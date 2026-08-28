@@ -101,6 +101,7 @@ window.__ModuleLoader__.load({
       const [upCaption, setUpCaption] = React.useState('')
       const [upKeywords, setUpKeywords] = React.useState('')
       const [uploading, setUploading] = React.useState(false)
+      const [recognizing, setRecognizing] = React.useState(false)
       const [uploadOpen, setUploadOpen] = React.useState(false)
       const [memeRoot, setMemeRoot] = React.useState('')
       const [memeRootInput, setMemeRootInput] = React.useState('')
@@ -292,9 +293,34 @@ window.__ModuleLoader__.load({
         }
         setUpFile(file)
         setUpPreview(URL.createObjectURL(file))
+        // 换图后清掉上一张的识别结果,避免误存错标签
+        setUpTag('')
+        setUpCaption('')
+        setUpKeywords('')
         const reader = new FileReader()
         reader.onload = () => setUpData64(String(reader.result || '').split(',')[1] || '')
         reader.readAsDataURL(file)
+      }
+
+      // AI 识别:上传前先让模型看图,自动填分类/描述/关键词;失败不阻塞手动填写
+      const onRecognize = async () => {
+        if (!upFile) { setNotice('先选择图片'); return }
+        if (!upData64) { setNotice('图片还没读好,稍等片刻再试'); return }
+        setRecognizing(true)
+        try {
+          const res = await apiPost({ op: 'recognize', fileName: upFile.name, dataBase64: upData64 })
+          if (res && res.ok) {
+            setUpTag(res.tag || '')
+            setUpCaption(res.caption || '')
+            setUpKeywords(res.keywords || '')
+            setNotice('AI 已识别: [' + (res.tag || '?') + '] ' + (res.caption || ''))
+          } else {
+            setNotice('AI 识别失败: ' + (res && res.error || '未知错误'))
+          }
+        } catch (error) {
+          setNotice('AI 识别失败: ' + (error && error.message ? error.message : String(error)))
+        }
+        setRecognizing(false)
       }
 
       const onConfirmUpload = async () => {
@@ -492,6 +518,10 @@ window.__ModuleLoader__.load({
               h('label', null, upFile ? '已选: ' + upFile.name + ' (点击更换)' : '文件'),
               h('input', { type: 'text', placeholder: upFile ? '' : '先选图片', value: '', readOnly: true, style: { display: 'none' } }),
             ),
+            // AI 识别:选图后一键自动填分类/描述/关键词,识别失败不阻塞手动填写
+            upFile ? h('div', { className: 'row', style: { width: '100%' } },
+              h('button', { className: 'btn-primary', onClick: onRecognize, disabled: recognizing }, recognizing ? 'AI 识别中…' : 'AI 识别'),
+            ) : null,
             h('div', { className: 'field' },
               h('label', null, '分类(必填)'),
               h('div', { className: 'row', style: { width: '100%' } },
