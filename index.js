@@ -465,9 +465,17 @@ export function apply(ctx, config) {
       return { tag, caption, keywords }
     }
 
-    const readBody = (req) => new Promise((resolve, reject) => {
+    const readBody = (req, maxBytes = 32 * 1024 * 1024) => new Promise((resolve, reject) => {
       const chunks = []
-      req.on('data', (c) => chunks.push(c))
+      let total = 0
+      req.on('data', (c) => {
+        total += c.length
+        if (total > maxBytes) {
+          reject(new Error('请求体过大(>32MB)'))
+          return
+        }
+        chunks.push(c)
+      })
       req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
       req.on('error', reject)
     })
@@ -521,6 +529,20 @@ export function apply(ctx, config) {
             memes: rows.map((m) => urlFor(m, pid)),
           })
           return
+        }
+        // 状态变更请求:校验 Origin 与 Host 同源,防浏览器跨站触发(CSRF)。
+        // 缺失 Origin 的本地脚本/curl 请求放行(兼容),不同源一律 403。
+        const origin = req.headers.origin
+        if (origin) {
+          let sameOrigin = false
+          try {
+            const o = new URL(origin)
+            sameOrigin = o.host === String(req.headers.host || '')
+          } catch { sameOrigin = false }
+          if (!sameOrigin) {
+            json(res, { ok: false, error: '跨站请求被拒绝' }, 403)
+            return
+          }
         }
         let body
         try {
