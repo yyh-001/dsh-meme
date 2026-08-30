@@ -150,6 +150,7 @@ export function apply(ctx, config) {
   // 陪伴模式提示词:模型主动斗图。设置页可编辑覆盖(settings.companionPrompt)。
   const DEFAULT_COMPANION_PROMPT = '斗图规则:主动斗图,不要等用户开口:\n' +
     '- 聊天气氛合适就主动用 send_meme 发一张贴题的表情包,不用等用户要求,发图优先于纯文字;\n' +
+    '- 发图先 search 拿候选,[表情: 描述] 里的描述必须抄候选原文,自己编的描述前端配不上图;\n' +
     '- 情绪到点、接梗、吐槽、卖萌时都主动甩图,别冷场;对方说正事/干活时克制;\n' +
     '- 发完保持简短,让图自己说话,不啰嗦不复述。'
   const memeRoot = resolveActiveRoot(readSettings(), config?.memeRoot)

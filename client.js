@@ -773,6 +773,49 @@ window.__ModuleLoader__.load({
 
     const inject = ['slots', 'workspaces']
 
+    // 模型常把 “” 抄成 ""；匹配时折叠引号和空白。
+    const foldCaption = (s) => String(s || '').trim()
+      .replace(/[\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f«»]/g, '"')
+      .replace(/\s+/g, ' ')
+    const looseCaption = (s) => foldCaption(s).replace(/["'\s]/g, '')
+    // 描述里按中英文标点切词,长词优先(两字以下太泛,不参与匹配)。
+    const splitDescTokens = (s) => foldCaption(s)
+      .split(/[\s,.!?;:、，。！？；：""''()（）\[\]【】《》…·～~\-]+/)
+      .map((t) => t.replace(/["']/g, ''))
+      .filter((t) => t.length >= 2)
+      .sort((a, b) => b.length - a.length)
+    // 分词兜底的 haystack:caption/关键词/文件名的折叠与紧凑形态 + 分词。
+    const buildMemeSearch = (rows, toUrl) => (rows || []).map((row) => {
+      const hay = []
+      const parts = []
+      for (const s of [row.caption, row.keywords, row.file_name]) {
+        const f = foldCaption(s)
+        if (!f) continue
+        const l = looseCaption(s)
+        hay.push(f, ...(l && l !== f ? [l] : []))
+        parts.push(s)
+      }
+      const tokens = [...new Set(splitDescTokens(parts.join(' ')))]
+      return { hay, tokens, url: toUrl(row) }
+    })
+    // 组合匹配:精确(原文/折叠/紧凑三级)→ 分词在 caption/关键词里双向包含。
+    const matchDesc = (desc, index, search) => {
+      if (index) {
+        const raw = String(desc || '').trim()
+        const exact = index.get(raw) || index.get(foldCaption(raw)) || index.get(looseCaption(raw))
+        if (exact) return exact
+      }
+      for (const token of splitDescTokens(desc)) {
+        const needle = looseCaption(token)
+        if (!needle) continue
+        for (const row of search || []) {
+          if (row.hay.some((hay) => hay.includes(needle))) return row.url
+          if ((row.tokens || []).some((t) => { const lt = looseCaption(t); return lt && (needle.includes(lt) || lt.includes(needle)) })) return row.url
+        }
+      }
+      return null
+    }
+
     function apply(ctx) {
       const styleEl = document.createElement('style')
       styleEl.textContent = CSS
@@ -785,20 +828,18 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => { pickerStyle.remove() }, 'dsh-expression-entry: meme-picker styles')
 
       // 表情文本渲染:[表情: 描述] 或旧格式 [表情: 描述](url) → 图片。
-      // 无 url 时按描述在图库里匹配。
+      // 无 url 时先按描述精确匹配图库;失败再按分词在 caption/关键词里做包含匹配
+      // 兜底(模型偶尔不抄候选原文、自己编描述);仍无命中显示描述原文,
+      // 不把 [表情: ...] 标记裸露在气泡里(历史教训:社区反馈「表情显示不出来」)。
       const MEME_TEXT_RE = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g
       let memeIndex = null
+      let memeSearch = [] // 分词兜底用的 haystack:[{hay:[...], url}]
       let memeIndexLoading = false
       const absMemeUrl = (u, path) => {
         if (u && /^https?:\/\//.test(u)) return u
         const rel = u || (path ? '/dsh-memes/' + path : '')
         try { return new URL(rel, window.location.origin).href } catch (e) { return rel }
       }
-      // 模型常把 “” 抄成 ""；匹配时折叠引号和空白。
-      const foldCaption = (s) => String(s || '').trim()
-        .replace(/[\u201c\u201d\u2018\u2019\u300c\u300d\u300e\u300f«»]/g, '"')
-        .replace(/\s+/g, ' ')
-      const looseCaption = (s) => foldCaption(s).replace(/["'\s]/g, '')
       const addCaptionKey = (map, key, url) => {
         const raw = String(key || '').trim()
         if (!raw) return
@@ -807,11 +848,7 @@ window.__ModuleLoader__.load({
         const loose = looseCaption(raw)
         if (loose) map.set(loose, url)
       }
-      const lookupCaption = (desc) => {
-        if (!memeIndex) return null
-        const raw = String(desc || '').trim()
-        return memeIndex.get(raw) || memeIndex.get(foldCaption(raw)) || memeIndex.get(looseCaption(raw)) || null
-      }
+      const findMemeUrl = (desc) => matchDesc(desc, memeIndex, memeSearch)
       const loadMemeIndex = () => {
         if (memeIndex || memeIndexLoading) return
         memeIndexLoading = true
@@ -819,8 +856,9 @@ window.__ModuleLoader__.load({
         fetch('/dsh-memes-api?packId=all')
           .then((r) => r.json())
           .then((res) => {
+            const rows = (res && res.memes) || []
             memeIndex = new Map()
-            for (const row of (res && res.memes) || []) {
+            for (const row of rows) {
               const url = absMemeUrl(row.url, row.path)
               addCaptionKey(memeIndex, row.caption, url)
               addCaptionKey(memeIndex, row.file_name, url)
@@ -828,6 +866,7 @@ window.__ModuleLoader__.load({
               addCaptionKey(memeIndex, String(row.caption || '').slice(0, 80), url)
               addCaptionKey(memeIndex, String(row.caption || '').slice(0, 100), url)
             }
+            memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
             decorateMemeText()
           })
           .catch(() => { memeIndex = new Map() })
@@ -870,7 +909,7 @@ window.__ModuleLoader__.load({
           let last = 0
           for (const hit of matches) {
             if (hit.index > last) frag.appendChild(document.createTextNode(text.slice(last, hit.index)))
-            const src = hit[2] || lookupCaption(hit[1])
+            const src = hit[2] || findMemeUrl(hit[1])
             if (src) {
               const img = document.createElement('img')
               img.src = src
@@ -880,7 +919,8 @@ window.__ModuleLoader__.load({
               frag.appendChild(img)
               imgs.push(img)
             } else {
-              frag.appendChild(document.createTextNode(hit[0]))
+              // 无命中:降级显示描述原文,不把 [表情: ...] 标记裸露给用户
+              frag.appendChild(document.createTextNode(hit[1]))
             }
             last = hit.index + hit[0].length
           }
@@ -950,6 +990,8 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = inject
+    // 纯函数导出仅用于回归测试(node --test),宿主/打包不消费
+    exports.__test = { foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc }
     return module.exports
   },
 })

@@ -271,7 +271,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
     description: '发一张表情包。流程:根据对话选一个情绪 tag → 系统从该情绪随机抽若干张(带 caption,数量用 limit 自己定) → 看描述觉得贴就发;不满意就再 search 同一 tag(会换一批),还是不行再换情绪或回文字。' +
       '情绪字典: ' + MOOD_DICT + '。' +
       (webMode
-        ? '挑中后把 [表情: 描述] 原样写进回复(不要带网址)。前端按描述配图。'
+        ? '挑中后把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址)——自己编的描述前端配不上图。'
         : '两步:search 看候选,再用 send + path 发出。') +
       '气氛对了就主动发;发完短接,让图自己说话。',
     parameters,
@@ -335,7 +335,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
         tags,
         message: '情绪 ' + mood + ' 随机 ' + candidates.length + ' 张。看 caption 贴就发;不满意再 search 同一 tag 换一批(可加大 limit)。' +
           (webMode
-            ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(可加一两句文字,不要加网址)。'
+            ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
             : '用 send + path 发出。') + '\n' + lines.join('\n'),
       }
     },

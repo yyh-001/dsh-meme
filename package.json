@@ -53,5 +53,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=22.13.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
   }
 }
