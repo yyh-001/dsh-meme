@@ -15,7 +15,7 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, rmSync } from 'node:fs'
-import { join, dirname, resolve } from 'node:path'
+import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import {
@@ -577,16 +577,23 @@ export function apply(ctx, config) {
             const entries = unzipStore(Buffer.from(data, 'base64'))
             const indexPath = entries.get('index.db')
             if (!indexPath) throw new Error('ZIP 里没有 index.db,不是有效的表情包包')
-            // 解包到扫描目录/<name>(包外,持久)
-            const target = join(packsDirNow(), name)
-            rmSync(target, { recursive: true, force: true })
-            mkdirSync(target, { recursive: true })
+            // 解包到扫描目录/<name>(包外,持久)。先整体校验所有条目路径,
+            // 任何越界(绝对路径或 .. 逃逸)都拒绝导入,不落盘(历史教训:任意文件写)。
+            const targetAbs = resolve(join(packsDirNow(), name))
+            for (const [rel] of entries) {
+              const full = resolve(targetAbs, rel)
+              if (full !== targetAbs && !full.startsWith(targetAbs + sep)) {
+                throw new Error('ZIP 条目路径越界,已拒绝导入: ' + rel)
+              }
+            }
+            rmSync(targetAbs, { recursive: true, force: true })
+            mkdirSync(targetAbs, { recursive: true })
             for (const [rel, bytes] of entries) {
-              const full = join(target, rel)
+              const full = resolve(targetAbs, rel)
               mkdirSync(dirname(full), { recursive: true })
               writeFileSync(full, bytes)
             }
-            reloadMemeStore(target, name)
+            reloadMemeStore(targetAbs, name)
             json(res, { ok: true, ...packPayload(), total: memes.list().memes.length, message: '导入成功,已切换到新图库' })
           } else if (op === 'getMemeRoot') {
             json(res, { ok: true, ...packPayload() })
