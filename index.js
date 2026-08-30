@@ -553,7 +553,21 @@ export function apply(ctx, config) {
         }
         try {
           const op = String(body.op || '')
-          if (op === 'upload') {
+          if (op === 'recognize') {
+            // 上传弹窗的 AI 识别:只返回识别结果,不写入图库(用户确认后走 upload)
+            const fileName = String(body.fileName || '').trim()
+            const data = String(body.dataBase64 || '')
+            if (!data) throw new Error('缺少图片数据')
+            const buf = Buffer.from(data, 'base64')
+            if (buf.byteLength === 0 || buf.byteLength > 8 * 1024 * 1024) throw new Error('图片大小超限(≤8MB)')
+            const ext = fileName.includes('.') ? '.' + fileName.split('.').pop().toLowerCase() : ''
+            if (!IMAGE_EXTS.includes(ext)) throw new Error('仅支持 jpg/png/gif/webp')
+            const sel = ctx.agentDefaultModel && typeof ctx.agentDefaultModel.currentSelection === 'function'
+              ? ctx.agentDefaultModel.currentSelection() : null
+            const r = await recognizeImageBytes(ctx.get('llm'), sel, buf, MIME[ext.slice(1)] || 'image/jpeg', fileName)
+            if (!r.tag || !validTagRe.test(r.tag)) throw new Error('AI 未识别出有效分类,请手动选择')
+            json(res, { ok: true, tag: r.tag, caption: r.caption, keywords: r.keywords })
+          } else if (op === 'upload') {
             const tag = String(body.tag || '').trim().toLowerCase()
             const fileName = String(body.fileName || '').trim()
             const data = String(body.dataBase64 || '')
