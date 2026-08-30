@@ -51,6 +51,8 @@ pnpm add file:/path/to/dsh-meme
 
 > 注意：pnpm 有「新包安全期」（默认 24h），刚发布的版本会被静默回落到旧版；急用可在 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 里加上 `dsh-meme`。
 
+> 运行时要求：**Node ≥ 22.13.0**（依赖内置 `node:sqlite` 模块；22.5–22.12 需 `--experimental-sqlite` 标志，Node 20 不支持）。
+
 ## 配置
 
 默认内置两套图库：`official-001`（官方表情包 1 号，92 张）和 `dafeiyu-001`（大肥鱼，49 张），开箱用官方包，**无需任何配置**。
