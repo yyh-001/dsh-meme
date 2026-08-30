@@ -14,9 +14,10 @@
  * 管理操作(上传/删除/改元数据)不移植——那是控制台的活,模型只需"选图发送"。
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, rmSync } from 'node:fs'
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, rmSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { join, dirname, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta,
@@ -286,6 +287,8 @@ export function apply(ctx, config) {
         packs,
         companionPrompt: readSettings().companionPrompt || '',
         defaultCompanionPrompt: DEFAULT_COMPANION_PROMPT,
+        remoteSubs: remoteSubs(),
+        remoteDirUrl,
         configured: !!(s.memeRoot || s.packId),
       }
     }
@@ -466,6 +469,223 @@ export function apply(ctx, config) {
       return { tag, caption, keywords }
     }
 
+    // ---- 远程图库订阅:清单 JSON → 按需下载成本地包(格式见 docs/remote-pack-spec.md) ----
+    // 订阅 = 服务端拉清单 + 并发下载图片 + 建索引,写入扫描目录;进度经 remoteJobStatus 轮询。
+    // 已下载的包再次提交同一清单 URL 自动转为增量更新(按 .dsh-remote.json 侧车文件识别)。
+    const remoteJobs = new Map() // jobId → job(内存态,重启即清;残留 .tmp 目录在插件启动时清理)
+    let remoteJobSeq = 0
+    const REMOTE_MANIFEST_MAX = 2 * 1024 * 1024
+    const REMOTE_IMAGE_MAX = 8 * 1024 * 1024
+    const REMOTE_CONCURRENCY = 4
+    const REMOTE_MAX_ITEMS = 500
+    const SIDECAR_NAME = '.dsh-remote.json'
+    const remoteDirUrl = config?.remoteDirUrl || [
+      'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme@main/docs/remote-packs.json',
+      'https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/remote-packs.json',
+    ]
+    const remoteSubs = () => {
+      const subs = readSettings().remoteSubs
+      return Array.isArray(subs) ? subs : []
+    }
+    const jobSnapshot = (job) => ({
+      id: job.id, packId: job.packId, name: job.name, mode: job.mode,
+      total: job.total, done: job.done, failed: job.failed,
+      added: job.added, updated: job.updated,
+      state: job.state, message: job.message,
+      errors: job.errors.slice(0, 5), warnings: job.warnings.slice(0, 10),
+    })
+    const fetchRemoteJson = async (url) => {
+      if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('清单地址必须是 http(s) 链接')
+      let res
+      try {
+        res = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: 'follow' })
+      } catch (error) {
+        const cause = error && error.cause
+        throw new Error('清单下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
+      }
+      if (!res.ok) throw new Error('清单下载失败: HTTP ' + res.status)
+      const text = await res.text()
+      if (text.length > REMOTE_MANIFEST_MAX) throw new Error('清单超过 2MB,拒绝处理')
+      let parsed
+      try { parsed = JSON.parse(text) } catch { throw new Error('清单不是合法 JSON') }
+      return parsed
+    }
+    // 清单 → 规范化条目;单条非法只跳过并记 warning,不整体失败
+    const normalizeRemoteManifest = (raw, fallbackId, sourceUrl) => {
+      const items = Array.isArray(raw && raw.memes) ? raw.memes : []
+      if (items.length === 0) throw new Error('清单缺少 memes 数组或为空')
+      if (items.length > REMOTE_MAX_ITEMS) throw new Error('清单超过 ' + REMOTE_MAX_ITEMS + ' 条,请拆分成多个包')
+      const slug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').replace(/^-+|-+$/g, '').slice(0, 40)
+      const id = slug(raw.id) || slug(fallbackId)
+        || ('remote-' + createHash('sha1').update(String(sourceUrl || '')).digest('hex').slice(0, 8))
+      const warnings = []
+      const seen = new Set()
+      const out = []
+      for (const it of items) {
+        const url = String((it && it.url) || '').trim()
+        if (!/^https?:\/\//i.test(url)) { warnings.push('跳过非 http(s) 链接: ' + url.slice(0, 60)); continue }
+        const tag = slug(it.tag)
+        if (!tag) { warnings.push('跳过无效分类: ' + url.slice(0, 60)); continue }
+        let fileName = String(it.file || '').trim().split(/[\\/]/).pop().trim()
+        let ext = fileName.includes('.') ? ('.' + fileName.split('.').pop().toLowerCase()) : ''
+        if (!IMAGE_EXTS.includes(ext)) {
+          const m = /\.(jpe?g|png|gif|webp)(?:\?|#|$)/i.exec(url)
+          ext = m ? '.' + (m[1].toLowerCase() === 'jpeg' ? 'jpg' : m[1].toLowerCase()) : '.webp'
+          fileName = fileName ? fileName.replace(/\.[^.]*$/, '') + ext : ''
+        }
+        if (!fileName) fileName = createHash('sha1').update(url).digest('hex').slice(0, 12) + ext
+        if (seen.has(tag + '/' + fileName)) fileName = createHash('sha1').update(url).digest('hex').slice(0, 8) + '-' + fileName
+        seen.add(tag + '/' + fileName)
+        out.push({
+          url, tag, fileName,
+          rel: 'memes/' + tag + '/' + fileName,
+          caption: String((it && it.caption) || '').trim().slice(0, 200),
+          keywords: String((it && it.keywords) || '').trim().slice(0, 200),
+        })
+      }
+      if (out.length === 0) throw new Error('清单没有有效条目(检查 url/tag 字段)')
+      return {
+        id,
+        name: String(raw.name || id).trim().slice(0, 60) || id,
+        description: String(raw.description || '').trim().slice(0, 200),
+        version: String(raw.version || '').trim().slice(0, 40),
+        items: out,
+        warnings,
+      }
+    }
+    const startRemoteJob = (manifest, sourceUrl, mode) => {
+      const jobId = 'rj-' + Date.now().toString(36) + '-' + (++remoteJobSeq)
+      const job = {
+        id: jobId, packId: manifest.id, name: manifest.name, mode,
+        total: manifest.items.length, done: 0, failed: 0, added: 0, updated: 0,
+        warnings: manifest.warnings.slice(0, 20), errors: [],
+        state: 'running', message: '准备中…', startedAt: Date.now(),
+      }
+      remoteJobs.set(jobId, job)
+      while (remoteJobs.size > 10) remoteJobs.delete(remoteJobs.keys().next().value)
+      ;(async () => {
+        const packsDir = resolve(packsDirNow())
+        const finalDir = resolve(join(packsDir, manifest.id))
+        let workDir = finalDir
+        let effectiveMode = mode
+        if (existsSync(finalDir)) {
+          let sidecar = null
+          try { sidecar = JSON.parse(readFileSync(join(finalDir, SIDECAR_NAME), 'utf8')) } catch { }
+          if (sidecar && sidecar.manifestUrl === sourceUrl) {
+            effectiveMode = 'update'
+            job.mode = 'update'
+          } else {
+            job.state = 'error'
+            job.message = '扫描目录下已存在同名图库「' + manifest.id + '」且不是本清单下载的,请先删除或换个 id'
+            return
+          }
+        }
+        const prev = {} // url → {path}(更新模式用于跳过已下载/刷新元数据)
+        if (effectiveMode === 'update') {
+          try {
+            const sc = JSON.parse(readFileSync(join(finalDir, SIDECAR_NAME), 'utf8'))
+            if (sc && sc.manifestUrl === sourceUrl) for (const it of sc.items || []) prev[it.url] = it
+          } catch { }
+        } else {
+          workDir = resolve(join(packsDir, manifest.id + '.tmp-' + Math.random().toString(16).slice(2, 8)))
+          rmSync(workDir, { recursive: true, force: true })
+          mkdirSync(workDir, { recursive: true })
+        }
+        job.message = (effectiveMode === 'update' ? '更新中 ' : '下载中 ') + '0/' + job.total
+        const db = new DatabaseSync(join(workDir, 'index.db'))
+        db.exec('CREATE TABLE IF NOT EXISTS memes (path TEXT PRIMARY KEY, tag TEXT, file_name TEXT, caption TEXT, keywords TEXT, mtime REAL, captioned_at REAL)')
+        try {
+          const queue = manifest.items.slice()
+          let active = 0
+          await new Promise((allDone) => {
+            const pump = () => {
+              while (active < REMOTE_CONCURRENCY && queue.length) {
+                const item = queue.shift()
+                active++
+                  ; (async () => {
+                    const known = prev[item.url]
+                    if (known && known.path === item.rel && existsSync(join(workDir, item.rel))) {
+                      db.prepare('UPDATE memes SET tag = ?, caption = ?, keywords = ?, mtime = ? WHERE path = ?')
+                        .run(item.tag, item.caption, item.keywords, Date.now(), item.rel)
+                      job.updated++
+                    } else {
+                      let res
+                      try {
+                        res = await fetch(item.url, { signal: AbortSignal.timeout(20000), redirect: 'follow' })
+                      } catch (error) {
+                        const cause = error && error.cause
+                        throw new Error('下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
+                      }
+                      if (!res.ok) throw new Error('HTTP ' + res.status)
+                      const buf = Buffer.from(await res.arrayBuffer())
+                      if (buf.byteLength === 0 || buf.byteLength > REMOTE_IMAGE_MAX) throw new Error('图片大小超限(≤8MB)')
+                      mkdirSync(join(workDir, 'memes', item.tag), { recursive: true })
+                      writeFileSync(join(workDir, item.rel), buf)
+                      if (known && known.path !== item.rel) {
+                        try { unlinkSync(join(workDir, known.path)) } catch { /* 已不在 */ }
+                        db.prepare('DELETE FROM memes WHERE path = ?').run(known.path)
+                      }
+                      db.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                        .run(item.rel, item.tag, item.fileName, item.caption, item.keywords, Date.now(), Date.now())
+                      job.added++
+                    }
+                    job.done++
+                    prev[item.url] = { url: item.url, path: item.rel }
+                  })().catch((error) => {
+                    job.failed++
+                    if (job.errors.length < 20) job.errors.push(item.url.slice(0, 80) + ' — ' + (error instanceof Error ? error.message : String(error)))
+                  }).finally(() => {
+                    active--
+                    job.message = (effectiveMode === 'update' ? '更新中 ' : '下载中 ') + (job.done + job.failed) + '/' + job.total
+                    pump()
+                  })
+              }
+              if (active === 0) allDone()
+            }
+            pump()
+          })
+        } finally {
+          db.close()
+        }
+        writeFileSync(join(workDir, SIDECAR_NAME), JSON.stringify({
+          manifestUrl: sourceUrl, id: manifest.id, name: manifest.name, version: manifest.version, lastSync: Date.now(),
+          items: Object.values(prev),
+        }))
+        if (effectiveMode === 'fresh') {
+          writeFileSync(join(workDir, 'manifest.json'), JSON.stringify({ name: manifest.name, description: manifest.description, source: sourceUrl }, null, 2))
+          rmSync(finalDir, { recursive: true, force: true })
+          renameSync(workDir, finalDir)
+        }
+        const subs = remoteSubs().filter((s) => s && s.id !== manifest.id)
+        subs.unshift({ id: manifest.id, url: sourceUrl, name: manifest.name, version: manifest.version, total: job.total, lastSync: Date.now() })
+        writeSettings({ remoteSubs: subs })
+        if (effectiveMode === 'fresh') {
+          reloadMemeStore(finalDir, manifest.id)
+          job.message = '完成:下载 ' + job.added + '/' + job.total + ' 张并已切换到「' + manifest.name + '」'
+            + (job.failed ? '(失败 ' + job.failed + ' 张,可稍后再点一次更新补齐)' : '')
+        } else {
+          job.message = '完成:新增 ' + job.added + ' 张,刷新元数据 ' + job.updated + ' 张' + (job.failed ? ',失败 ' + job.failed + ' 张' : '')
+        }
+        job.state = job.failed ? 'done-with-errors' : 'done'
+      })().catch((error) => {
+        job.state = 'error'
+        job.message = '失败: ' + (error instanceof Error ? error.message : String(error))
+      })
+   
+      return job
+    }
+    // 清理上次运行残留的临时下载目录(没有 index.db,扫描不会看到,但会占磁盘)
+    try {
+      const dir = packsDirNow()
+      if (existsSync(dir)) {
+        for (const name of readdirSync(dir)) {
+          if (!/\.tmp-[0-9a-f]+$/.test(name)) continue
+          const p = join(dir, name)
+          try { if (statSync(p).isDirectory()) rmSync(p, { recursive: true, force: true }) } catch { }
+        }
+      }
+    } catch { }
+
     const readBody = (req, maxBytes = 32 * 1024 * 1024) => new Promise((resolve, reject) => {
       const chunks = []
       let total = 0
@@ -505,7 +725,7 @@ export function apply(ctx, config) {
                 for (const m of new MemesStore(p.path).list().memes) all.push(urlFor(m, p.id))
               } catch { /* 坏库跳过 */ }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -528,6 +748,8 @@ export function apply(ctx, config) {
             packId: pid,
             packs: packList(),
             memes: rows.map((m) => urlFor(m, pid)),
+            remoteSubs: remoteSubs(),
+            remoteDirUrl,
           })
           return
         }
@@ -632,7 +854,53 @@ export function apply(ctx, config) {
             }
             reloadMemeStore(targetAbs, name)
             json(res, { ok: true, ...packPayload(), total: memes.list().memes.length, message: '导入成功,已切换到新图库' })
+          } else if (op === 'subscribeRemote') {
+            const manifestUrl = String(body.manifestUrl || '').trim()
+            const rawManifest = await fetchRemoteJson(manifestUrl)
+            const manifest = normalizeRemoteManifest(rawManifest, String(body.packId || '').trim(), manifestUrl)
+            for (const j of remoteJobs.values()) {
+              if (j.packId === manifest.id && j.state === 'running') {
+                json(res, { ok: true, ...jobSnapshot(j), running: true, message: '该图库已在下载中' })
+                return
+              }
+            }
+            json(res, { ok: true, ...jobSnapshot(startRemoteJob(manifest, manifestUrl, 'fresh')) })
+          } else if (op === 'remoteJobStatus') {
+            const job = remoteJobs.get(String(body.jobId || '').trim())
+            if (!job) throw new Error('未知任务: ' + String(body.jobId || ''))
+            json(res, { ok: true, ...jobSnapshot(job) })
+          } else if (op === 'updateRemotePack') {
+            const id = String(body.id || '').trim()
+            const sub = remoteSubs().find((s) => s && s.id === id)
+            if (!sub || !sub.url) throw new Error('未找到订阅: ' + id)
+            const rawManifest = await fetchRemoteJson(sub.url)
+            const manifest = normalizeRemoteManifest(rawManifest, id, sub.url)
+            manifest.id = id
+            for (const j of remoteJobs.values()) {
+              if (j.packId === id && j.state === 'running') {
+                json(res, { ok: true, ...jobSnapshot(j), running: true, message: '该图库已在更新中' })
+                return
+              }
+            }
+            json(res, { ok: true, ...jobSnapshot(startRemoteJob(manifest, sub.url, 'update')) })
+          } else if (op === 'removeRemoteSub') {
+            const id = String(body.id || '').trim()
+            const subs = remoteSubs()
+            if (!subs.some((s) => s && s.id === id)) throw new Error('未找到订阅: ' + id)
+            let removedFiles = false
+            if (body.deleteFiles) {
+              const root = resolve(packsDirNow())
+              const target = resolve(join(root, id))
+              if (!target.startsWith(root + sep)) throw new Error('目录越界')
+              if (!existsSync(join(target, SIDECAR_NAME))) throw new Error('该图库不是远程订阅下载的,请手动处理其目录')
+              if (resolve(memes.root) === target) throw new Error('该图库正在使用中,请先切换到其他图库')
+              rmSync(target, { recursive: true, force: true })
+              removedFiles = true
+            }
+            writeSettings({ remoteSubs: subs.filter((s) => s && s.id !== id) })
+            json(res, { ok: true, removedFiles, ...packPayload(), message: removedFiles ? '已删除订阅及本地文件' : '已删除订阅(本地文件保留)' })
           } else if (op === 'getMemeRoot') {
+
             json(res, { ok: true, ...packPayload() })
           } else if (op === 'setPack') {
             const packId = String(body.packId || '').trim()

@@ -1,6 +1,6 @@
 {
   "name": "dsh-meme",
-  "version": "0.1.40",
+  "version": "0.1.41",
   "description": "DeepSeek Harness 表情包插件:内置官方-001 与大肥鱼两套图库,设置页扫描切换,send_meme 发图(Web/QQ)。",
   "repository": {
     "type": "git",
@@ -13,13 +13,13 @@
   "type": "module",
   "main": "index.js",
   "files": [
+    "client.js",
+    "cordis.patch.yml",
+    "docs/",
     "index.js",
     "memes.js",
-    "client.js",
-    "panel.html",
-    "cordis.patch.yml",
     "memes/",
-    "docs/"
+    "panel.html"
   ],
   "exports": {
     ".": "./index.js",

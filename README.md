@@ -133,6 +133,14 @@ pnpm add file:/path/to/dsh-meme
 
 可选：把插件导出的那个 ZIP 挂到 GitHub Release，别人就能直接下载再导入。也可以 `git clone` 之后，把仓库放进扫描目录（或设置页「打开其他目录」指过去）。
 
+## 订阅远程图库
+
+设置页「远程图库」里粘贴一个**清单 JSON 地址**(或从图库目录点「下载」),插件自动下载全部图片、建索引、出现在「当前图库」下拉并切换——不用碰 ZIP,不用碰命令行。
+
+- 清单格式与收录方式见 **[docs/remote-pack-spec.md](./docs/remote-pack-spec.md)**(URL + 分类 + 描述 + 关键词,一张 JSON 管一个包)
+- 已订阅的包再点「更新」走增量:只下载新增图片,已有图片仅刷新描述/关键词
+- 图库目录:[`docs/remote-packs.json`](./docs/remote-packs.json)(jsDelivr/raw 双源,PR 收录)
+
 ## 它做什么
 
 | 能力 | 说明 |
@@ -145,6 +153,7 @@ pnpm add file:/path/to/dsh-meme
 | **管理 API** | 上传 / 编辑 / 删除 / 删除分类，全部在设置页完成，数据持久 |
 | **图库切换** | 设置页下拉切换已扫描图库；扫描目录默认 `~/.dsh/meme-packs` |
 | **导出 / 导入** | 图库一键打包 ZIP 分享，导入别人的包自动切换（零依赖实现） |
+| **订阅远程图库** | 设置页粘贴清单 JSON 即按需下载建包，支持增量更新（`remoteDirUrl` 可配目录源） |
 
 ## 日常命令（模型视角）
 

@@ -119,6 +119,12 @@ window.__ModuleLoader__.load({
       const [defaultPrompt, setDefaultPrompt] = React.useState('') // 内置默认提示词
       const [promptOpen, setPromptOpen] = React.useState(false)
       const [promptDraft, setPromptDraft] = React.useState('') // 弹窗内草稿
+      const [remoteSubs, setRemoteSubs] = React.useState([])
+      const [remoteDirUrl, setRemoteDirUrl] = React.useState(null) // 服务端下发的目录地址(数组时逐源回退)
+      const [remoteDir, setRemoteDir] = React.useState(null)
+      const [remoteUrl, setRemoteUrl] = React.useState('')
+      const [remoteJobs, setRemoteJobs] = React.useState({})
+      const [remoteBusy, setRemoteBusy] = React.useState(false)
       const applyRoot = (res) => {
         if (!res || !res.ok) return
         setMemeRoot(res.memeRoot || '')
@@ -129,6 +135,8 @@ window.__ModuleLoader__.load({
         setPacksDirInput(res.packsDir || '')
         setCompanionPrompt(res.companionPrompt || '')
         setDefaultPrompt(res.defaultCompanionPrompt || '')
+        setRemoteSubs(Array.isArray(res.remoteSubs) ? res.remoteSubs : [])
+        if (res.remoteDirUrl) setRemoteDirUrl(res.remoteDirUrl)
       }
       const onSaveCompanionPrompt = async () => {
         try {
@@ -147,6 +155,82 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
       }, [])
+      // 远程图库目录:服务端可配(remoteDirUrl,数组时逐源回退),失败静默(保留手动粘贴入口)
+      React.useEffect(() => {
+        if (!remoteDirUrl) return
+        let alive = true
+        ;(async () => {
+          const urls = Array.isArray(remoteDirUrl) ? remoteDirUrl : [remoteDirUrl]
+          for (const u of urls) {
+            try {
+              const r = await fetch(u)
+              if (!r.ok) continue
+              const list = await r.json()
+              if (alive && Array.isArray(list)) {
+                setRemoteDir(list.filter((e) => e && e.manifestUrl))
+                return
+              }
+            } catch (e) { /* 换下一个源 */ }
+          }
+        })()
+        return () => { alive = false }
+      }, [Array.isArray(remoteDirUrl) ? remoteDirUrl.join('|') : remoteDirUrl])
+      const pollRemoteJob = async (jobId) => {
+        try {
+          const res = await apiPost({ op: 'remoteJobStatus', jobId })
+          if (!res || !res.ok) {
+            setRemoteJobs((cur) => { const n = { ...cur }; delete n[jobId]; return n })
+            return
+          }
+          if (res.state === 'running') {
+            setRemoteJobs((cur) => ({ ...cur, [jobId]: res }))
+            return
+          }
+          setRemoteJobs((cur) => { const n = { ...cur }; delete n[jobId]; return n })
+          setRootNotice(res.message || (res.state === 'error' ? '下载失败' : '远程图库已就绪'))
+          if (res.state !== 'error') {
+            await load('', '')
+            apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
+          }
+        } catch (e) { /* 下一轮轮询再试 */ }
+      }
+      React.useEffect(() => {
+        const ids = Object.keys(remoteJobs)
+        if (ids.length === 0) return
+        const t = setInterval(() => { for (const id of ids) pollRemoteJob(id) }, 1200)
+        return () => clearInterval(t)
+      }, [remoteJobs])
+      const startRemote = async (manifestUrl, packId) => {
+        const url = String(manifestUrl || remoteUrl || '').trim()
+        if (!url) { setRootNotice('先填远程图库清单 JSON 地址'); return }
+        setRemoteBusy(true)
+        try {
+          const res = await apiPost({ op: 'subscribeRemote', manifestUrl: url, packId: packId || '' })
+          if (res && res.ok) {
+            setRemoteJobs((cur) => ({ ...cur, [res.id]: res }))
+            setRemoteUrl('')
+            setRootNotice('「' + res.name + '」开始下载(' + res.total + ' 张),完成后自动切换')
+          } else {
+            setRootNotice('订阅失败: ' + ((res && res.error) || '未知错误'))
+          }
+        } catch (e) {
+          setRootNotice('订阅失败: ' + (e && e.message ? e.message : String(e)))
+        }
+        setRemoteBusy(false)
+      }
+      const onRemoveRemote = async (sub) => {
+        if (!window.confirm('删除订阅「' + (sub.name || sub.id) + '」及已下载的本地图片?')) return
+        try {
+          const res = await apiPost({ op: 'removeRemoteSub', id: sub.id, deleteFiles: true })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || '已删除')
+            await load('', '')
+          } else {
+            setRootNotice('删除失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) { setRootNotice('删除失败') }
+      }
       const onSetPack = async (id) => {
         const packIdNext = String(id || '').trim()
         if (!packIdNext) return
@@ -428,6 +512,26 @@ window.__ModuleLoader__.load({
         ),
       ))
 
+      // 远程图库行:目录条目 + 不在目录里的历史订阅
+      const remoteRows = (() => {
+        const rows = []
+        for (const entry of (remoteDir || [])) {
+          const pid = entry.id || ''
+          const sub = remoteSubs.find((s) => s.id === pid) || remoteSubs.find((s) => s.url === entry.manifestUrl) || null
+          rows.push({
+            key: 'dir-' + (pid || entry.manifestUrl), name: entry.name || pid, desc: entry.description || '',
+            count: entry.count || 0, entry, sub,
+            jobPackId: pid,
+            downloaded: (pid && packs.some((p) => p.id === pid)) || !!sub,
+          })
+        }
+        for (const s of remoteSubs) {
+          if (rows.some((r) => r.sub && r.sub.id === s.id)) continue
+          rows.push({ key: 'sub-' + s.id, name: s.name || s.id, desc: s.url, count: s.total || 0, entry: null, sub: s, jobPackId: s.id, downloaded: packs.some((p) => p.id === s.id) })
+        }
+        return rows
+      })()
+
       return h('div', { className: 'meme-panel' },
         h('div', { className: 'section-title' }, '当前图库'),
         h('div', { className: 'row', style: { width: '100%' } },
@@ -588,6 +692,31 @@ window.__ModuleLoader__.load({
           h('button', { onClick: () => importFileRef.current && importFileRef.current.click() }, '导入图库'),
           h('button', { onClick: () => onPickDir('memeRoot') }, '打开其他目录'),
           h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
+        ),
+        h('div', { className: 'section-title' }, '远程图库'),
+        remoteRows.length === 0
+          ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '目录暂无内容,可在下方粘贴清单 JSON 地址订阅')
+          : remoteRows.map((row) => h('div', { key: row.key, className: 'row', style: { width: '100%' } },
+            h('span', { style: { fontWeight: 600 } }, row.name),
+            row.count ? h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, row.count + ' 张') : null,
+            row.desc ? h('span', {
+              title: row.desc,
+              style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+            }, row.desc) : null,
+            Object.values(remoteJobs).some((j) => j.packId === row.jobPackId && j.state === 'running')
+              ? h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-brand-primary)' } }, '下载中…')
+              : row.entry
+                ? h('button', { onClick: () => startRemote(row.entry.manifestUrl, row.entry.id || ''), disabled: remoteBusy }, row.downloaded ? '更新' : '下载')
+                : h('button', { onClick: () => startRemote(row.sub.url, row.sub.id), disabled: remoteBusy }, '更新'),
+            row.sub ? h('button', { className: 'danger', onClick: () => onRemoveRemote(row.sub), title: '删除订阅及本地文件' }, '删除') : null,
+          )),
+        Object.values(remoteJobs).map((job) => h('div', { key: 'job-' + job.id, className: 'notice' },
+          (job.name || job.packId) + ': ' + (job.message || job.state) + ' — ' + (job.done + job.failed) + '/' + job.total
+          + (job.failed ? '(失败 ' + job.failed + ')' : '')
+          + ((job.warnings || []).length ? ';警告: ' + job.warnings[0] : ''))),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '或粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
+          h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
         ),
         rootNotice ? h('div', { className: 'notice' }, rootNotice) : null,
         // 目录浏览弹窗(WSL 无原生选择器,用 browse 能力前端浏览)
