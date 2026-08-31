@@ -60,6 +60,31 @@ window.__ModuleLoader__.load({
       '.meme-modal input[type=text],.meme-modal select,.meme-modal textarea{box-sizing:border-box;width:100%}',
       '.meme-modal .field label{font-size:11px;color:var(--dsw-alias-label-secondary)}',
       '.meme-modal .modal-acts{display:flex;gap:8px;justify-content:flex-end}',
+      '.mk-tabs{display:flex;gap:18px;border-bottom:1px solid var(--dsw-alias-border-l1);width:100%}',
+      '.meme-panel .mk-tab{border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-secondary);padding:4px 2px 8px;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0;transition:color .12s}',
+      '.meme-panel .mk-tab:hover{color:var(--dsw-alias-label-primary);background:transparent;border-color:transparent;border-bottom-color:transparent}',
+      '.meme-panel .mk-tab.on{color:var(--dsw-alias-brand-primary);border-bottom-color:var(--dsw-alias-brand-primary);font-weight:600}',
+      '.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;width:100%}',
+      '.mk-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;transition:transform .12s ease,box-shadow .12s ease}',
+      '.mk-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
+      '.mk-cover{width:100%;height:92px;object-fit:cover;display:block;background:var(--dsw-alias-bg-base)}',
+      '.mk-cover-fallback{display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-2))}',
+      '.mk-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}',
+      '.mk-title{display:flex;align-items:center;justify-content:space-between;gap:8px}',
+      '.mk-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.mk-badge{flex:none;font-size:10px;color:var(--dsw-alias-brand-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,transparent);border-radius:999px;padding:1px 7px;white-space:nowrap}',
+      '.mk-meta{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      '.mk-desc{font-size:12px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
+      '.mk-chips{display:flex;gap:4px;flex-wrap:wrap}',
+      '.mk-chip{font-size:10px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);border-radius:999px;padding:1px 8px}',
+      '.mk-progress-wrap{display:flex;flex-direction:column;gap:3px}',
+      '.mk-progress{height:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
+      '.mk-progress-bar{height:100%;background:var(--dsw-alias-brand-primary);border-radius:999px;transition:width .3s ease}',
+      '.mk-progress-text{font-size:10px;color:var(--dsw-alias-label-secondary)}',
+      '.mk-acts{display:flex;gap:6px;margin-top:auto}',
+      '.mk-acts button{padding:3px 12px;font-size:12px;border-radius:6px}',
+      '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
+      '.mk-empty{width:100%;color:var(--dsw-alias-label-secondary);padding:20px;text-align:center;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;font-size:12px}',
     ].join('')
 
     // 分类中文显示(仅 UI,存储/搜索仍是英文 tag)
@@ -76,6 +101,7 @@ window.__ModuleLoader__.load({
       const qs = new URLSearchParams()
       if (params.tag) qs.set('tag', params.tag)
       if (params.q) qs.set('q', params.q)
+      if (params.remoteDir) qs.set('remoteDir', '1')
       return (await fetch('/dsh-memes-api?' + qs.toString())).json()
     }
     async function apiPost(payload) {
@@ -120,11 +146,13 @@ window.__ModuleLoader__.load({
       const [promptOpen, setPromptOpen] = React.useState(false)
       const [promptDraft, setPromptDraft] = React.useState('') // 弹窗内草稿
       const [remoteSubs, setRemoteSubs] = React.useState([])
-      const [remoteDirUrl, setRemoteDirUrl] = React.useState(null) // 服务端下发的目录地址(数组时逐源回退)
-      const [remoteDir, setRemoteDir] = React.useState(null)
+      const [remoteDir, setRemoteDir] = React.useState(null) // 服务端代拉的图库目录(null=暂不可用)
       const [remoteUrl, setRemoteUrl] = React.useState('')
       const [remoteJobs, setRemoteJobs] = React.useState({})
       const [remoteBusy, setRemoteBusy] = React.useState(false)
+      const [remoteTab, setRemoteTab] = React.useState('discover')
+      const [panelTab, setPanelTab] = React.useState('library')
+      const [remoteQuery, setRemoteQuery] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
         setMemeRoot(res.memeRoot || '')
@@ -136,7 +164,6 @@ window.__ModuleLoader__.load({
         setCompanionPrompt(res.companionPrompt || '')
         setDefaultPrompt(res.defaultCompanionPrompt || '')
         setRemoteSubs(Array.isArray(res.remoteSubs) ? res.remoteSubs : [])
-        if (res.remoteDirUrl) setRemoteDirUrl(res.remoteDirUrl)
       }
       const onSaveCompanionPrompt = async () => {
         try {
@@ -155,26 +182,14 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
       }, [])
-      // 远程图库目录:服务端可配(remoteDirUrl,数组时逐源回退),失败静默(保留手动粘贴入口)
+      // 远程图库目录:服务端代拉(逐源回退 + 60s 缓存),浏览器侧没有跨域问题
       React.useEffect(() => {
-        if (!remoteDirUrl) return
         let alive = true
-        ;(async () => {
-          const urls = Array.isArray(remoteDirUrl) ? remoteDirUrl : [remoteDirUrl]
-          for (const u of urls) {
-            try {
-              const r = await fetch(u)
-              if (!r.ok) continue
-              const list = await r.json()
-              if (alive && Array.isArray(list)) {
-                setRemoteDir(list.filter((e) => e && e.manifestUrl))
-                return
-              }
-            } catch (e) { /* 换下一个源 */ }
-          }
-        })()
+        apiGet({ remoteDir: 1 }).then((res) => {
+          if (alive && res && res.ok) setRemoteDir(Array.isArray(res.remoteDir) ? res.remoteDir : null)
+        }).catch(() => {})
         return () => { alive = false }
-      }, [Array.isArray(remoteDirUrl) ? remoteDirUrl.join('|') : remoteDirUrl])
+      }, [])
       const pollRemoteJob = async (jobId) => {
         try {
           const res = await apiPost({ op: 'remoteJobStatus', jobId })
@@ -230,6 +245,17 @@ window.__ModuleLoader__.load({
             setRootNotice('删除失败: ' + ((res && res.error) || ''))
           }
         } catch (e) { setRootNotice('删除失败') }
+      }
+      const onUseRemote = async (sub) => {
+        try {
+          const res = await apiPost({ op: 'setPack', packId: sub.id })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice('已切换到图库「' + (sub.name || sub.id) + '」')
+          } else {
+            setRootNotice('切换失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) { setRootNotice('切换失败') }
       }
       const onSetPack = async (id) => {
         const packIdNext = String(id || '').trim()
@@ -512,27 +538,53 @@ window.__ModuleLoader__.load({
         ),
       ))
 
-      // 远程图库行:目录条目 + 不在目录里的历史订阅
-      const remoteRows = (() => {
-        const rows = []
-        for (const entry of (remoteDir || [])) {
-          const pid = entry.id || ''
-          const sub = remoteSubs.find((s) => s.id === pid) || remoteSubs.find((s) => s.url === entry.manifestUrl) || null
-          rows.push({
-            key: 'dir-' + (pid || entry.manifestUrl), name: entry.name || pid, desc: entry.description || '',
-            count: entry.count || 0, entry, sub,
-            jobPackId: pid,
-            downloaded: (pid && packs.some((p) => p.id === pid)) || !!sub,
-          })
+      // 市场卡片:发现 = 目录条目;已安装 = 订阅记录。搜索按 空格分词 全命中。
+      const mkQuery = remoteQuery.trim().toLowerCase()
+      const mkMatch = (hay) => !mkQuery || mkQuery.split(/\s+/).filter(Boolean).every((t) => hay.includes(t))
+      const jobFor = (pid) => Object.values(remoteJobs).find((j) => j.packId === pid && j.state === 'running')
+      const mkCards = (() => {
+        const cards = []
+        if (remoteTab === 'discover') {
+          for (const entry of (remoteDir || [])) {
+            const pid = entry.id || ''
+            const sub = remoteSubs.find((s) => s.id === pid) || remoteSubs.find((s) => s.url === entry.manifestUrl) || null
+            const keywords = Array.isArray(entry.keywords) ? entry.keywords : []
+            const hay = ((entry.name || '') + ' ' + (entry.author || '') + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
+            if (!mkMatch(hay)) continue
+            cards.push({
+              key: 'dir-' + (pid || entry.manifestUrl), packId: pid,
+              name: entry.name || pid, desc: entry.description || '',
+              cover: entry.preview || (entry.previews || [])[0] || null,
+              meta: [entry.author, entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
+              tags: keywords, entry, sub,
+              installed: !!sub || (pid && packs.some((p) => p.id === pid)),
+              job: jobFor(pid), activePack: pid && packId === pid,
+            })
+          }
+        } else {
+          for (const s of remoteSubs) {
+            const hay = ((s.name || '') + ' ' + s.id + ' ' + (s.url || '')).toLowerCase()
+            if (!mkMatch(hay)) continue
+            cards.push({
+              key: 'sub-' + s.id, packId: s.id,
+              name: s.name || s.id, desc: s.url, cover: null,
+              meta: [packs.some((p) => p.id === s.id) ? '已下载' : '未下载', s.version, s.total ? s.total + ' 张' : ''].filter(Boolean).join(' · '),
+              tags: [], entry: null, sub: s,
+              installed: true, job: jobFor(s.id), activePack: packId === s.id,
+              downloaded: packs.some((p) => p.id === s.id),
+            })
+          }
         }
-        for (const s of remoteSubs) {
-          if (rows.some((r) => r.sub && r.sub.id === s.id)) continue
-          rows.push({ key: 'sub-' + s.id, name: s.name || s.id, desc: s.url, count: s.total || 0, entry: null, sub: s, jobPackId: s.id, downloaded: packs.some((p) => p.id === s.id) })
-        }
-        return rows
+        return cards
       })()
 
       return h('div', { className: 'meme-panel' },
+        h('div', { className: 'mk-tabs', style: { width: '100%', marginBottom: 2 } },
+          h('button', { className: 'mk-tab' + (panelTab === 'library' ? ' on' : ''), onClick: () => setPanelTab('library') }, '图库' + (total ? ' (' + total + ')' : '')),
+          h('button', { className: 'mk-tab' + (panelTab === 'remote' ? ' on' : ''), onClick: () => setPanelTab('remote') }, '图库市场'),
+          h('button', { className: 'mk-tab' + (panelTab === 'settings' ? ' on' : ''), onClick: () => setPanelTab('settings') }, '设置'),
+        ),
+        panelTab === 'library' ? h(React.Fragment, null,
         h('div', { className: 'section-title' }, '当前图库'),
         h('div', { className: 'row', style: { width: '100%' } },
           h('div', { className: 'pack-dd' },
@@ -656,6 +708,76 @@ window.__ModuleLoader__.load({
         ) : null,
         fileInput,
         // 陪伴提示词编辑弹窗:基于默认提示词修改,留空/恢复默认 = 内置规则
+
+        ) : null,
+        panelTab === 'remote' ? h(React.Fragment, null,
+        h('div', { className: 'mk-tabs' },
+          h('button', { className: 'mk-tab' + (remoteTab === 'discover' ? ' on' : ''), onClick: () => setRemoteTab('discover') }, '发现'),
+          h('button', { className: 'mk-tab' + (remoteTab === 'installed' ? ' on' : ''), onClick: () => setRemoteTab('installed') }, '已安装 (' + remoteSubs.length + ')'),
+        ),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', {
+            type: 'text', value: remoteQuery, onChange: (e) => setRemoteQuery(e.target.value),
+            placeholder: '搜索图库…', style: { flex: 1, minWidth: 160 },
+          }),
+        ),
+        mkCards.length === 0
+          ? h('div', { className: 'mk-empty' },
+              remoteTab === 'discover'
+                ? (mkQuery
+                    ? '没有匹配的图库'
+                    : (remoteDir === null
+                        ? '图库目录暂不可用,可在下方粘贴清单 JSON 地址订阅'
+                        : '目录暂无内容,可在下方粘贴清单 JSON 地址订阅'))
+                : (mkQuery ? '没有匹配的订阅' : '还没有已安装的远程图库,去「发现」逛逛'))
+          : h('div', { className: 'mk-grid' }, mkCards.map((row) => {
+            const job = row.job
+            const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
+            return h('div', { key: row.key, className: 'mk-card' },
+              row.cover
+                ? h('img', { className: 'mk-cover', src: row.cover, alt: '', loading: 'lazy' })
+                : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
+              h('div', { className: 'mk-body' },
+                h('div', { className: 'mk-title' },
+                  h('span', { className: 'mk-name', title: row.name }, row.name),
+                  row.activePack
+                    ? h('span', { className: 'mk-badge' }, '使用中')
+                    : (row.installed ? h('span', { className: 'mk-badge' }, '已安装') : null),
+                ),
+                row.meta ? h('div', { className: 'mk-meta', title: row.meta }, row.meta) : null,
+                row.desc ? h('div', { className: 'mk-desc', title: row.desc }, row.desc) : null,
+                row.tags && row.tags.length
+                  ? h('div', { className: 'mk-chips' }, row.tags.slice(0, 4).map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
+                  : null,
+                job ? h('div', { className: 'mk-progress-wrap' },
+                  h('div', { className: 'mk-progress' }, h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })),
+                  h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + ' ' + pct + '%'),
+                ) : null,
+                h('div', { className: 'mk-acts' },
+                  remoteTab === 'discover'
+                    ? h('button', {
+                      className: row.installed ? '' : 'btn-primary',
+                      onClick: () => startRemote(row.entry.manifestUrl, row.entry.id || ''),
+                      disabled: remoteBusy || !!job,
+                    }, job ? '下载中…' : (row.installed ? '更新' : '安装'))
+                    : [
+                      row.downloaded && !row.activePack
+                        ? h('button', { key: 'use', onClick: () => onUseRemote(row.sub) }, '使用')
+                        : null,
+                      h('button', { key: 'update', onClick: () => startRemote(row.sub.url, row.sub.id), disabled: remoteBusy || !!job }, '更新'),
+                      h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载'),
+                    ],
+                ),
+              ),
+            )
+          })),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '高级:粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
+          h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
+        ),
+
+        ) : null,
+        panelTab === 'settings' ? h(React.Fragment, null,
         promptOpen ? h('div', { className: 'meme-modal-mask', onClick: () => setPromptOpen(false) },
           h('div', { className: 'meme-modal', style: { width: 460 }, onClick: (e) => e.stopPropagation() },
             h('h3', null, '陪伴提示词(注入模型)'),
@@ -693,31 +815,8 @@ window.__ModuleLoader__.load({
           h('button', { onClick: () => onPickDir('memeRoot') }, '打开其他目录'),
           h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
         ),
-        h('div', { className: 'section-title' }, '远程图库'),
-        remoteRows.length === 0
-          ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '目录暂无内容,可在下方粘贴清单 JSON 地址订阅')
-          : remoteRows.map((row) => h('div', { key: row.key, className: 'row', style: { width: '100%' } },
-            h('span', { style: { fontWeight: 600 } }, row.name),
-            row.count ? h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, row.count + ' 张') : null,
-            row.desc ? h('span', {
-              title: row.desc,
-              style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-            }, row.desc) : null,
-            Object.values(remoteJobs).some((j) => j.packId === row.jobPackId && j.state === 'running')
-              ? h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-brand-primary)' } }, '下载中…')
-              : row.entry
-                ? h('button', { onClick: () => startRemote(row.entry.manifestUrl, row.entry.id || ''), disabled: remoteBusy }, row.downloaded ? '更新' : '下载')
-                : h('button', { onClick: () => startRemote(row.sub.url, row.sub.id), disabled: remoteBusy }, '更新'),
-            row.sub ? h('button', { className: 'danger', onClick: () => onRemoveRemote(row.sub), title: '删除订阅及本地文件' }, '删除') : null,
-          )),
-        Object.values(remoteJobs).map((job) => h('div', { key: 'job-' + job.id, className: 'notice' },
-          (job.name || job.packId) + ': ' + (job.message || job.state) + ' — ' + (job.done + job.failed) + '/' + job.total
-          + (job.failed ? '(失败 ' + job.failed + ')' : '')
-          + ((job.warnings || []).length ? ';警告: ' + job.warnings[0] : ''))),
-        h('div', { className: 'row', style: { width: '100%' } },
-          h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '或粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
-          h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
-        ),
+
+        ) : null,
         rootNotice ? h('div', { className: 'notice' }, rootNotice) : null,
         // 目录浏览弹窗(WSL 无原生选择器,用 browse 能力前端浏览)
         browseOpen && browseList ? h('div', { className: 'meme-modal-mask', onClick: () => setBrowseOpen(false) },

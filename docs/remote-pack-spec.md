@@ -1,6 +1,6 @@
 # dsh-meme 远程图库清单格式(remote-pack manifest)
 
-远程图库 = 一个托管在任意 http(s) 地址的 JSON 清单。插件设置页「远程图库」里粘贴清单地址(或从图库目录点「下载」),插件会:
+远程图库 = 一个托管在任意 http(s) 地址的 JSON 清单。插件设置页「图库市场」里粘贴清单地址(或从发现页点「安装」),插件会:
 
 1. 服务端拉取清单,校验并规范化每个条目;
 2. 并发下载全部图片(≤8MB/张),按 `memes/<tag>/<file>` 落盘到扫描目录(默认 `~/.dsh/meme-packs/<id>/`);
@@ -50,7 +50,7 @@
 
 ## 图库目录(docs/remote-packs.json)
 
-设置页的「远程图库」列表来自本仓库的 [`docs/remote-packs.json`](./remote-packs.json)(经 jsDelivr/raw 双源拉取,可用 patch 配置 `remoteDirUrl` 覆盖)。想进目录:给本仓库发 PR,往数组里加一条:
+设置页「图库市场 → 发现」列表来自本仓库的 [`docs/remote-packs.json`](./remote-packs.json)(经 jsDelivr/raw 双源拉取,可用 patch 配置 `remoteDirUrl` 覆盖)。想进目录:给本仓库发 PR,往数组里加一条:
 
 ```json
 {
@@ -60,8 +60,23 @@
   "description": "128 张台词级梗图,持续更新",
   "count": 128,
   "version": "2026-08-31",
-  "homepage": "https://ai-meme.cdqyfdbymn.me/"
+  "author": "the-beating-light-of-the-nail",
+  "homepage": "https://ai-meme.cdqyfdbymn.me/",
+  "preview": "https://your-host/previews/cover.webp",
+  "previews": ["https://your-host/previews/1.webp", "https://your-host/previews/2.webp"],
+  "keywords": ["DeepSeek", "鲸鱼娘", "台词梗"]
 }
 ```
 
+| 字段 | 说明 |
+|------|------|
+| `id` / `manifestUrl` / `name` | 必填;`id` 是安装后的包 id |
+| `description` / `count` / `version` / `author` | 设置页「发现」卡片展示 |
+| `preview` / `previews` | 卡片封面图(任选其一,`preview` 优先);建议 2:1 左右横图 |
+| `keywords` | 字符串数组,发现页搜索可命中 |
+
 `manifestUrl` 必须可直接 GET 到上面的清单 JSON。收录标准与宣传页一致:来源/版权标注清晰、无盗链争议。
+
+## 目录源覆盖
+
+插件默认从 jsDelivr / raw 双源拉取本文件的 [`remote-packs.json`](./remote-packs.json)。内网或调试场景可在 `~/.dsh/dsh-expression.json` 里写 `"remoteDirUrl": "https://你的地址/remote-packs.json"`(或 patch config 的 `remoteDirUrl`),改动即时生效,不用重启。

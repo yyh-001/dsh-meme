@@ -288,7 +288,7 @@ export function apply(ctx, config) {
         companionPrompt: readSettings().companionPrompt || '',
         defaultCompanionPrompt: DEFAULT_COMPANION_PROMPT,
         remoteSubs: remoteSubs(),
-        remoteDirUrl,
+        remoteDirUrl: remoteDirUrls(),
         configured: !!(s.memeRoot || s.packId),
       }
     }
@@ -479,13 +479,37 @@ export function apply(ctx, config) {
     const REMOTE_CONCURRENCY = 4
     const REMOTE_MAX_ITEMS = 500
     const SIDECAR_NAME = '.dsh-remote.json'
-    const remoteDirUrl = config?.remoteDirUrl || [
+    // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认(jsDelivr/raw 双源)。
+    // 每次请求现读 settings:改配置文件即刻生效,不用重启。
+    const remoteDirUrls = () => readSettings().remoteDirUrl || config?.remoteDirUrl || [
       'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme@main/docs/remote-packs.json',
       'https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/remote-packs.json',
     ]
     const remoteSubs = () => {
       const subs = readSettings().remoteSubs
       return Array.isArray(subs) ? subs : []
+    }
+    let remoteDirCache = null // {at, data},60s 内复用,面板每次挂载拉一次也不怕
+    const fetchRemoteDirectory = async () => {
+      if (remoteDirCache && Date.now() - remoteDirCache.at < 60000) return remoteDirCache.data
+      for (const u of [].concat(remoteDirUrls() || [])) {
+        try {
+          let res
+          try {
+            res = await fetch(u, { signal: AbortSignal.timeout(8000) })
+          } catch (error) {
+            const cause = error && error.cause
+            throw new Error(cause ? (cause.code || cause.message) : String(error && error.message || error))
+          }
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          const list = await res.json()
+          if (!Array.isArray(list)) throw new Error('目录不是数组')
+          const data = list.filter((e) => e && e.manifestUrl)
+          remoteDirCache = { at: Date.now(), data }
+          return data
+        } catch { /* 试下一个源 */ }
+      }
+      return null
     }
     const jobSnapshot = (job) => ({
       id: job.id, packId: job.packId, name: job.name, mode: job.mode,
@@ -711,6 +735,10 @@ export function apply(ctx, config) {
       async handler(req, res) {
         if (req.method === 'GET') {
           const u = new URL(req.url || '/', 'http://localhost')
+          if (u.searchParams.has('remoteDir')) {
+            json(res, { ok: true, remoteDir: await fetchRemoteDirectory() })
+            return
+          }
           const packs = listAllPacks()
           const activeId = readSettings().packId
             || ((packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || '')
@@ -725,7 +753,7 @@ export function apply(ctx, config) {
                 for (const m of new MemesStore(p.path).list().memes) all.push(urlFor(m, p.id))
               } catch { /* 坏库跳过 */ }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrls() })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -749,7 +777,7 @@ export function apply(ctx, config) {
             packs: packList(),
             memes: rows.map((m) => urlFor(m, pid)),
             remoteSubs: remoteSubs(),
-            remoteDirUrl,
+            remoteDirUrl: remoteDirUrls(),
           })
           return
         }
