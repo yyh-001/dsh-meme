@@ -92,7 +92,11 @@ export function liveStore(store) {
     list(...a) { return box._s.list(...a) },
     sampleMood(...a) { return box._s.sampleMood(...a) },
     resolveStored(...a) { return box._s.resolveStored(...a) },
-    replace(next) { box._s = next },
+    replace(next) {
+      const prev = box._s
+      box._s = next
+      if (prev && prev !== next && typeof prev.close === 'function') prev.close()
+    },
   }
   box._s = store
   return box
@@ -216,6 +220,10 @@ export class MemesStore {
       throw new Error('文件不存在: ' + stored)
     }
     return target
+  }
+
+  close() {
+    try { this.db.close() } catch { /* 已关闭 */ }
   }
 }
 

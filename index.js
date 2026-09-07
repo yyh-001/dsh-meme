@@ -41,7 +41,7 @@ function crc32(buf) {
 }
 
 /** 打包文件列表为 ZIP(store 无压缩):[{name, data}] → Buffer */
-function zipStore(files) {
+export function zipStore(files) {
   const parts = []
   const central = []
   let offset = 0
@@ -94,7 +94,7 @@ function zipStore(files) {
 }
 
 /** 解析 ZIP(仅 store/无压缩条目):Buffer → Map<name, Buffer> */
-function unzipStore(buf) {
+export function unzipStore(buf) {
   const out = new Map()
   // EOCD:从尾部找签名
   let eocd = -1
@@ -205,7 +205,15 @@ export function apply(ctx, config) {
           }
           // 每次请求动态构建白名单:静态快照会漏掉新上传的图(历史教训:上传后 404 图片不显示)
           let allowed = null
-          try { allowed = new Set(new MemesStore(root).list().memes.map((m) => m.path)) } catch { allowed = null }
+          let routeStore = null
+          try {
+            routeStore = new MemesStore(root)
+            allowed = new Set(routeStore.list().memes.map((m) => m.path))
+          } catch {
+            allowed = null
+          } finally {
+            if (routeStore) routeStore.close()
+          }
           if (!stored || !allowed || !allowed.has(stored)) {
             res.writeHead(404, { 'Content-Type': 'text/plain' })
             res.end('not found')
@@ -309,6 +317,7 @@ export function apply(ctx, config) {
         memeRoot: abs,
         packId: packId || (hit ? hit.id : '_custom'),
       })
+      try { adminDb.close() } catch { /* 已关闭 */ }
       memes.replace(next)
       adminDb = nextDb
     }
@@ -476,12 +485,15 @@ export function apply(ctx, config) {
     let remoteJobSeq = 0
     const REMOTE_MANIFEST_MAX = 2 * 1024 * 1024
     const REMOTE_IMAGE_MAX = 8 * 1024 * 1024
+    const REMOTE_ARCHIVE_MAX = 100 * 1024 * 1024
     const REMOTE_CONCURRENCY = 4
     const REMOTE_MAX_ITEMS = 500
     const SIDECAR_NAME = '.dsh-remote.json'
     // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认(jsDelivr/raw 双源)。
     // 每次请求现读 settings:改配置文件即刻生效,不用重启。
     const remoteDirUrls = () => readSettings().remoteDirUrl || config?.remoteDirUrl || [
+      'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme-packs@main/catalog.json',
+      'https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json',
       'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme@main/docs/remote-packs.json',
       'https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/remote-packs.json',
     ]
@@ -502,9 +514,10 @@ export function apply(ctx, config) {
             throw new Error(cause ? (cause.code || cause.message) : String(error && error.message || error))
           }
           if (!res.ok) throw new Error('HTTP ' + res.status)
-          const list = await res.json()
-          if (!Array.isArray(list)) throw new Error('目录不是数组')
-          const data = list.filter((e) => e && e.manifestUrl)
+          const raw = await res.json()
+          const list = Array.isArray(raw) ? raw : (Array.isArray(raw && raw.packs) ? raw.packs : null)
+          if (!list) throw new Error('目录不是数组或 { packs: [] }')
+          const data = list.filter((e) => e && (e.manifestUrl || e.archiveUrl))
           remoteDirCache = { at: Date.now(), data }
           return data
         } catch { /* 试下一个源 */ }
@@ -533,6 +546,86 @@ export function apply(ctx, config) {
       let parsed
       try { parsed = JSON.parse(text) } catch { throw new Error('清单不是合法 JSON') }
       return parsed
+    }
+    const fetchRemoteArchive = async (url, expectedSha256) => {
+      if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('ZIP 地址必须是 http(s) 链接')
+      const expected = String(expectedSha256 || '').trim().toLowerCase()
+      if (expected && !/^[0-9a-f]{64}$/.test(expected)) throw new Error('SHA-256 格式无效')
+      let res
+      try {
+        res = await fetch(url, { signal: AbortSignal.timeout(60000), redirect: 'follow' })
+      } catch (error) {
+        const cause = error && error.cause
+        throw new Error('ZIP 下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
+      }
+      if (!res.ok) throw new Error('ZIP 下载失败: HTTP ' + res.status)
+      const declared = Number(res.headers.get('content-length') || 0)
+      if (declared > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 超过 100MB,拒绝处理')
+      const buf = Buffer.from(await res.arrayBuffer())
+      if (buf.byteLength === 0 || buf.byteLength > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
+      const actual = createHash('sha256').update(buf).digest('hex')
+      if (expected && actual !== expected) throw new Error('ZIP SHA-256 校验失败,文件可能损坏或已被替换')
+      return { buf, sha256: actual }
+    }
+    const packSlug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').replace(/^-+|-+$/g, '').slice(0, 40)
+    const installZipEntries = (entries, packId, sidecar) => {
+      const id = packSlug(packId)
+      if (!id) throw new Error('图库 id 无效')
+      if (!entries.get('index.db')) throw new Error('ZIP 里没有 index.db,不是有效的表情包包')
+      const root = resolve(packsDirNow())
+      const targetAbs = resolve(join(root, id))
+      if (!targetAbs.startsWith(root + sep)) throw new Error('图库目录越界')
+      const nonce = Math.random().toString(16).slice(2, 10)
+      const stageAbs = resolve(join(root, id + '.tmp-' + nonce))
+      const backupAbs = resolve(join(root, id + '.bak-' + nonce))
+      if (!stageAbs.startsWith(root + sep) || !backupAbs.startsWith(root + sep)) throw new Error('临时目录越界')
+
+      const files = new Map(entries)
+      if (sidecar) files.set(SIDECAR_NAME, Buffer.from(JSON.stringify(sidecar, null, 2)))
+      for (const [rel] of files) {
+        if (!rel || /[\\\/]$/.test(rel)) continue
+        const full = resolve(stageAbs, rel)
+        if (full === stageAbs || !full.startsWith(stageAbs + sep)) {
+          throw new Error('ZIP 条目路径越界,已拒绝导入: ' + rel)
+        }
+      }
+
+      mkdirSync(root, { recursive: true })
+      rmSync(stageAbs, { recursive: true, force: true })
+      rmSync(backupAbs, { recursive: true, force: true })
+      try {
+        mkdirSync(stageAbs, { recursive: true })
+        for (const [rel, bytes] of files) {
+          if (!rel || /[\\\/]$/.test(rel)) continue
+          const full = resolve(stageAbs, rel)
+          mkdirSync(dirname(full), { recursive: true })
+          writeFileSync(full, bytes)
+        }
+        const verifyDb = new DatabaseSync(join(stageAbs, 'index.db'), { readOnly: true })
+        try { verifyDb.prepare('SELECT COUNT(*) AS n FROM memes').get() } finally { verifyDb.close() }
+
+        const replacingActive = resolve(memes.root) === targetAbs
+        if (replacingActive) {
+          try { adminDb.close() } catch { /* 已关闭 */ }
+        }
+        let backedUp = false
+        try {
+          if (existsSync(targetAbs)) {
+            renameSync(targetAbs, backupAbs)
+            backedUp = true
+          }
+          renameSync(stageAbs, targetAbs)
+        } catch (error) {
+          if (backedUp && !existsSync(targetAbs) && existsSync(backupAbs)) renameSync(backupAbs, targetAbs)
+          if (replacingActive && existsSync(targetAbs)) reloadMemeStore(targetAbs, id)
+          throw error
+        }
+        rmSync(backupAbs, { recursive: true, force: true })
+        reloadMemeStore(targetAbs, id)
+        return targetAbs
+      } finally {
+        rmSync(stageAbs, { recursive: true, force: true })
+      }
     }
     // 清单 → 规范化条目;单条非法只跳过并记 warning,不整体失败
     const normalizeRemoteManifest = (raw, fallbackId, sourceUrl) => {
@@ -749,9 +842,12 @@ export function apply(ctx, config) {
           if (packId === 'all') {
             const all = []
             for (const p of packs) {
+              let store = null
               try {
-                for (const m of new MemesStore(p.path).list().memes) all.push(urlFor(m, p.id))
+                store = new MemesStore(p.path)
+                for (const m of store.list().memes) all.push(urlFor(m, p.id))
               } catch { /* 坏库跳过 */ }
+              finally { if (store) store.close() }
             }
             json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrls() })
             return
@@ -760,11 +856,14 @@ export function apply(ctx, config) {
           let rows = []
           let tags = []
           if (pack) {
+            let store = null
             try {
-              const r = new MemesStore(pack.path).list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined)
+              store = new MemesStore(pack.path)
+              const r = store.list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined)
               rows = r.memes
               tags = r.tags
             } catch { /* 坏库/缺索引 → 空列表 */ }
+            finally { if (store) store.close() }
           } else {
             const r = memes.list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined)
             rows = r.memes
@@ -859,29 +958,39 @@ export function apply(ctx, config) {
             json(res, { ok: true, deleted: n })
           } else if (op === 'importMemePack') {
             const data = String(body.dataBase64 || '')
-            const name = String(body.name || 'meme-pack').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'meme-pack'
+            const name = packSlug(body.name) || 'meme-pack'
             if (!data) throw new Error('缺少 ZIP 数据')
             const entries = unzipStore(Buffer.from(data, 'base64'))
-            const indexPath = entries.get('index.db')
-            if (!indexPath) throw new Error('ZIP 里没有 index.db,不是有效的表情包包')
-            // 解包到扫描目录/<name>(包外,持久)。先整体校验所有条目路径,
-            // 任何越界(绝对路径或 .. 逃逸)都拒绝导入,不落盘(历史教训:任意文件写)。
-            const targetAbs = resolve(join(packsDirNow(), name))
-            for (const [rel] of entries) {
-              const full = resolve(targetAbs, rel)
-              if (full !== targetAbs && !full.startsWith(targetAbs + sep)) {
-                throw new Error('ZIP 条目路径越界,已拒绝导入: ' + rel)
-              }
-            }
-            rmSync(targetAbs, { recursive: true, force: true })
-            mkdirSync(targetAbs, { recursive: true })
-            for (const [rel, bytes] of entries) {
-              const full = resolve(targetAbs, rel)
-              mkdirSync(dirname(full), { recursive: true })
-              writeFileSync(full, bytes)
-            }
-            reloadMemeStore(targetAbs, name)
+            installZipEntries(entries, name)
             json(res, { ok: true, ...packPayload(), total: memes.list().memes.length, message: '导入成功,已切换到新图库' })
+          } else if (op === 'installRemoteArchive') {
+            const archiveUrl = String(body.archiveUrl || '').trim()
+            const requestedId = packSlug(body.packId)
+            const downloaded = await fetchRemoteArchive(archiveUrl, body.sha256)
+            const entries = unzipStore(downloaded.buf)
+            let manifest = {}
+            try { manifest = JSON.parse(String(entries.get('manifest.json') || '{}')) } catch { throw new Error('manifest.json 不是合法 JSON') }
+            const manifestId = packSlug(manifest.id)
+            const id = requestedId || manifestId
+            if (!id) throw new Error('ZIP manifest.json 缺少有效 id')
+            if (requestedId && manifestId && requestedId !== manifestId) {
+              throw new Error('目录 id 与 ZIP manifest id 不一致,已拒绝安装')
+            }
+            const displayName = String(manifest.name || body.name || id).trim().slice(0, 60) || id
+            const version = String(manifest.version || body.version || '').trim().slice(0, 40)
+            const sidecar = {
+              sourceType: 'archive', archiveUrl, sha256: downloaded.sha256,
+              id, name: displayName, version, lastSync: Date.now(),
+            }
+            installZipEntries(entries, id, sidecar)
+            const total = memes.list().memes.length
+            const subs = remoteSubs().filter((s) => s && s.id !== id)
+            subs.unshift({
+              id, archiveUrl, sha256: downloaded.sha256,
+              name: displayName, version, total, lastSync: Date.now(),
+            })
+            writeSettings({ remoteSubs: subs })
+            json(res, { ok: true, ...packPayload(), total, message: '安装成功,已切换到「' + displayName + '」' })
           } else if (op === 'subscribeRemote') {
             const manifestUrl = String(body.manifestUrl || '').trim()
             const rawManifest = await fetchRemoteJson(manifestUrl)
@@ -900,7 +1009,28 @@ export function apply(ctx, config) {
           } else if (op === 'updateRemotePack') {
             const id = String(body.id || '').trim()
             const sub = remoteSubs().find((s) => s && s.id === id)
-            if (!sub || !sub.url) throw new Error('未找到订阅: ' + id)
+            if (!sub) throw new Error('未找到订阅: ' + id)
+            if (sub.archiveUrl) {
+              const downloaded = await fetchRemoteArchive(sub.archiveUrl, sub.sha256)
+              const entries = unzipStore(downloaded.buf)
+              let manifest = {}
+              try { manifest = JSON.parse(String(entries.get('manifest.json') || '{}')) } catch { throw new Error('manifest.json 不是合法 JSON') }
+              const manifestId = packSlug(manifest.id)
+              if (manifestId && manifestId !== id) throw new Error('订阅 id 与 ZIP manifest id 不一致,已拒绝更新')
+              const displayName = String(manifest.name || sub.name || id).trim().slice(0, 60) || id
+              const version = String(manifest.version || sub.version || '').trim().slice(0, 40)
+              installZipEntries(entries, id, {
+                sourceType: 'archive', archiveUrl: sub.archiveUrl, sha256: downloaded.sha256,
+                id, name: displayName, version, lastSync: Date.now(),
+              })
+              const total = memes.list().memes.length
+              const next = remoteSubs().filter((s) => s && s.id !== id)
+              next.unshift({ ...sub, sha256: downloaded.sha256, name: displayName, version, total, lastSync: Date.now() })
+              writeSettings({ remoteSubs: next })
+              json(res, { ok: true, ...packPayload(), total, message: '更新成功,已切换到「' + displayName + '」' })
+              return
+            }
+            if (!sub.url) throw new Error('订阅缺少更新地址: ' + id)
             const rawManifest = await fetchRemoteJson(sub.url)
             const manifest = normalizeRemoteManifest(rawManifest, id, sub.url)
             manifest.id = id

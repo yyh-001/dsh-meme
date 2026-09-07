@@ -48,9 +48,31 @@
 - 清单本体 >2MB 或条目 >500 条会被拒绝(拆成多个包);
 - 清单可以是 CDN/对象存储上的静态 JSON,更新图片后改清单即可,用户在插件里点「更新」增量同步。
 
-## 图库目录(docs/remote-packs.json)
+## 图库目录
 
-设置页「图库市场 → 发现」列表来自本仓库的 [`docs/remote-packs.json`](./remote-packs.json)(经 jsDelivr/raw 双源拉取,可用 patch 配置 `remoteDirUrl` 覆盖)。想进目录:给本仓库发 PR,往数组里加一条:
+设置页「图库市场 → 发现」的主目录来自 [`yyh-001/dsh-meme-packs`](https://github.com/yyh-001/dsh-meme-packs) 的 `catalog.json`（经 jsDelivr/raw 双源拉取）。目录既接受原来的数组，也接受更适合独立仓库的 `{ "packs": [] }`：
+
+```json
+{
+  "schemaVersion": 1,
+  "packs": [
+    {
+      "id": "deepseek-chan",
+      "name": "DeepSeek酱语录",
+      "version": "1.0.0",
+      "description": "128 张台词级梗图",
+      "maintainer": "your-name",
+      "count": 128,
+      "archiveUrl": "https://github.com/owner/repo/releases/download/deepseek-chan-v1.0.0/deepseek-chan-v1.0.0.zip",
+      "sha256": "64位小写十六进制哈希",
+      "preview": "https://example.com/cover.webp",
+      "keywords": ["DeepSeek", "鲸鱼娘"]
+    }
+  ]
+}
+```
+
+`archiveUrl` 指向插件「导出图库」生成的未压缩 ZIP（根目录含 `index.db`、`manifest.json`、`memes/`）。插件下载后限制 ZIP ≤100MB，校验 `sha256`，并校验 ZIP 内 `manifest.json.id` 与目录 `id` 一致，再原子安装到用户扫描目录。旧版逐图下载条目仍可写成：
 
 ```json
 {
@@ -70,13 +92,15 @@
 
 | 字段 | 说明 |
 |------|------|
-| `id` / `manifestUrl` / `name` | 必填;`id` 是安装后的包 id |
-| `description` / `count` / `version` / `author` | 设置页「发现」卡片展示 |
+| `id` / `name` | 必填;`id` 是安装后的包 id |
+| `archiveUrl` 或 `manifestUrl` | 二选一;Release ZIP 直链或逐图清单直链 |
+| `sha256` | `archiveUrl` 强烈建议必填;下载完成后校验完整性 |
+| `description` / `count` / `version` / `author` / `maintainer` | 设置页「发现」卡片展示 |
 | `preview` / `previews` | 卡片封面图(任选其一,`preview` 优先);建议 2:1 左右横图 |
 | `keywords` | 字符串数组,发现页搜索可命中 |
 
-`manifestUrl` 必须可直接 GET 到上面的清单 JSON。收录标准与宣传页一致:来源/版权标注清晰、无盗链争议。
+`archiveUrl` 或 `manifestUrl` 必须可直接 GET。收录标准:来源/版权标注清晰、无盗链争议。
 
 ## 目录源覆盖
 
-插件默认从 jsDelivr / raw 双源拉取本文件的 [`remote-packs.json`](./remote-packs.json)。内网或调试场景可在 `~/.dsh/dsh-expression.json` 里写 `"remoteDirUrl": "https://你的地址/remote-packs.json"`(或 patch config 的 `remoteDirUrl`),改动即时生效,不用重启。
+插件默认先从 jsDelivr / raw 双源拉取 `dsh-meme-packs/catalog.json`，失败后再回退到本仓库的 [`remote-packs.json`](./remote-packs.json)。内网或调试场景可在 `~/.dsh/dsh-expression.json` 里写 `"remoteDirUrl": "https://你的地址/catalog.json"`（或 patch config 的 `remoteDirUrl`），改动即时生效，不用重启。

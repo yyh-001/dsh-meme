@@ -2,14 +2,19 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { createServer } from 'node:http'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 
 // ---- fixture:本地 HTTP 服务提供清单与图片 ----
-const imgBytes = readFileSync(join(dirname(new URL(import.meta.url).pathname), '..', 'memes', 'dafeiyu-001', 'memes', 'happy', 'ok.jpg'))
+const fixtureDir = dirname(fileURLToPath(import.meta.url))
+const imgBytes = readFileSync(join(fixtureDir, '..', 'memes', 'dafeiyu-001', 'memes', 'happy', 'ok.jpg'))
 let currentManifest = null
+let archiveBytes = Buffer.alloc(0)
+let archiveSha256 = ''
 const fixture = createServer((req, res) => {
   const url = (req.url || '').split('?')[0]
   if (url === '/manifest.json') {
@@ -25,6 +30,22 @@ const fixture = createServer((req, res) => {
   if (url === '/big.jpg') {
     res.writeHead(200, { 'Content-Type': 'image/jpeg' })
     res.end(Buffer.alloc(8 * 1024 * 1024 + 1))
+    return
+  }
+  if (url === '/catalog.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      schemaVersion: 1,
+      packs: [{
+        id: 'market-test', name: '市场测试包', version: '1.0.0', count: 1,
+        archiveUrl: base + '/pack.zip', sha256: archiveSha256,
+      }],
+    }))
+    return
+  }
+  if (url === '/pack.zip') {
+    res.writeHead(200, { 'Content-Type': 'application/zip', 'Content-Length': String(archiveBytes.length) })
+    res.end(archiveBytes)
     return
   }
   res.writeHead(404)
@@ -49,7 +70,19 @@ const ctx = {
   agentDefaultModel: null,
 }
 const mod = await import('../index.js')
-mod.apply(ctx, {})
+const archiveWork = mkdtempSync(join(tmpdir(), 'dsh-meme-archive-fixture-'))
+const archiveDbPath = join(archiveWork, 'index.db')
+const archiveDb = new DatabaseSync(archiveDbPath)
+archiveDb.exec('CREATE TABLE memes (path TEXT PRIMARY KEY, tag TEXT, file_name TEXT, caption TEXT, keywords TEXT, mtime REAL, captioned_at REAL)')
+archiveDb.prepare('INSERT INTO memes VALUES (?, ?, ?, ?, ?, ?, ?)').run('memes/happy/test.jpg', 'happy', 'test.jpg', '市场测试', '测试', 1, 1)
+archiveDb.close()
+archiveBytes = mod.zipStore([
+  { name: 'index.db', data: readFileSync(archiveDbPath) },
+  { name: 'manifest.json', data: Buffer.from(JSON.stringify({ id: 'market-test', name: '市场测试包', version: '1.0.0' })) },
+  { name: 'memes/happy/test.jpg', data: imgBytes },
+])
+archiveSha256 = createHash('sha256').update(archiveBytes).digest('hex')
+mod.apply(ctx, { remoteDirUrl: base + '/catalog.json' })
 const api = handlers.find((h) => h.path === '/dsh-memes-api')
 const route = handlers.find((h) => h.kind === 'prefix')
 
@@ -95,7 +128,10 @@ const waitJob = async (jobId, timeoutMs = 20000) => {
   }
 }
 const packDir = () => join(home, '.dsh', 'meme-packs', 'remote-test')
-const dbRows = () => new DatabaseSync(join(packDir(), 'index.db'), { readOnly: true }).prepare('SELECT path, tag, caption FROM memes ORDER BY path').all()
+const dbRows = () => {
+  const db = new DatabaseSync(join(packDir(), 'index.db'), { readOnly: true })
+  try { return db.prepare('SELECT path, tag, caption FROM memes ORDER BY path').all() } finally { db.close() }
+}
 
 const v1 = {
   id: 'remote-test',
@@ -124,6 +160,14 @@ test('subscribeRemote 拒绝非 http(s) 清单地址', async () => {
   const res = await post({ op: 'subscribeRemote', manifestUrl: 'file:///etc/passwd' })
   assert.equal(res.statusCode, 400)
   assert.match(res.body, /http\(s\)/)
+})
+
+test('发现页目录兼容 { packs: [] } ZIP 市场格式', async () => {
+  const res = await get('?remoteDir=1')
+  assert.equal(res.statusCode, 200)
+  assert.equal(res.json.remoteDir.length, 1)
+  assert.equal(res.json.remoteDir[0].id, 'market-test')
+  assert.equal(res.json.remoteDir[0].archiveUrl, base + '/pack.zip')
 })
 
 test('subscribeRemote 全流程:下载建包建索引并自动切换', async () => {
@@ -226,6 +270,8 @@ test('同名但非远程下载的包会被拒绝,不覆盖', async () => {
 })
 
 test('超限图片计入失败,任务不崩', async () => {
+  const swBefore = await post({ op: 'setPack', packId: 'dafeiyu-001' })
+  assert.equal(JSON.parse(swBefore.body).ok, true)
   rmSync(packDir(), { recursive: true, force: true }) // 清掉上一轮残留,避开同名拦截
   const big = { id: 'remote-test', name: '大图包', memes: [{ url: base + '/big.jpg', tag: 'happy', file: 'big.jpg' }] }
   currentManifest = big
@@ -233,6 +279,8 @@ test('超限图片计入失败,任务不崩', async () => {
   const snap = await waitJob(JSON.parse(res.body).id)
   assert.equal(snap.failed, 1)
   assert.ok(snap.errors[0].includes('大小超限'))
+  const swAfter = await post({ op: 'setPack', packId: 'dafeiyu-001' })
+  assert.equal(JSON.parse(swAfter.body).ok, true)
   rmSync(packDir(), { recursive: true, force: true })
 })
 
@@ -262,4 +310,38 @@ test('非远程包不能走 removeRemoteSub 删除', async () => {
   assert.match(res.body, /未找到订阅/)
 })
 
-after(() => fixture.close())
+test('installRemoteArchive:下载、校验并安装市场 ZIP', async () => {
+  const res = await post({
+    op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
+    sha256: archiveSha256, packId: 'market-test',
+  })
+  assert.equal(res.statusCode, 200, res.body)
+  const out = JSON.parse(res.body)
+  assert.equal(out.ok, true)
+  assert.equal(out.packId, 'market-test')
+  assert.equal(out.total, 1)
+  const dir = join(home, '.dsh', 'meme-packs', 'market-test')
+  assert.ok(existsSync(join(dir, 'index.db')))
+  assert.ok(existsSync(join(dir, 'memes', 'happy', 'test.jpg')))
+  const sidecar = JSON.parse(readFileSync(join(dir, '.dsh-remote.json'), 'utf8'))
+  assert.equal(sidecar.sourceType, 'archive')
+  assert.equal(sidecar.sha256, archiveSha256)
+  assert.ok(out.remoteSubs.some((s) => s.id === 'market-test' && s.archiveUrl === base + '/pack.zip'))
+})
+
+test('installRemoteArchive:SHA-256 不一致时拒绝且不覆盖', async () => {
+  const before = readFileSync(join(home, '.dsh', 'meme-packs', 'market-test', 'index.db'))
+  const res = await post({
+    op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
+    sha256: '0'.repeat(64), packId: 'market-test',
+  })
+  assert.equal(res.statusCode, 400)
+  assert.match(res.body, /SHA-256 校验失败/)
+  const afterBytes = readFileSync(join(home, '.dsh', 'meme-packs', 'market-test', 'index.db'))
+  assert.deepEqual(afterBytes, before)
+})
+
+after(() => {
+  fixture.close()
+  rmSync(archiveWork, { recursive: true, force: true })
+})

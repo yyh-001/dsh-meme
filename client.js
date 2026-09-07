@@ -233,6 +233,29 @@ window.__ModuleLoader__.load({
         }
         setRemoteBusy(false)
       }
+      const startArchive = async (entry) => {
+        const archiveUrl = String((entry && entry.archiveUrl) || '').trim()
+        if (!archiveUrl) { setRootNotice('该图库没有可下载的 ZIP 地址'); return }
+        setRemoteBusy(true)
+        setRootNotice('正在下载并校验「' + (entry.name || entry.id || '图库') + '」…')
+        try {
+          const res = await apiPost({
+            op: 'installRemoteArchive', archiveUrl,
+            sha256: entry.sha256 || '', packId: entry.id || '',
+            name: entry.name || '', version: entry.version || '',
+          })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || '安装成功')
+            await load('', '')
+          } else {
+            setRootNotice('安装失败: ' + ((res && res.error) || '未知错误'))
+          }
+        } catch (e) {
+          setRootNotice('安装失败: ' + (e && e.message ? e.message : String(e)))
+        }
+        setRemoteBusy(false)
+      }
       const onRemoveRemote = async (sub) => {
         if (!window.confirm('删除订阅「' + (sub.name || sub.id) + '」及已下载的本地图片?')) return
         try {
@@ -547,15 +570,19 @@ window.__ModuleLoader__.load({
         if (remoteTab === 'discover') {
           for (const entry of (remoteDir || [])) {
             const pid = entry.id || ''
-            const sub = remoteSubs.find((s) => s.id === pid) || remoteSubs.find((s) => s.url === entry.manifestUrl) || null
-            const keywords = Array.isArray(entry.keywords) ? entry.keywords : []
-            const hay = ((entry.name || '') + ' ' + (entry.author || '') + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
+            const sub = remoteSubs.find((s) => s.id === pid)
+              || remoteSubs.find((s) => s.url && s.url === entry.manifestUrl)
+              || remoteSubs.find((s) => s.archiveUrl && s.archiveUrl === entry.archiveUrl)
+              || null
+            const keywords = Array.isArray(entry.keywords) ? entry.keywords : (Array.isArray(entry.tags) ? entry.tags : [])
+            const author = entry.author || entry.maintainer || ''
+            const hay = ((entry.name || '') + ' ' + author + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
             if (!mkMatch(hay)) continue
             cards.push({
-              key: 'dir-' + (pid || entry.manifestUrl), packId: pid,
+              key: 'dir-' + (pid || entry.manifestUrl || entry.archiveUrl), packId: pid,
               name: entry.name || pid, desc: entry.description || '',
               cover: entry.preview || (entry.previews || [])[0] || null,
-              meta: [entry.author, entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
+              meta: [author, entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '', entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
               tags: keywords, entry, sub,
               installed: !!sub || (pid && packs.some((p) => p.id === pid)),
               job: jobFor(pid), activePack: pid && packId === pid,
@@ -563,11 +590,11 @@ window.__ModuleLoader__.load({
           }
         } else {
           for (const s of remoteSubs) {
-            const hay = ((s.name || '') + ' ' + s.id + ' ' + (s.url || '')).toLowerCase()
+            const hay = ((s.name || '') + ' ' + s.id + ' ' + (s.url || s.archiveUrl || '')).toLowerCase()
             if (!mkMatch(hay)) continue
             cards.push({
               key: 'sub-' + s.id, packId: s.id,
-              name: s.name || s.id, desc: s.url, cover: null,
+              name: s.name || s.id, desc: s.url || s.archiveUrl, cover: null,
               meta: [packs.some((p) => p.id === s.id) ? '已下载' : '未下载', s.version, s.total ? s.total + ' 张' : ''].filter(Boolean).join(' · '),
               tags: [], entry: null, sub: s,
               installed: true, job: jobFor(s.id), activePack: packId === s.id,
@@ -757,14 +784,20 @@ window.__ModuleLoader__.load({
                   remoteTab === 'discover'
                     ? h('button', {
                       className: row.installed ? '' : 'btn-primary',
-                      onClick: () => startRemote(row.entry.manifestUrl, row.entry.id || ''),
+                      onClick: () => row.entry.archiveUrl
+                        ? startArchive(row.entry)
+                        : startRemote(row.entry.manifestUrl, row.entry.id || ''),
                       disabled: remoteBusy || !!job,
                     }, job ? '下载中…' : (row.installed ? '更新' : '安装'))
                     : [
                       row.downloaded && !row.activePack
                         ? h('button', { key: 'use', onClick: () => onUseRemote(row.sub) }, '使用')
                         : null,
-                      h('button', { key: 'update', onClick: () => startRemote(row.sub.url, row.sub.id), disabled: remoteBusy || !!job }, '更新'),
+                      h('button', {
+                        key: 'update',
+                        onClick: () => row.sub.archiveUrl ? startArchive(row.sub) : startRemote(row.sub.url, row.sub.id),
+                        disabled: remoteBusy || !!job,
+                      }, '更新'),
                       h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载'),
                     ],
                 ),

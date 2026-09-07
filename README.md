@@ -99,6 +99,7 @@ pnpm add file:/path/to/dsh-meme
 - **当前图库**：下拉切换已扫描到的表情包组（内置 + 扫描目录）
 - **扫描目录**：改路径后自动发现子文件夹里的图库；导入 ZIP 也放这里
 - **导出/导入图库**：打包成 ZIP 分享给别人，导入别人的包一键切换
+- **图库市场**：发现页直接展示 GitHub 图库目录；点「安装/更新」会下载 Release ZIP、校验 SHA-256 并自动切换
 - **上传弹窗**：选图预览 + 分类下拉（选择/新建/删除分类）+ 描述 + 关键词
 - **编辑弹窗**：同款分类下拉，改分类/描述/关键词
 - **分类中文显示**：下拉与卡片显示「生气 (angry)」式中文
@@ -116,7 +117,7 @@ pnpm add file:/path/to/dsh-meme
 
 ## 分享自己的表情包
 
-两条路：发给朋友，或挂到[宣传页](https://yyh-001.github.io/dsh-meme/)让别人预览。
+两条路：发给朋友，或提交到公共的 [`dsh-meme-packs`](https://github.com/yyh-001/dsh-meme-packs) 图库市场。
 
 **发给朋友**
 
@@ -135,13 +136,13 @@ pnpm add file:/path/to/dsh-meme
 
 可选：把插件导出的那个 ZIP 挂到 GitHub Release，别人就能直接下载再导入。也可以 `git clone` 之后，把仓库放进扫描目录（或设置页「打开其他目录」指过去）。
 
-## 订阅远程图库
+## 图库市场与远程订阅
 
-设置页「图库市场」里粘贴一个**清单 JSON 地址**(或从图库目录点「下载」),插件自动下载全部图片、建索引、出现在「当前图库」下拉并切换——不用碰 ZIP,不用碰命令行。
+设置页「图库市场 → 发现」默认读取 [`dsh-meme-packs/catalog.json`](https://github.com/yyh-001/dsh-meme-packs/blob/main/catalog.json)。用户点「安装」后，插件直接下载 GitHub Release ZIP、校验 SHA-256、安装并切换，不需要先手动下载。
 
-- 清单格式与收录方式见 **[docs/remote-pack-spec.md](./docs/remote-pack-spec.md)**(URL + 分类 + 描述 + 关键词,一张 JSON 管一个包)
+- GitHub Release ZIP 与旧版逐图清单两种格式都支持，规范见 **[docs/remote-pack-spec.md](./docs/remote-pack-spec.md)**
 - 已订阅的包再点「更新」走增量:只下载新增图片,已有图片仅刷新描述/关键词
-- 图库目录:[`docs/remote-packs.json`](./docs/remote-packs.json)(jsDelivr/raw 双源,PR 收录)
+- 主目录走 jsDelivr/raw 双源；旧目录 [`docs/remote-packs.json`](./docs/remote-packs.json) 保留为兼容回退
 
 ## 它做什么
 
@@ -155,7 +156,7 @@ pnpm add file:/path/to/dsh-meme
 | **管理 API** | 上传 / 编辑 / 删除 / 删除分类，全部在设置页完成，数据持久 |
 | **图库切换** | 设置页下拉切换已扫描图库；扫描目录默认 `~/.dsh/meme-packs` |
 | **导出 / 导入** | 图库一键打包 ZIP 分享，导入别人的包自动切换（零依赖实现） |
-| **订阅远程图库** | 设置页粘贴清单 JSON 即按需下载建包，支持增量更新（`remoteDirUrl` 可配目录源） |
+| **图库市场** | 发现页读取 GitHub 目录，一键安装带 SHA-256 校验的 Release ZIP；也兼容逐图清单增量更新 |
 
 ## 日常命令（模型视角）
 
