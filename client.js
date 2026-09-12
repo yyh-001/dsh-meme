@@ -1235,9 +1235,15 @@ window.__ModuleLoader__.load({
 
       // 输入框快捷发图(QQ 式)。
       const store = makeMemeStore()
+      // Hoisted out of the render callback on purpose: makeMemeButton() returns a fresh
+      // function component on every call, so creating it inside the slot render callback
+      // hands React a new component type on every re-render → the trigger button is
+      // unmounted and remounted each time (measured 20+ rebuilds/second while a turn is
+      // streaming), which in turn wakes every full-body MutationObserver in the host.
+      const MemeButton = makeMemeButton(store)
       slots.inject('conversation.input.left', () => slots.register(
         { name: 'conversation.input.left', id: 'meme-picker', order: 5, label: '表情包' },
-        (props) => React.createElement(makeMemeButton(store), { input: props.input }),
+        (props) => React.createElement(MemeButton, { input: props.input }),
       ))
       slots.inject('conversation.input.overlay', () => slots.register(
         { name: 'conversation.input.overlay', id: 'meme-picker', order: 5, label: '表情包' },
