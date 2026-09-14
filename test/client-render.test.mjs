@@ -66,7 +66,7 @@ const packPayload = () => ({
   packId: 'p1',
   packs: [{
     id: 'p1', name: '包一', count: 2, source: 'user', version: '1.0.0',
-    cover: '/dsh-memes/p1/memes/happy/a.jpg', customCover: '', enabled: true,
+    cover: '/dsh-memes/p1/memes/happy/a.jpg', enabled: true,
   }],
   enabledPacks: ['p1'],
   packsDir: '/packs',
@@ -185,7 +185,6 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   const detail = render()
   text = allText(detail)
   assert.ok(text.includes('甲') && text.includes('乙'), '详情页应渲染出表情卡片: ' + text.slice(0, 300))
-  assert.ok(text.includes('设为封面'), '每张图应有设为封面')
   assert.ok(findButton(detail, '图库列表'), '详情页应有返回按钮')
 
   // 弹窗们也要能渲染——它们各自是一大块 JSX,只有打开时才走到

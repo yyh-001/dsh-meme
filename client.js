@@ -327,17 +327,6 @@ window.__ModuleLoader__.load({
           await load('', '')
         } catch (error) { setRootNotice(error.message || '删除失败') }
       }
-      // 详情页「设为封面」:把这张图记成该图库的封面(空 = 恢复自动挑的)
-      const onSetCover = async (path) => {
-        const packIdNow = packView || packId
-        if (!packIdNow) return
-        try {
-          const res = await apiPost({ op: 'setPackCover', packId: packIdNow, path })
-          if (!res || !res.ok) throw new Error((res && res.error) || '操作失败')
-          applyRoot(res)
-          setRootNotice(res.message || '已设为封面')
-        } catch (error) { setRootNotice(error.message || '操作失败') }
-      }
       const onDeletePackPrompt = (row) => {
         setRootNotice('')
         setConfirmBox({
@@ -703,11 +692,6 @@ window.__ModuleLoader__.load({
           h('div', { className: 'cap' }, m.caption || m.file_name),
           h('div', { className: 'acts' },
             h('button', { onClick: () => setEdit({ path: m.path, tag: m.tag, caption: m.caption || '', keywords: m.keywords || '' }) }, '编辑'),
-            // 卡片封面就是这一张时把按钮置灰,免得反复点
-            h('button', {
-              onClick: () => onSetCover(m.path),
-              disabled: !!(curPack && curPack.cover && m.url && curPack.cover === m.url),
-            }, (curPack && curPack.cover && m.url && curPack.cover === m.url) ? '当前封面' : '设为封面'),
             h('button', { className: 'danger', onClick: () => onDelete(m) }, '删除'),
           ),
         ),
@@ -843,9 +827,6 @@ window.__ModuleLoader__.load({
               h('button', { className: 'btn-primary', onClick: () => setUploadOpen(true) }, '上传表情包'),
               tagSelect,
               h('button', { onClick: () => load(q, tagFilter), disabled: busy }, '搜索'),
-              curPack && curPack.customCover
-                ? h('button', { onClick: () => onSetCover(''), title: '恢复成自动挑的那张' }, '恢复默认封面')
-                : null,
             ),
             notice ? h('div', { className: 'notice' }, notice) : null,
             memes.length === 0 && !busy

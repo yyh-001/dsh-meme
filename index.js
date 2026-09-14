@@ -378,19 +378,12 @@ export function apply(ctx, config) {
       return {
         memeRoot: memes.root,
         packId,
-        packs: packs.map((p) => {
-          // 手动指定的封面优先(设置页在表情包详情里「设为封面」),没设过才用自动挑的那张
-          const manual = String((s.packCovers || {})[p.id] || '').trim()
-          const useManual = manual && existsSync(join(p.path, manual))
-          const rel = useManual ? manual : p.cover
-          return {
-            ...p,
-            // 本地图库的封面走插件自己的图片路由:图已经装到本地了,不该再去拉远程预览图
-            cover: rel ? ROUTE + '/' + p.id + '/' + rel : '',
-            customCover: useManual ? manual : '',
-            enabled: enabled.includes(p.id),
-          }
-        }),
+        packs: packs.map((p) => ({
+          ...p,
+          // 本地图库的封面走插件自己的图片路由:图已经装到本地了,不该再去拉远程预览图
+          cover: p.cover ? ROUTE + '/' + p.id + '/' + p.cover : '',
+          enabled: enabled.includes(p.id),
+        })),
         enabledPacks: enabled,
         packsDir: packsDirNow(),
         companionPrompt: readSettings().companionPrompt || '',
@@ -1217,25 +1210,6 @@ export function apply(ctx, config) {
               : current.filter((id) => id !== target)
             writeSettings({ enabledPacks: next })
             json(res, { ok: true, ...packPayload(), message: next.includes(target) ? '已打开「' + target + '」,模型可以用它发图' : '已关闭「' + target + '」' })
-          } else if (op === 'setPackCover') {
-            // 手动指定封面:path 为空 = 恢复自动挑的那张
-            const coverPackId = String(body.packId || '').trim()
-            const coverHit = listAllPacks().find((p) => p.id === coverPackId)
-            if (!coverHit) throw new Error('图库不存在: ' + coverPackId)
-            const rel = String(body.path || '').trim()
-            const covers = { ...(readSettings().packCovers || {}) }
-            if (!rel) {
-              delete covers[coverPackId]
-            } else {
-              if (rel.includes('..') || rel.startsWith('/') || rel.startsWith('\\')) throw new Error('封面路径不合法')
-              const coverRoot = resolve(coverHit.path)
-              const coverAbs = resolve(join(coverRoot, rel))
-              if (!coverAbs.startsWith(coverRoot + sep)) throw new Error('封面路径越界')
-              if (!existsSync(coverAbs)) throw new Error('封面文件不存在: ' + rel)
-              covers[coverPackId] = rel
-            }
-            writeSettings({ packCovers: covers })
-            json(res, { ok: true, ...packPayload(), message: rel ? '已把这张设为封面' : '已恢复默认封面' })
           } else if (op === 'deleteMemePack') {
             // 唯一的删除入口:不管是内置、市场下载还是自建/导入,都用这一个 op。
             // 内置包删了升级/重装会回来;市场下载的顺便把订阅记录摘掉。

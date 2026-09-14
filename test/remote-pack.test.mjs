@@ -583,37 +583,6 @@ test('安装完的图库默认打开开关(模型直接可用)', async () => {
 })
 
 
-test('setPackCover:手动封面覆盖自动挑的,空路径恢复默认', async () => {
-  // cover-empty 由前面的用例创建;上传/列表都作用于当前图库,先切过去
-  assert.equal(JSON.parse((await post({ op: 'setPack', packId: 'cover-empty' })).body).ok, true)
-  const before = JSON.parse((await post({ op: 'getMemeRoot' })).body)
-  const pack = before.packs.find((p) => p.id === 'cover-empty')
-  assert.ok(pack, 'cover-empty 图库应存在')
-  assert.ok(pack.cover, '自动封面应存在')
-  assert.equal(pack.customCover, '')
-
-  await post({ op: 'upload', tag: 'happy', fileName: 'd.jpg', dataBase64: imgBytes.toString('base64'), caption: '第二张' })
-  const listed = await get('?packId=all')
-  const second = listed.json.memes.find((m) => m.caption === '第二张')
-  assert.ok(second, '刚上传的图应能列出来')
-
-  const set = JSON.parse((await post({ op: 'setPackCover', packId: 'cover-empty', path: second.path })).body)
-  assert.equal(set.ok, true)
-  const card = set.packs.find((p) => p.id === 'cover-empty')
-  assert.equal(card.customCover, second.path)
-  assert.equal(card.cover, '/dsh-memes/cover-empty/' + second.path)
-
-  // 越界 / 文件不存在 / 图库不存在都要拒绝
-  assert.equal((await post({ op: 'setPackCover', packId: 'cover-empty', path: '../../secret.jpg' })).statusCode, 400)
-  assert.equal((await post({ op: 'setPackCover', packId: 'cover-empty', path: 'memes/happy/nope.jpg' })).statusCode, 400)
-  assert.equal((await post({ op: 'setPackCover', packId: 'nope', path: 'x.jpg' })).statusCode, 400)
-
-  // 空路径 = 恢复默认
-  const reset = JSON.parse((await post({ op: 'setPackCover', packId: 'cover-empty', path: '' })).body)
-  assert.equal(reset.packs.find((p) => p.id === 'cover-empty').customCover, '')
-})
-
-
 test('清单没 id 时用 URL 派生 id,任务不会碰扫描目录本身', async () => {
   // normalizeRemoteManifest 会用 URL 哈希兜底出 id;这条守住的是更重要的性质:
   // 任务只在自己那个子目录里干活,绝不会动到 meme-packs 根目录
