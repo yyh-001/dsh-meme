@@ -639,13 +639,19 @@ export function apply(ctx, config) {
       try { parsed = JSON.parse(text) } catch { throw new Error('清单不是合法 JSON') }
       return parsed
     }
-    const fetchRemoteArchive = async (url, expectedSha256) => {
+    const fmtBytes = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB')
+    /**
+     * 下载 ZIP 并校验。逐块读,顺便通过 onProgress(已下载字节, content-length) 汇报进度
+     * —— 客户端靠它画进度条(以前用 arrayBuffer 一把梭,安装期间界面上只有一句文字)。
+     */
+    const fetchRemoteArchive = async (url, expectedSha256, onProgress) => {
       if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('ZIP 地址必须是 http(s) 链接')
       const expected = String(expectedSha256 || '').trim().toLowerCase()
       if (expected && !/^[0-9a-f]{64}$/.test(expected)) throw new Error('SHA-256 格式无效')
       let res
       try {
-        res = await fetch(url, { signal: AbortSignal.timeout(60000), redirect: 'follow' })
+        // 大包给足 3 分钟(上限 100MB,慢链路也够)
+        res = await fetch(url, { signal: AbortSignal.timeout(180000), redirect: 'follow' })
       } catch (error) {
         const cause = error && error.cause
         throw new Error('ZIP 下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
@@ -653,11 +659,86 @@ export function apply(ctx, config) {
       if (!res.ok) throw new Error('ZIP 下载失败: HTTP ' + res.status)
       const declared = Number(res.headers.get('content-length') || 0)
       if (declared > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 超过 100MB,拒绝处理')
-      const buf = Buffer.from(await res.arrayBuffer())
+      const chunks = []
+      let size = 0
+      if (res.body && typeof res.body[Symbol.asyncIterator] === 'function') {
+        for await (const chunk of res.body) {
+          size += chunk.length
+          if (size > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
+          chunks.push(Buffer.from(chunk))
+          if (onProgress) onProgress(size, declared)
+        }
+      } else {
+        const one = Buffer.from(await res.arrayBuffer())
+        size = one.byteLength
+        chunks.push(one)
+      }
+      const buf = Buffer.concat(chunks)
       if (buf.byteLength === 0 || buf.byteLength > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
       const actual = createHash('sha256').update(buf).digest('hex')
       if (expected && actual !== expected) throw new Error('ZIP SHA-256 校验失败,文件可能损坏或已被替换')
       return { buf, sha256: actual }
+    }
+
+    /** 下载完之后的校验+解包+安装(任务与旧同步路径共用)。 */
+    const installArchiveBuffer = (buf, sha256, opts) => {
+      const entries = unzipStore(buf)
+      let manifest = {}
+      try { manifest = JSON.parse(String(entries.get('manifest.json') || '{}')) } catch { throw new Error('manifest.json 不是合法 JSON') }
+      const requestedId = packSlug(opts.requestedId)
+      const manifestId = packSlug(manifest.id)
+      const id = requestedId || manifestId
+      if (!id) throw new Error('ZIP manifest.json 缺少有效 id')
+      if (requestedId && manifestId && requestedId !== manifestId) {
+        throw new Error('目录 id 与 ZIP manifest id 不一致,已拒绝安装')
+      }
+      const displayName = String(manifest.name || opts.name || id).trim().slice(0, 60) || id
+      const version = String(manifest.version || opts.version || '').trim().slice(0, 40)
+      const sidecar = {
+        sourceType: 'archive', archiveUrl: opts.archiveUrl, sha256,
+        id, name: displayName, version, lastSync: Date.now(),
+      }
+      installZipEntries(entries, id, sidecar)
+      const total = memes.list().memes.length
+      const subs = remoteSubs().filter((s) => s && s.id !== id)
+      subs.unshift({ id, archiveUrl: opts.archiveUrl, sha256, name: displayName, version, total, lastSync: Date.now() })
+      writeSettings({ remoteSubs: subs })
+      return { id, displayName, total, files: entries.size }
+    }
+
+    /** ZIP 安装走任务制:客户端轮询 remoteJobStatus 就能画下载进度条。 */
+    const startArchiveJob = ({ archiveUrl, sha256, requestedId, name, version }) => {
+      const jobId = 'ra-' + Date.now().toString(36) + '-' + (++remoteJobSeq)
+      const job = {
+        id: jobId, packId: packSlug(requestedId) || '', name: name || '', mode: 'archive',
+        total: 0, done: 0, failed: 0, added: 0, updated: 0, warnings: [], errors: [],
+        state: 'running', message: '开始下载…', startedAt: Date.now(),
+      }
+      remoteJobs.set(jobId, job)
+      while (remoteJobs.size > 10) remoteJobs.delete(remoteJobs.keys().next().value)
+      ;(async () => {
+        try {
+          const { buf, sha256: actual } = await fetchRemoteArchive(archiveUrl, sha256, (got, declared) => {
+            job.done = got
+            job.total = declared          // 0 = 上游没给 content-length,客户端画不确定进度条
+            job.message = '下载中 ' + fmtBytes(got) + (declared ? ' / ' + fmtBytes(declared) : '')
+          })
+          job.total = buf.byteLength
+          job.done = buf.byteLength
+          job.message = '校验通过,正在解包安装…'
+          const done = installArchiveBuffer(buf, actual, { archiveUrl, requestedId, name, version })
+          job.packId = done.id
+          job.name = done.displayName
+          job.added = done.total
+          job.state = 'done'
+          job.message = '安装完成,已切换到「' + done.displayName + '」'
+        } catch (error) {
+          job.state = 'error'
+          job.message = error instanceof Error ? error.message : String(error)
+          job.errors.push(String(job.message))
+        }
+      })()
+      return job
     }
     const packSlug = (s) => String(s || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '').replace(/^-+|-+$/g, '').slice(0, 40)
     const installZipEntries = (entries, packId, sidecar) => {
@@ -1094,32 +1175,20 @@ export function apply(ctx, config) {
             json(res, { ok: true, ...packPayload(), total: memes.list().memes.length, message: '导入成功,已切换到新图库' })
           } else if (op === 'installRemoteArchive') {
             const archiveUrl = String(body.archiveUrl || '').trim()
-            const requestedId = packSlug(body.packId)
-            const downloaded = await fetchRemoteArchive(archiveUrl, body.sha256)
-            const entries = unzipStore(downloaded.buf)
-            let manifest = {}
-            try { manifest = JSON.parse(String(entries.get('manifest.json') || '{}')) } catch { throw new Error('manifest.json 不是合法 JSON') }
-            const manifestId = packSlug(manifest.id)
-            const id = requestedId || manifestId
-            if (!id) throw new Error('ZIP manifest.json 缺少有效 id')
-            if (requestedId && manifestId && requestedId !== manifestId) {
-              throw new Error('目录 id 与 ZIP manifest id 不一致,已拒绝安装')
+            const wanted = packSlug(body.packId)
+            for (const j of remoteJobs.values()) {
+              if (j.mode === 'archive' && j.state === 'running' && wanted && j.packId === wanted) {
+                json(res, { ok: true, ...jobSnapshot(j), running: true, message: '该图库已在下载中' })
+                return
+              }
             }
-            const displayName = String(manifest.name || body.name || id).trim().slice(0, 60) || id
-            const version = String(manifest.version || body.version || '').trim().slice(0, 40)
-            const sidecar = {
-              sourceType: 'archive', archiveUrl, sha256: downloaded.sha256,
-              id, name: displayName, version, lastSync: Date.now(),
-            }
-            installZipEntries(entries, id, sidecar)
-            const total = memes.list().memes.length
-            const subs = remoteSubs().filter((s) => s && s.id !== id)
-            subs.unshift({
-              id, archiveUrl, sha256: downloaded.sha256,
-              name: displayName, version, total, lastSync: Date.now(),
+            json(res, {
+              ok: true,
+              ...jobSnapshot(startArchiveJob({
+                archiveUrl, sha256: body.sha256,
+                requestedId: body.packId, name: body.name, version: body.version,
+              })),
             })
-            writeSettings({ remoteSubs: subs })
-            json(res, { ok: true, ...packPayload(), total, message: '安装成功,已切换到「' + displayName + '」' })
           } else if (op === 'subscribeRemote') {
             const manifestUrl = String(body.manifestUrl || '').trim()
             const rawManifest = await fetchRemoteJson(manifestUrl)

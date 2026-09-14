@@ -80,6 +80,8 @@ window.__ModuleLoader__.load({
       '.mk-progress{height:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
       '.mk-progress-bar{height:100%;background:var(--dsw-alias-brand-primary);border-radius:999px;transition:width .3s ease}',
       '.mk-progress-text{font-size:10px;color:var(--dsw-alias-label-secondary)}',
+      '.mk-progress-unknown{width:35%;animation:mk-slide 1.2s ease-in-out infinite}',
+      '@keyframes mk-slide{0%{margin-left:0}50%{margin-left:65%}100%{margin-left:0}}',
       '.mk-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}',
       '.mk-acts button{padding:3px 12px;font-size:12px;border-radius:6px}',
       '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
@@ -282,9 +284,9 @@ window.__ModuleLoader__.load({
             name: entry.name || '', version: entry.version || '',
           })
           if (res && res.ok) {
-            applyRoot(res)
-            setRootNotice(res.message || '安装成功')
-            await load('', '')
+            // 走任务制:注册后由轮询更新进度条,装完 pollRemoteJob 会刷新列表
+            setRemoteJobs((cur) => ({ ...cur, [res.id]: res }))
+            setRootNotice('「' + (entry.name || entry.id || '图库') + '」开始下载安装…')
           } else {
             setRootNotice('安装失败: ' + ((res && res.error) || '未知错误'))
           }
@@ -824,8 +826,12 @@ window.__ModuleLoader__.load({
               ? h('div', { className: 'mk-chips' }, row.tags.slice(0, 4).map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
               : null,
             job ? h('div', { className: 'mk-progress-wrap' },
-              h('div', { className: 'mk-progress' }, h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })),
-              h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + ' ' + pct + '%'),
+              h('div', { className: 'mk-progress' },
+                // total 为 0 = 上游没给 content-length:画不确定进度条,别假装 100%
+                job.total
+                  ? h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })
+                  : h('div', { className: 'mk-progress-bar mk-progress-unknown' })),
+              h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + (job.total ? ' ' + pct + '%' : '')),
             ) : null,
             h('div', { className: 'mk-acts', onClick: (e) => e.stopPropagation() }, acts),
           ),

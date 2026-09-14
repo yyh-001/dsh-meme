@@ -309,23 +309,29 @@ test('deleteMemePack:市场下载的包也能删,删完连订阅记录一起清�
   assert.ok(!del.packs.some((p) => p.id === 'remote-test'))
 })
 
-test('installRemoteArchive:下载、校验并安装市场 ZIP', async () => {
+test('installRemoteArchive:下载、校验并安装市场 ZIP(任务制,可看进度)', async () => {
   const res = await post({
     op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
     sha256: archiveSha256, packId: 'market-test',
   })
   assert.equal(res.statusCode, 200, res.body)
-  const out = JSON.parse(res.body)
-  assert.equal(out.ok, true)
-  assert.equal(out.packId, 'market-test')
-  assert.equal(out.total, 1)
+  const started = JSON.parse(res.body)
+  assert.equal(started.ok, true)
+  assert.equal(started.mode, 'archive')
+  assert.equal(started.state, 'running')
+  assert.equal(started.packId, 'market-test')
+  const snap = await waitJob(started.id)
+  assert.equal(snap.state, 'done', JSON.stringify(snap))
+  assert.equal(snap.message.includes('安装完成'), true)
+  assert.equal(snap.done, snap.total, '进度条要走到头(字节数)')
   const dir = join(home, '.dsh', 'meme-packs', 'market-test')
   assert.ok(existsSync(join(dir, 'index.db')))
   assert.ok(existsSync(join(dir, 'memes', 'happy', 'test.jpg')))
   const sidecar = JSON.parse(readFileSync(join(dir, '.dsh-remote.json'), 'utf8'))
   assert.equal(sidecar.sourceType, 'archive')
   assert.equal(sidecar.sha256, archiveSha256)
-  assert.ok(out.remoteSubs.some((s) => s.id === 'market-test' && s.archiveUrl === base + '/pack.zip'))
+  const payload = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  assert.ok(payload.remoteSubs.some((s) => s.id === 'market-test' && s.archiveUrl === base + '/pack.zip'))
 })
 
 test('installRemoteArchive:SHA-256 不一致时拒绝且不覆盖', async () => {
@@ -334,8 +340,10 @@ test('installRemoteArchive:SHA-256 不一致时拒绝且不覆盖', async () => 
     op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
     sha256: '0'.repeat(64), packId: 'market-test',
   })
-  assert.equal(res.statusCode, 400)
-  assert.match(res.body, /SHA-256 校验失败/)
+  assert.equal(res.statusCode, 200, res.body)   // 改成任务制后,错误在任务里报
+  const snap = await waitJob(JSON.parse(res.body).id)
+  assert.equal(snap.state, 'error')
+  assert.match(String(snap.message), /SHA-256 校验失败/)
   const afterBytes = readFileSync(join(home, '.dsh', 'meme-packs', 'market-test', 'index.db'))
   assert.deepEqual(afterBytes, before)
 })
@@ -499,6 +507,7 @@ test('deleteMemePack:能删自建图库,当前/订阅的拒绝', async () => {
     sha256: archiveSha256, packId: 'market-test',
   })
   assert.equal(installed.statusCode, 200, installed.body)
+  assert.equal((await waitJob(JSON.parse(installed.body).id)).state, 'done')
   await post({ op: 'setPack', packId: 'switch-a' })
   const delRemote = JSON.parse((await post({ op: 'deleteMemePack', packId: 'market-test' })).body)
   assert.equal(delRemote.ok, true)
@@ -577,7 +586,9 @@ test('安装完的图库默认打开开关(模型直接可用)', async () => {
     sha256: archiveSha256, packId: 'market-test',
   })
   assert.equal(res.statusCode, 200, res.body)
-  const out = JSON.parse(res.body)
+  const snap = await waitJob(JSON.parse(res.body).id)
+  assert.equal(snap.state, 'done', JSON.stringify(snap))
+  const out = JSON.parse((await post({ op: 'getMemeRoot' })).body)
   assert.equal(out.packId, 'market-test', '装完应切到新图库')
   assert.ok(out.enabledPacks.includes('market-test'), '装完应把开关打开: ' + JSON.stringify(out.enabledPacks))
 })
