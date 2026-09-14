@@ -817,8 +817,8 @@ window.__ModuleLoader__.load({
                   ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿')
                   : null,
                 (row.sub || row.entry) ? updateBtn(row) : null,
-                row.downloaded && !row.builtin && !row.sub
-                  ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => { setPackTarget({ id: row.packId, name: row.name }); setRootNotice(''); setPackDialog('delete') } }, '删除')
+                row.downloaded && !row.sub
+                  ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => { setPackTarget({ id: row.packId, name: row.name, builtin: !!row.builtin }); setRootNotice(''); setPackDialog('delete') } }, '删除')
                   : null,
                 row.sub && row.downloaded ? h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载') : null,
               ].filter(Boolean)))),
@@ -994,6 +994,9 @@ window.__ModuleLoader__.load({
             ) : packDialog === 'delete' ? h(React.Fragment, null,
               h('p', null, '确认删除图库「' + ((packTarget && packTarget.name) || '') + '」？'),
               h('p', null, '该图库的目录和里面的图片都会被删掉，不可恢复。'),
+              packTarget && packTarget.builtin
+                ? h('p', null, '这是插件自带的内置图库，升级或重装插件后它会重新出现。')
+                : null,
             ) : h(React.Fragment, null,
               h('p', null, '自动导出当前图库 ZIP，并打开预填好的 GitHub 投稿页。'),
               h('p', null, '登录 GitHub 后，将下载的 ZIP 拖入“图库 ZIP”一栏，补充图片来源和许可，再提交。审核通过后收录到市场。'),

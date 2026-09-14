@@ -74,6 +74,7 @@ const ctx = {
   agentDefaultModel: null,
 }
 const mod = await import('../index.js')
+const memesMod = await import('../memes.js')
 const archiveWork = mkdtempSync(join(tmpdir(), 'dsh-meme-archive-fixture-'))
 const archiveDbPath = join(archiveWork, 'index.db')
 const archiveDb = new DatabaseSync(archiveDbPath)
@@ -467,7 +468,25 @@ test('图库开关:可同时打开多个,关掉的图库不进候选', async () 
 })
 
 
-test('deleteMemePack:能删自建图库,内置/当前/订阅的拒绝', async () => {
+test('packDeleteDir 只放行扫描目录/插件内置目录下的图库', () => {
+  const packsDir = join(home, '.dsh', 'meme-packs')
+  // 用户包:正好在扫描目录下
+  assert.equal(memesMod.packDeleteDir({ id: 'mine', path: join(packsDir, 'mine'), source: 'user' }, packsDir), join(packsDir, 'mine'))
+  // 用户包:指向别处 / 目录名与 id 不符 → 拒绝
+  assert.throws(() => memesMod.packDeleteDir({ id: 'mine', path: home, source: 'user' }, packsDir), /预期不符/)
+  assert.throws(() => memesMod.packDeleteDir({ id: 'mine', path: join(packsDir, 'other'), source: 'user' }, packsDir), /预期不符/)
+  // 内置包:只认插件包内 memes/<id>
+  const bundled = memesMod.bundledPacksDir()
+  assert.equal(memesMod.packDeleteDir({ id: 'official-001', path: join(bundled, 'official-001'), source: 'bundled' }, packsDir), join(bundled, 'official-001'))
+  assert.throws(() => memesMod.packDeleteDir({ id: 'official-001', path: packsDir, source: 'bundled' }, packsDir), /预期不符/)
+  // 缺信息 / 越界 id 一律拒绝
+  assert.throws(() => memesMod.packDeleteDir(null, packsDir), /不完整/)
+  assert.throws(() => memesMod.packDeleteDir({ id: '', path: packsDir }, packsDir), /不完整/)
+  assert.throws(() => memesMod.packDeleteDir({ id: '../escape', path: join(home, 'escape'), source: 'user' }, packsDir), /预期不符/)
+})
+
+
+test('deleteMemePack:能删自建图库,当前/订阅的拒绝', async () => {
   // 当前图库不能删
   const active = JSON.parse((await post({ op: 'setPack', packId: 'switch-b' })).body)
   assert.equal(active.ok, true)
@@ -475,10 +494,9 @@ test('deleteMemePack:能删自建图库,内置/当前/订阅的拒绝', async ()
   assert.equal(delActive.statusCode, 400)
   assert.match(delActive.body, /先切到别的图库/)
 
-  // 内置包不能删
-  const delBundled = await post({ op: 'deleteMemePack', packId: 'dafeiyu-001' })
-  assert.equal(delBundled.statusCode, 400)
-  assert.match(delBundled.body, /内置图库不能删除/)
+  // 内置包也能删(这里只验守卫放行,不真删仓库里的 memes/*;真删会毁掉工作区)
+  const bundledPath = join(memesMod.bundledPacksDir(), 'dafeiyu-001')
+  assert.equal(memesMod.packDeleteDir({ id: 'dafeiyu-001', path: bundledPath, source: 'bundled' }, join(home, '.dsh', 'meme-packs')), bundledPath)
 
   // 市场订阅的包走「卸载」(前面的用例已把订阅卸掉,这里重新装一个)
   const installed = await post({

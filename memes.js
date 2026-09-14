@@ -37,6 +37,24 @@ export function defaultPacksDir() {
 }
 
 /**
+ * 删除图库时该删哪个目录。只认两种路径,别的一律拒绝(防越界/防误删):
+ * - 内置包:插件包内 `memes/<id>`(删掉后升级或重装会回来)
+ * - 用户包:扫描目录 `<packsDir>/<id>`
+ * @param {{id?: string, path?: string, source?: string}} pack listAllPacks() 的一项
+ * @param {string} packsDir 当前扫描目录
+ */
+export function packDeleteDir(pack, packsDir) {
+  const id = String((pack && pack.id) || '').trim()
+  if (!pack || !pack.path || !id) throw new Error('图库信息不完整')
+  const dir = resolve(pack.path)
+  const expected = pack.source === 'bundled'
+    ? resolve(join(bundledPacksDir(), id))
+    : resolve(join(String(packsDir || ''), id))
+  if (dir !== expected) throw new Error('图库目录与预期不符,已拒绝删除')
+  return dir
+}
+
+/**
  * 模型可以用的图库 id 列表(设置页每张卡片上的开关)。
  * 没设置过 `enabledPacks` 时只算当前图库——保持「装完即用」的旧行为,
  * 用户一旦拨过开关就以显式列表为准(可以同时开多个)。

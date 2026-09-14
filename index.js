@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta,
-  resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds,
+  resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -1191,22 +1191,19 @@ export function apply(ctx, config) {
             writeSettings({ enabledPacks: next })
             json(res, { ok: true, ...packPayload(), message: next.includes(target) ? '已打开「' + target + '」,模型可以用它发图' : '已关闭「' + target + '」' })
           } else if (op === 'deleteMemePack') {
-            // 删除图库目录:内置包不能删,市场订阅的走「卸载」,当前图库要先切走
+            // 删除图库目录:内置包也能删(升级/重装会回来),订阅的走「卸载」,当前图库要先切走
             const target = String(body.packId || '').trim()
             const hit = listAllPacks().find((p) => p.id === target)
             if (!hit) throw new Error('图库不存在: ' + target)
-            if (hit.source === 'bundled') throw new Error('内置图库不能删除')
             if (remoteSubs().some((s) => s.id === target)) throw new Error('市场下载的图库请用「卸载」')
             if (resolve(hit.path) === resolve(memes.root)) throw new Error('请先切到别的图库再删除')
-            const root = resolve(packsDirNow())
-            const dir = resolve(hit.path)
-            if (dir !== resolve(join(root, target)) && !dir.startsWith(root + sep)) throw new Error('图库目录越界,已拒绝删除')
-            if (hit.source === 'user' && !dir.startsWith(root + sep)) throw new Error('图库不在扫描目录内,已拒绝删除')
+            // 只允许删「扫描目录/<id>」或「插件包内 memes/<id>」,其余路径一律拒绝
+            const dir = packDeleteDir(hit, packsDirNow())
             // 删除的图库从开关列表里摘掉,别留脏 id
             const saved = readSettings().enabledPacks
             if (Array.isArray(saved)) writeSettings({ enabledPacks: saved.filter((id) => id !== target) })
             rmSync(dir, { recursive: true, force: true })
-            json(res, { ok: true, ...packPayload(), message: '已删除图库「' + (hit.name || target) + '」' })
+            json(res, { ok: true, ...packPayload(), message: '已删除图库「' + (hit.name || target) + '」' + (hit.source === 'bundled' ? '(内置包,升级或重装后会回来)' : '') })
           } else if (op === 'browse') {
             // 服务端列目录:宿主 0.1.5 的客户端没有 workspaces 服务,「选择目录」只能走自己的 API
             let dir = resolve(String(body.path || '').trim() || packsDirNow())
