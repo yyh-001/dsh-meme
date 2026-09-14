@@ -87,12 +87,17 @@ export function readPackMeta(dir, id = basename(dir), source = 'custom') {
     if (m && m.version) version = String(m.version)
   } catch { /* 无 manifest 也能当包用 */ }
   let count = 0
+  let cover = ''
   try {
     const db = new DatabaseSync(join(dir, 'index.db'), { readOnly: true })
     count = Number(db.prepare('SELECT COUNT(*) AS n FROM memes').get().n) || 0
+    // 封面用图库自己的一张图(相对路径),装完的那份就在本地,不必再拉远程预览图。
+    // 取法固定:优先 happy 桶里字典序第一张,保证同一图库每次算出来同一张。
+    const row = db.prepare("SELECT path FROM memes ORDER BY (tag = 'happy') DESC, path ASC LIMIT 1").get()
+    if (row && row.path) cover = String(row.path)
     db.close()
   } catch { /* 空库或坏库 */ }
-  return { id, name, description, version, count, path: resolve(dir), source }
+  return { id, name, description, version, count, cover, path: resolve(dir), source }
 }
 
 /**

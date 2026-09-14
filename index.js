@@ -378,7 +378,12 @@ export function apply(ctx, config) {
       return {
         memeRoot: memes.root,
         packId,
-        packs: packs.map((p) => ({ ...p, enabled: enabled.includes(p.id) })),
+        packs: packs.map((p) => ({
+          ...p,
+          // 本地图库的封面走插件自己的图片路由:图已经装到本地了,不该再去拉远程预览图
+          cover: p.cover ? ROUTE + '/' + p.id + '/' + p.cover : '',
+          enabled: enabled.includes(p.id),
+        })),
         enabledPacks: enabled,
         packsDir: packsDirNow(),
         companionPrompt: readSettings().companionPrompt || '',
@@ -659,6 +664,9 @@ export function apply(ctx, config) {
       const id = packSlug(packId)
       if (!id) throw new Error('图库 id 无效')
       if (!entries.get('index.db')) throw new Error('ZIP 里没有 index.db,不是有效的表情包包')
+      // 装/导入完默认就能用:切换过去 + 打开开关(其它图库的开关保持不动)。
+      // 开关状态要在切包之前取,否则「没设置过」的隐含默认会跟着变成新图库。
+      const enabledBefore = enabledPackIds(readSettings(), listAllPacks(), activePackId())
       const root = resolve(packsDirNow())
       const targetAbs = resolve(join(root, id))
       if (!targetAbs.startsWith(root + sep)) throw new Error('图库目录越界')
@@ -709,6 +717,7 @@ export function apply(ctx, config) {
         }
         rmSync(backupAbs, { recursive: true, force: true })
         reloadMemeStore(targetAbs, id)
+        writeSettings({ enabledPacks: [...new Set([...enabledBefore, id])] })
         return targetAbs
       } finally {
         rmSync(stageAbs, { recursive: true, force: true })
@@ -864,7 +873,10 @@ export function apply(ctx, config) {
         subs.unshift({ id: manifest.id, url: sourceUrl, name: manifest.name, version: manifest.version, total: job.total, lastSync: Date.now() })
         writeSettings({ remoteSubs: subs })
         if (effectiveMode === 'fresh') {
+          // 初次订阅下载完也默认直接可用:切过去 + 打开开关
+          const enabledBefore = enabledPackIds(readSettings(), listAllPacks(), activePackId())
           reloadMemeStore(finalDir, manifest.id)
+          writeSettings({ enabledPacks: [...new Set([...enabledBefore, manifest.id])] })
           job.message = '完成:下载 ' + job.added + '/' + job.total + ' 张并已切换到「' + manifest.name + '」'
             + (job.failed ? '(失败 ' + job.failed + ' 张,可稍后再点一次更新补齐)' : '')
         } else {

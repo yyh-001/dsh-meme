@@ -548,3 +548,36 @@ test('目录源顺序:raw 在前(jsDelivr 的 @main 缓存会滞留旧内容)', 
   assert.ok(rawIdx >= 0 && jsdIdx >= 0, '两个源都要在: ' + JSON.stringify(urls))
   assert.ok(rawIdx < jsdIdx, 'raw 必须排在 jsDelivr 前面,否则会一直拿到缓存里的旧 catalog')
 })
+
+
+test('已安装图库带本地封面路径(不再依赖远程预览图)', async () => {
+  // 新建的空图库没有图 → 没有封面
+  const empty = JSON.parse((await post({ op: 'createMemePack', id: 'cover-empty', name: '空封面' })).body)
+  assert.equal(empty.packs.find((p) => p.id === 'cover-empty').cover, '')
+  // 传一张图后应给出插件自己路由的封面地址,且指向图库内真实存在的图
+  await post({ op: 'upload', tag: 'happy', fileName: 'c.jpg', dataBase64: imgBytes.toString('base64'), caption: '封面测试' })
+  const filled = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  const pack = filled.packs.find((p) => p.id === 'cover-empty')
+  assert.match(pack.cover, /^\/dsh-memes\/cover-empty\/memes\/happy\//, '封面应走插件自己的图片路由: ' + pack.cover)
+  assert.ok(existsSync(join(home, '.dsh', 'meme-packs', 'cover-empty', pack.cover.replace('/dsh-memes/cover-empty/', ''))))
+  // 同一图库每次算出的封面要一致
+  const again = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  assert.equal(again.packs.find((p) => p.id === 'cover-empty').cover, pack.cover)
+})
+
+
+test('安装完的图库默认打开开关(模型直接可用)', async () => {
+  // 先把所有开关关掉
+  for (const p of JSON.parse((await post({ op: 'getMemeRoot' })).body).packs) {
+    await post({ op: 'setPackEnabled', packId: p.id, enabled: false })
+  }
+  // ZIP 里的 manifest id 是 market-test,requestedId 必须一致
+  const res = await post({
+    op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
+    sha256: archiveSha256, packId: 'market-test',
+  })
+  assert.equal(res.statusCode, 200, res.body)
+  const out = JSON.parse(res.body)
+  assert.equal(out.packId, 'market-test', '装完应切到新图库')
+  assert.ok(out.enabledPacks.includes('market-test'), '装完应把开关打开: ' + JSON.stringify(out.enabledPacks))
+})

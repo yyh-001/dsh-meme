@@ -194,7 +194,8 @@ window.__ModuleLoader__.load({
         return {
           key: 'pack-' + p.id, packId: p.id,
           name: p.name || p.id, desc: '',
-          cover: entry ? (entry.preview || (entry.previews || [])[0] || null) : null,
+          // 已安装的图库用本地那张图当封面(插件自己的路由),不再依赖远程预览图
+          cover: p.cover || null,
           meta: [
             isBundled ? '内置' : (isUserPack ? '导入' : '自定义'),
             installed ? 'v' + installed.replace(/^v/i, '') : '',
@@ -727,15 +728,18 @@ window.__ModuleLoader__.load({
           const author = entry.author || entry.maintainer || ''
           const hay = ((entry.name || '') + ' ' + author + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
           if (!mkMatch(hay)) continue
+          const local = pid ? packs.find((p) => p.id === pid) : null
+          const downloaded = !!(pid && local)
           cards.push({
             key: 'dir-' + (pid || entry.manifestUrl || entry.archiveUrl), packId: pid,
             name: entry.name || pid, desc: entry.description || '',
-            cover: entry.preview || (entry.previews || [])[0] || null,
+            // 装过的用本地封面,没装的才用目录里的远程预览图
+            cover: (downloaded && local.cover) ? local.cover : (entry.preview || (entry.previews || [])[0] || null),
             meta: [author, entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '', entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
             tags: keywords, entry, sub,
-            installed: !!sub || (pid && packs.some((p) => p.id === pid)),
+            installed: !!sub || downloaded,
             job: jobFor(pid), activePack: pid && packId === pid,
-            downloaded: !!(pid && packs.some((p) => p.id === pid)),
+            downloaded,
           })
         }
         return cards
