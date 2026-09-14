@@ -1,7 +1,7 @@
 {
   "name": "dsh-meme",
-  "version": "0.1.42",
-  "description": "DeepSeek Harness 表情包插件:内置官方-001 与大肥鱼两套图库,设置页扫描切换,send_meme 发图(Web/QQ)。",
+  "version": "0.1.43",
+  "description": "DeepSeek Harness 表情包插件:图库市场一键安装、多图库开关、情绪与关键词搜图、AI 学图,Web 与 QQ 双通道发图。",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/yyh-001/dsh-meme.git"
