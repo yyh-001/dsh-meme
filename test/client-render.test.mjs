@@ -159,7 +159,7 @@ const findClickable = (tree, label) => {
 }
 const findCover = (tree) => {
   let hit = null
-  walk(tree, (n) => { if (!hit && n.props && n.props.className === 'mk-cover' && n.props.style) hit = n.props.style.backgroundImage })
+  walk(tree, (n) => { if (!hit && n.props && n.props.className === 'mk-cover-img' && n.props.style) hit = n.props.style.backgroundImage })
   return hit
 }
 

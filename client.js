@@ -67,8 +67,9 @@ window.__ModuleLoader__.load({
       '.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;width:100%}',
       '.mk-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;transition:transform .12s ease,box-shadow .12s ease}',
       '.mk-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
-      '.mk-cover{width:100%!important;height:136px!important;background-size:cover!important;background-position:center 28%!important;background-repeat:no-repeat!important;background-color:var(--dsw-alias-bg-base);display:block}',
-      '.mk-cover-fallback{display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-2))}',
+      '.mk-cover{position:relative;width:100%!important;height:136px!important;background-color:var(--dsw-alias-bg-base);display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--dsw-alias-label-secondary)}',
+      '.mk-cover-img{position:absolute;inset:0;background-size:cover;background-position:center 28%;background-repeat:no-repeat}',
+      '.mk-cover-fallback{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-2))}',
       '.mk-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}',
       '.mk-title{display:flex;align-items:center;justify-content:space-between;gap:8px}',
       '.mk-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
@@ -809,14 +810,20 @@ window.__ModuleLoader__.load({
         },
           // 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
           // 全局样式影响(之前实测在宿主里图片没铺满,露出一块空底色很难看)
+          // 首字母始终是子节点:背景图正常时不透明看不见,加载失败(远程 404/断网)时就露出来,
+          // 不会只留一块空白让人以为坏了 —— 之前 catalog 里漏了扩展名就是这个症状
           row.cover
-            ? h('div', {
-              className: 'mk-cover',
-              style: {
-                backgroundImage: 'url("' + coverUrl(row.cover) + '")',
-                backgroundSize: 'cover', backgroundPosition: 'center 28%', backgroundRepeat: 'no-repeat',
-              },
-            })
+            ? h('div', { className: 'mk-cover' },
+              (row.name || '?').slice(0, 1),
+              // 图片单独一层盖在首字母上面:加载成功(不透明)就看不见字,404/断网时露出来,
+              // 不会只留一块空白让人以为坏了 —— catalog 里漏扩展名那次就是这个症状
+              h('div', {
+                className: 'mk-cover-img',
+                style: {
+                  backgroundImage: 'url("' + coverUrl(row.cover) + '")',
+                  backgroundSize: 'cover', backgroundPosition: 'center 28%', backgroundRepeat: 'no-repeat',
+                },
+              }))
             : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
           h('div', { className: 'mk-body' },
             h('div', { className: 'mk-title' },
