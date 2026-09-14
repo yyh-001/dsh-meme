@@ -22,6 +22,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
+  searchRows,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -327,6 +328,36 @@ export function apply(ctx, config) {
       }
       if (!mood) return { mood: null, memes: [], tags }
       return { mood, memes: pickShuffled(merged, n), tags }
+    },
+    // 关键词搜图:和 sampleMood 一样跨所有打开的图库。先把各包的行合并(路径带包前缀),
+    // 再统一排序——「所有关键词都命中」只有在合并后比才准,否则每包各自取最优,
+    // 只命中一个词的弱结果会和全中的强结果混在一起。
+    search(query, n, tag) {
+      const ids = enabledIds()
+      if (ids.length === 0) {
+        const { tags } = memes.list()
+        return { query: String(query || '').trim().toLowerCase(), memes: [], tags, reason: '当前没有打开任何图库，去设置页把要用的图库开关打开' }
+      }
+      if (ids.length === 1 && ids[0] === activePackId()) return memes.search(query, n, tag)
+      const packs = packRows()
+      const active = activePackId()
+      const merged = []
+      let tags = []
+      for (const id of ids) {
+        const hit = packs.find((p) => p.id === id)
+        if (!hit) continue
+        let store = null
+        try {
+          store = new MemesStore(hit.path)
+          const one = store.list(tag)
+          tags = one.tags.length ? one.tags : tags
+          for (const row of one.memes) {
+            // 非当前图库的路径带上包前缀,QQ 通道发图时按前缀找对图库
+            merged.push(id === active ? row : { ...row, path: id + '/' + row.path })
+          }
+        } catch { /* 坏包跳过,不影响其他图库 */ } finally { if (store) store.close() }
+      }
+      return { ...searchRows(merged, query, n), tags }
     },
     resolveStored(stored) {
       const raw = String(stored || '')

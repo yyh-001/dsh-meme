@@ -1,8 +1,9 @@
 /**
  * 表情包存储与搜索(dsh-expression 插件)。
  *
- * 模型侧:先按 6 个情绪桶选 tag,系统从该桶随机抽 5 张(带 caption),
- * 模型看描述觉得贴再发。管理面板仍可按 caption 子串筛选。
+ * 模型侧两种搜法:①按 6 个情绪桶选 tag,从桶里随机抽若干张;②按关键词
+ * 在 caption/关键词/图名里子串搜(全部关键词命中优先)。两个都给 = 在该
+ * 情绪里筛关键词。候选都带 caption,模型看描述觉得贴再发。
  */
 import { DatabaseSync } from 'node:sqlite'
 import { basename, join, resolve, sep } from 'node:path'
@@ -142,6 +143,7 @@ export function liveStore(store) {
   const box = {
     get root() { return box._s.root },
     list(...a) { return box._s.list(...a) },
+    search(...a) { return box._s.search(...a) },
     sampleMood(...a) { return box._s.sampleMood(...a) },
     resolveStored(...a) { return box._s.resolveStored(...a) },
     replace(next) {
@@ -224,6 +226,60 @@ function pickRandom(rows, n) {
   return copy.slice(0, n)
 }
 
+/** 关键词分词:空格/逗号/顿号/斜杠分隔,小写去重。中文词整词先搜,不预先切。 */
+export function keywordTokens(query) {
+  const raw = String(query || '').trim().toLowerCase()
+  if (!raw) return []
+  return [...new Set(raw.split(/[\s,，、;；/|]+/).filter(Boolean))]
+}
+
+/** 整词全都没命中时的兜底拆词:「生气猫」→ 生气 / 气猫。 */
+function biGrams(tokens) {
+  const out = []
+  for (const t of tokens) {
+    if (t.length < 3 || !/[\u4e00-\u9fff]/.test(t)) continue
+    for (let i = 0; i + 2 <= t.length; i++) out.push(t.slice(i, i + 2))
+  }
+  return [...new Set(out)]
+}
+
+const rowHay = (row) => (
+  (row.tag || '') + ' ' + (row.caption || '') + ' ' + (row.keywords || '') + ' ' + (row.file_name || '')
+).toLowerCase()
+
+/**
+ * 关键词搜图(纯函数:面板/工具/跨图库合并共用)。
+ * 排序:全部关键词都命中的优先;没有全命中就取命中词数最多的那一档;
+ * 同一档内随机——同一个词反复 search 能换一批,不会每次都撞同一张。
+ * @returns {{query: string, tokens: string[], memes: object[]}}
+ */
+export function searchRows(rows, query, limit = 8) {
+  const tokens = keywordTokens(query)
+  if (tokens.length === 0) return { query: '', tokens: [], memes: [] }
+  const scan = (words) => {
+    const hits = []
+    for (const row of rows) {
+      const hay = rowHay(row)
+      let score = 0
+      for (const w of words) if (hay.includes(w)) score++
+      if (score > 0) hits.push({ row, score })
+    }
+    return hits
+  }
+  let hits = scan(tokens)
+  if (hits.length === 0) {
+    const grams = biGrams(tokens)
+    if (grams.length) hits = scan(grams)
+  }
+  if (hits.length === 0) return { query: tokens.join(' '), tokens, memes: [] }
+  const best = Math.max(...hits.map((h) => h.score))
+  return {
+    query: tokens.join(' '),
+    tokens,
+    memes: pickRandom(hits.filter((h) => h.score === best).map((h) => h.row), limit),
+  }
+}
+
 export class MemesStore {
   constructor(root = defaultMemeRoot()) {
     this.root = resolve(root)
@@ -252,6 +308,20 @@ export class MemesStore {
       })
     }
     return { memes, tags }
+  }
+
+  /**
+   * 关键词搜图。给了 tag 就先把范围限在那个情绪桶里(细 tag 展开同 list),
+   * 于是「情绪 + 关键词」= 在桶里筛词。
+   * @returns {{query: string, tokens: string[], memes: object[], tags: string[]}}
+   */
+  search(query, n = 8, tag = null) {
+    const rows = this.db
+      .prepare('SELECT path, tag, file_name, caption, COALESCE(keywords, \'\') AS keywords FROM memes')
+      .all()
+    const fine = fineTagsFor(tag)
+    const scoped = fine ? rows.filter((m) => fine.includes(m.tag)) : rows
+    return { ...searchRows(scoped, query, n), tags: moodNames() }
   }
 
   /** 按情绪取池,随机抽 n 张给模型看 caption。 */
@@ -306,29 +376,30 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
   const parameters = {
     tag: {
       type: 'string',
-      description: '先选情绪(必填优先): ' + MOOD_DICT + '。没特定情绪用 happy。',
+      description: '情绪范围(可选): ' + MOOD_DICT + '。只给 tag = 在该情绪里随机抽;tag + query = 在该情绪里按关键词筛。',
     },
     query: {
       type: 'string',
-      description: '可选。没传 tag 时用来推断情绪(如「害羞」「生气」),不要一长串。',
+      description: '关键词(可选,想找特定的图就用它): 按 caption/关键词/图名子串搜,比只抽情绪准。中文词,空格分隔多个(如「猫」「生气 猫」「无语」);整词没命中会自动拆词重试。没给 tag 时,搜不到也会拿它推断情绪。',
     },
     limit: {
       type: 'number',
-      description: '本次随机抽几张候选(1-20,默认 8)。拿不准就多抽点;不满意再 search 换一批。',
+      description: '本次返回几张候选(1-20,默认 8)。拿不准就多抽点;不满意再 search 换一批。',
     },
   }
   if (!webMode) {
     parameters.action = {
       type: 'string',
       enum: ['search', 'send'],
-      description: 'search: 按情绪随机抽候选; send: 发送挑中的 path',
+      description: 'search: 按情绪或关键词取候选; send: 发送挑中的 path',
     }
     parameters.path = { type: 'string', description: 'send 时要发的图路径(来自 search 候选列表)' }
   }
 
   ctx.tools.register(defineTool({
     name: 'send_meme',
-    description: '发一张表情包。流程:根据对话选一个情绪 tag → 系统从该情绪随机抽若干张(带 caption,数量用 limit 自己定) → 看描述觉得贴就发;不满意就再 search 同一 tag(会换一批),还是不行再换情绪或回文字。' +
+    description: '发一张表情包。两种搜法:①只给 tag(情绪)→ 从该情绪里随机抽;②给 query(关键词)→ 在 caption/关键词/图名里搜,想找特定的图(「猫」「比心」「摸鱼」)就用这个;两个都给 = 在该情绪里按关键词筛,最准。' +
+      '流程:给 tag/query → 系统返回若干张候选(带 caption,数量用 limit 自己定) → 看描述觉得贴就发;不满意再 search 换一批,还不行就换词/换情绪或回文字。' +
       '情绪字典: ' + MOOD_DICT + '。' +
       (webMode
         ? '挑中后把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址)——自己编的描述前端配不上图。'
@@ -367,37 +438,64 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
         return { ok: false, message: '没有可用发送通道: ' + absolute }
       }
 
+      const lines = (rows) => rows.map((m, i) => {
+        const caption = (m.caption || m.file_name).slice(0, 80)
+        return webMode
+          ? (i + 1) + '. [表情: ' + caption + ']'
+          : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
+      })
+      const hits = (rows) => (webMode
+        ? rows.map((m) => ({ caption: (m.caption || m.file_name).slice(0, 80) }))
+        : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption })))
+      const howToSend = webMode
+        ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
+        : '用 send + path 发出。'
+
+      // 关键词优先:有关键词就先精确搜(caption/关键词/图名),命中了直接给候选。
+      // 全都没命中才退回老路——拿 query 推断情绪随机抽,并在消息里说清是退回来的。
+      let keywordMiss = ''
+      if (query) {
+        const found = memes.search(query, limit, tag)
+        if (found.memes.length > 0) {
+          return {
+            ok: true,
+            mode: 'keyword',
+            query: found.query,
+            hits: hits(found.memes),
+            tags: found.tags,
+            message: '关键词「' + found.query + '」命中 ' + found.memes.length + ' 张' +
+              (tag ? '(限在情绪 ' + tag + ' 里)' : '') +
+              '。看 caption 贴就发;不满意再 search(换词或加大 limit)。' +
+              howToSend + '\n' + lines(found.memes).join('\n'),
+          }
+        }
+        if (found.reason) return { ok: false, message: found.reason }
+        keywordMiss = '关键词「' + (found.query || query) + '」没找到图(caption/关键词里没有这几个词)。'
+      }
+
       const { mood, memes: candidates, tags, reason } = memes.sampleMood(tag, query, limit)
       if (!mood) {
         return {
           ok: false,
-          message: reason || ('先选一个情绪 tag 再搜。字典: ' + MOOD_DICT),
+          message: reason || (keywordMiss + ' 要么换个更常见的词,要么给个情绪 tag。字典: ' + MOOD_DICT),
         }
       }
       if (candidates.length === 0) {
         return {
           ok: false,
           // 没有可用图库时 sampler 会给 reason,直说比「情绪下没有图」清楚
-          message: reason || ('情绪「' + mood + '」下没有图。换一个: ' + MOOD_DICT),
+          message: reason || (keywordMiss + '情绪「' + mood + '」下也没有图。换一个: ' + MOOD_DICT),
         }
       }
-      const lines = candidates.map((m, i) => {
-        const caption = (m.caption || m.file_name).slice(0, 80)
-        return webMode
-          ? (i + 1) + '. [表情: ' + caption + ']'
-          : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
-      })
       return {
         ok: true,
+        mode: 'mood',
         mood,
-        hits: webMode
-          ? candidates.map((m) => ({ caption: (m.caption || m.file_name).slice(0, 80) }))
-          : candidates.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption })),
+        hits: hits(candidates),
         tags,
-        message: '情绪 ' + mood + ' 随机 ' + candidates.length + ' 张。看 caption 贴就发;不满意再 search 同一 tag 换一批(可加大 limit)。' +
-          (webMode
-            ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
-            : '用 send + path 发出。') + '\n' + lines.join('\n'),
+        message: (keywordMiss ? keywordMiss + '下面按情绪抽:' : '') +
+          '情绪 ' + mood + ' 随机 ' + candidates.length + ' 张。看 caption 贴就发;不满意再 search 同一 tag 换一批(可加大 limit)。' +
+          howToSend + '\n' + lines(candidates).join('\n'),
       }
     },
   }))

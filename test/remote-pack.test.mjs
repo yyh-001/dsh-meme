@@ -649,6 +649,69 @@ test('previewManifest:没装的清单包也能拿到全部图片地址(封顶 60
 })
 
 
+test('send_meme 关键词搜图:命中 caption/关键词,没命中退回情绪抽', async () => {
+  const tool = tools.find((t) => t.name === 'send_meme')
+  const a = JSON.parse((await post({ op: 'createMemePack', id: 'kw-a', name: '关键词A' })).body)
+  assert.equal(a.ok, true)
+  await post({ op: 'upload', tag: 'happy', fileName: 'cat-heart.jpg', dataBase64: imgBytes.toString('base64'), caption: '猫猫比心', keywords: '猫 可爱 比心' })
+  await post({ op: 'upload', tag: 'daily', fileName: 'fish.jpg', dataBase64: imgBytes.toString('base64'), caption: '摸鱼上班', keywords: '摸鱼 上班 划水' })
+  const b = JSON.parse((await post({ op: 'createMemePack', id: 'kw-b', name: '关键词B' })).body)
+  assert.equal(b.ok, true)
+  await post({ op: 'upload', tag: 'angry', fileName: 'angry-cat.jpg', dataBase64: imgBytes.toString('base64'), caption: '生气的猫', keywords: '生气 猫 暴躁' })
+
+  // 只开这两个包:别的测试留下的包会混进候选
+  for (const p of b.packs) {
+    await post({ op: 'setPackEnabled', packId: p.id, enabled: p.id === 'kw-a' || p.id === 'kw-b' })
+  }
+
+  // 「猫」在 caption 里也在关键词里,而且两个图库都能搜到(跨包合并)
+  const cat = await tool.execute({ query: '猫', limit: 20 })
+  assert.equal(cat.ok, true)
+  assert.equal(cat.mode, 'keyword')
+  assert.deepEqual(cat.hits.map((h) => h.caption).sort(), ['猫猫比心', '生气的猫'])
+  assert.match(cat.message, /命中 2 张/)
+  assert.doesNotMatch(cat.message, /摸鱼上班/)
+
+  // 搜的是关键词字段,不只是 caption
+  const fish = await tool.execute({ query: '划水', limit: 20 })
+  assert.equal(fish.mode, 'keyword')
+  assert.match(fish.message, /摸鱼上班/)
+
+  // tag + query:只在这个情绪桶里筛
+  const scoped = await tool.execute({ tag: 'angry', query: '猫', limit: 20 })
+  assert.equal(scoped.mode, 'keyword')
+  assert.deepEqual(scoped.hits.map((h) => h.caption), ['生气的猫'])
+
+  // 多个词:全部命中的优先,只命中一个的不出
+  const both = await tool.execute({ query: '猫 生气', limit: 20 })
+  assert.deepEqual(both.hits.map((h) => h.caption), ['生气的猫'])
+
+  // 整词没命中时拆词兜底(生气猫 → 生气)
+  const loose = await tool.execute({ query: '生气猫', limit: 20 })
+  assert.equal(loose.mode, 'keyword')
+  assert.match(loose.message, /生气的猫/)
+
+  // 关键词没命中,但词里能看出情绪(困 → daily)→ 退回该情绪随机抽,并说明原因
+  const fallback = await tool.execute({ query: '困了', limit: 5 })
+  assert.equal(fallback.ok, true)
+  assert.equal(fallback.mode, 'mood')
+  assert.match(fallback.message, /没找到图/)
+  assert.match(fallback.message, /摸鱼上班/)
+
+  // 关键词没命中又推不出情绪 → 让模型换个词或给情绪
+  const miss = await tool.execute({ query: '库里斯不存在的话术', limit: 5 })
+  assert.equal(miss.ok, false)
+  assert.match(miss.message, /没找到图/)
+  assert.match(miss.message, /情绪 tag/)
+
+  // 图库全关时关键词搜索也要回人话原因,而不是「没搜到」
+  for (const p of b.packs) await post({ op: 'setPackEnabled', packId: p.id, enabled: false })
+  const none = await tool.execute({ query: '猫', limit: 5 })
+  assert.equal(none.ok, false)
+  assert.match(none.message, /没有打开任何图库/)
+})
+
+
 test('payload 带插件版本(反馈表单预填用)', async () => {
   const out = JSON.parse((await post({ op: 'getMemeRoot' })).body)
   assert.match(String(out.pluginVersion || ''), /^\d+\.\d+\.\d+/, '版本应来自 package.json: ' + out.pluginVersion)
