@@ -188,19 +188,24 @@ window.__ModuleLoader__.load({
         const isBundled = p.source === 'bundled'
         const isUserPack = p.source === 'user'
         const count = p.count || 0
+        // 本地版本:市场装的看订阅记录,内置/导入/自建看自己的 manifest
+        const installed = String((sub && sub.version) || p.version || '').trim()
+        const hasUpdate = !!(entry && entry.version && installed && compareVersions(entry.version, installed) > 0)
         return {
           key: 'pack-' + p.id, packId: p.id,
           name: p.name || p.id, desc: '',
           cover: entry ? (entry.preview || (entry.previews || [])[0] || null) : null,
           meta: [
             isBundled ? '内置' : (isUserPack ? '导入' : '自定义'),
-            entry && entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '',
+            installed ? 'v' + installed.replace(/^v/i, '') : '',
             count ? count + ' 张' : '',
+            hasUpdate ? '可更新到 v' + String(entry.version).replace(/^v/i, '') : '',
           ].filter(Boolean).join(' · '),
           tags: (entry && (entry.keywords || entry.tags)) || [],
           entry, sub,
           installed: true, job: null, activePack: p.id === packId,
           downloaded: true,
+          hasUpdate,
           builtin: isBundled,
           enabled: p.enabled === true,
           onToggle: (next) => onTogglePack(p.id, next),
@@ -835,7 +840,8 @@ window.__ModuleLoader__.load({
                 row.packId === packId && curPack && curPack.count > 0
                   ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿')
                   : null,
-                (row.sub || row.entry) ? updateBtn(row) : null,
+                // 没下载的给「安装」,下载了且真有新版本才给「更新」
+                (!row.downloaded || row.hasUpdate) ? updateBtn(row) : null,
                 row.downloaded && !row.sub
                   ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => { setPackTarget({ id: row.packId, name: row.name, builtin: !!row.builtin }); setRootNotice(''); setPackDialog('delete') } }, '删除')
                   : null,
@@ -937,15 +943,16 @@ window.__ModuleLoader__.load({
                     ? '图库目录暂不可用,可在下方粘贴清单 JSON 地址订阅'
                     : '目录暂无内容,可在下方粘贴清单 JSON 地址订阅'))
           : h('div', { className: 'mk-grid' }, discoverCards.map((row) => packCard(row, [
-            h('button', {
+            // 发现页只负责装:装过的这里不给按钮,更新去图库页(有新版本才显示)
+            row.downloaded ? null : h('button', {
               key: 'install',
-              className: row.installed ? '' : 'btn-primary',
+              className: 'btn-primary',
               onClick: () => row.entry.archiveUrl
                 ? startArchive(row.entry)
                 : startRemote(row.entry.manifestUrl, row.entry.id || ''),
               disabled: remoteBusy || !!row.job,
-            }, row.job ? '下载中…' : (row.installed ? '更新' : '安装')),
-          ]))),
+            }, row.job ? '下载中…' : '安装'),
+          ].filter(Boolean)))),
         h('div', { className: 'row', style: { width: '100%' } },
           h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '高级:粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
           h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
@@ -1082,6 +1089,33 @@ window.__ModuleLoader__.load({
       '.meme-picker .mp-cell:hover{border-color:var(--dsw-alias-brand-primary);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}',
       '.meme-picker .mp-empty{color:var(--dsw-alias-label-secondary);text-align:center;padding:28px 0}',
     ].join('')
+
+    /**
+     * 比较版本号:按 `.` `-` `+` 切段,纯数字段按数值比,长度不足补 0。
+     * 非数字段退化成字符串比较;任一侧为空返回 0(无法判断 = 不算有更新)。
+     * @returns {number} 1 / 0 / -1
+     */
+    function compareVersions(a, b) {
+      const parts = (v) => String(v == null ? '' : v).trim().replace(/^v/i, '').split(/[.\-+]/).filter(Boolean)
+      const pa = parts(a)
+      const pb = parts(b)
+      if (pa.length === 0 || pb.length === 0) return 0
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const x = pa[i] || '0'
+        const y = pb[i] || '0'
+        const nx = /^\d+$/.test(x)
+        const ny = /^\d+$/.test(y)
+        if (nx && ny) {
+          const d = Number(x) - Number(y)
+          if (d !== 0) return d > 0 ? 1 : -1
+          continue
+        }
+        // 一边数字一边非数字:非数字那段是预发布后缀(1.2.0-beta),比不带后缀的旧
+        if (nx !== ny) return nx ? 1 : -1
+        if (x !== y) return x > y ? 1 : -1
+      }
+      return 0
+    }
 
     function makeMemeStore() {
       let open = false
@@ -1431,7 +1465,7 @@ window.__ModuleLoader__.load({
     exports.apply = apply
     exports.inject = inject
     // 纯函数导出仅用于回归测试(node --test),宿主/打包不消费
-    exports.__test = { foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc }
+    exports.__test = { foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc, compareVersions }
     return module.exports
   },
 })

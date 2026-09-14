@@ -57,7 +57,7 @@ pnpm add file:/path/to/dsh-meme
 
 ## 配置
 
-默认内置两套图库：`official-001`（官方表情包 1 号，92 张）和 `dafeiyu-001`（大肥鱼，49 张），开箱用官方包，**无需任何配置**。
+内置一套图库：`dafeiyu-001`（大肥鱼，49 张），开箱即用，**无需任何配置**。「官方表情包 1 号」（`official-001`）已不再随插件分发，需要的话到设置页「发现」里一键安装（市场里有带 SHA-256 校验的 Release ZIP）。
 
 设置页「图库」页：点卡片上的「编辑」切入该图库（管理图片用），点卡片右上角的开关决定**模型能不能用这个图库发图**（可以同时开多个）。插件会扫描内置 `memes/*` 以及「扫描目录」（默认 `~/.dsh/meme-packs`）下带 `index.db` 的子文件夹。导入 ZIP 也会放进扫描目录并立刻切过去。设置存在 `~/.dsh/dsh-expression.json`，升级插件不丢。
 
@@ -100,9 +100,10 @@ pnpm add file:/path/to/dsh-meme
 - **图库开关**：每张卡片右上角一个开关，**打开后模型才能用这个图库发图**，可以同时打开多个（`send_meme` 的候选从所有打开的图库里抽；一个都没开时模型会被告知去设置页打开）
 - **新建图包库 / 导入图库**：图库页顶部；导入是选一个插件导出的 ZIP，导入后自动切过去。新建的图库会自动打开开关
 - **导出**：每张图库卡片上都有，导出该图库的 ZIP（不必先切过去）
+- **更新**：只在市场里有更新版本时才显示（比对图库自己的版本与市场目录的版本）；发现页只负责安装，装过的条目不给按钮，要更新到图库页
 - **删除**：图库卡片上的「删除」（二次确认，目录和图片一起删）。内置的两套也能删，但插件升级或重装后它们会随包回来；市场下载的用「卸载」；当前图库要先切走
 - **投稿**：当前图库的卡片上，导出图库 ZIP 并打开预填好的 GitHub 投稿表单
-- **发现**：展示 GitHub 图库目录，点「安装/更新」下载 Release ZIP、校验 SHA-256 并自动切换；底部可粘贴清单 JSON 地址订阅
+- **发现**：展示 GitHub 图库目录，点「安装」下载 Release ZIP、校验 SHA-256 并自动切换；已安装的条目不显示按钮（更新在图库页）。底部可粘贴清单 JSON 地址订阅
 - **设置**：扫描目录（带「选择目录」应用内浏览器）、陪伴提示词开关（关掉后模型不再主动斗图）、编辑提示词
 - **上传弹窗**：选图预览 + 分类下拉（选择/新建/删除分类）+ 描述 + 关键词
 - **编辑弹窗**：同款分类下拉，改分类/描述/关键词
@@ -166,7 +167,7 @@ pnpm add file:/path/to/dsh-meme
 | **管理 API** | 上传 / 编辑 / 删除 / 删除分类，全部在设置页完成，数据持久 |
 | **图库切换** | 设置页「图库」页点卡片上的「编辑」切换并进入；扫描目录默认 `~/.dsh/meme-packs` |
 | **导出 / 导入** | 图库一键打包 ZIP 分享，导入别人的包自动切换（零依赖实现） |
-| **图库市场** | 发现页读取 GitHub 目录，一键安装带 SHA-256 校验的 Release ZIP；也兼容逐图清单增量更新 |
+| **图库市场** | 发现页读取 GitHub 目录，一键安装带 SHA-256 校验的 Release ZIP；图库页在有新版本时才显示「更新」 |
 
 ## 日常命令（模型视角）
 
@@ -193,7 +194,7 @@ learn_meme imageUrl="https://…"    # 收录任意图片 URL
 
 - **大肥鱼**（`id: dafeiyu-001`，49 张鲸鱼娘 chibi），设置页可切过来：包含 `angry` 3 张、`confused` 4 张、`daily` 7 张、`happy` 12 张、`sad` 6 张、`shy` 4 张，以及 `baka` / `color` / `cpu` / `fool` / `givemoney` / `like` / `meow` / `morning` / `see` / `sigh` / `sleep` / `surprised` / `work` 各 1 张。
   - 2026-08-20 新增 25 张自动学图表情，来自 [PR #3](https://github.com/yyh-001/dsh-meme/pull/3)，感谢 [hZsFN](https://github.com/hZsFN) 的补充。
-- **官方表情包1号**（`id: official-001`，默认）来自 **Astrbot mememanager 官方初始表情包**：
+- **官方表情包1号**（`id: official-001`，已改为市场安装、不再内置）来自 **Astrbot mememanager 官方初始表情包**：
 
 - 上游仓库：[anka-afk/astrbot-meme-pack-official-01](https://github.com/anka-afk/astrbot-meme-pack-official-01)（`main` 分支），维护者 **anka-afk**
 - 构成：`index.db`（SQLite 索引，含每张 caption/关键词）+ `manifest.json`（分类说明 + 来源标注）+ `memes/<tag>/` 图片 + `previews/`
@@ -205,7 +206,7 @@ learn_meme imageUrl="https://…"    # 收录任意图片 URL
 |------|------|
 | **dsh-meme** | 本插件：`MemesStore`（情绪抽图）+ `send_meme`（发送）+ `learn_meme`（学图）+ 管理 API |
 | **[dsh-companion](https://github.com/yyh-001/dsh-companion)** | 人设 + Hermes 记忆 + 消息通道；提供发图服务 |
-| **图库** | 内置 `official-001` + `dafeiyu-001`，设置页扫描切换 / 导入分享包 |
+| **图库** | 内置 `dafeiyu-001`；`official-001` 和其它图库在市场「发现」页安装，也可导入分享包 |
 
 ```text
 dsh-meme/
@@ -214,7 +215,6 @@ dsh-meme/
   client.js         前端：设置页面板(上传/编辑/删除) + 😊 悬浮窗 + [表情: 描述] 配图
   cordis.patch.yml  bundle patch(纯 insert,热挂载免重启)
   memes/
-    official-001/   内置默认图库（92 张）
     dafeiyu-001/    内置大肥鱼（49 张鲸鱼娘）
   package.json      name / inject / peer deps
   README.md

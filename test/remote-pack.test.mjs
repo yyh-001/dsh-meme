@@ -362,6 +362,7 @@ test('createMemePack creates an empty library and protects duplicate IDs and pat
   assert.equal(data.ok, true)
   assert.equal(data.packId, 'personal-test')
   assert.equal(data.packs.find(p => p.id === 'personal-test').count, 0)
+  assert.equal(data.packs.find(p => p.id === 'personal-test').version, '1.0.0', 'payload 要带上本地版本,面板靠它判断有没有更新')
   const duplicate = await post({ op: 'createMemePack', id: 'personal-test', name: '覆盖' })
   assert.equal(duplicate.statusCode, 400)
 

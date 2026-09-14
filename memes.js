@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
-/** 内置图库根目录：插件包内 memes/<id>/（含 official-001、dafeiyu-001）。 */
+/** 内置图库根目录：插件包内 memes/<id>/（随包分发的只有 dafeiyu-001）。 */
 export function bundledPacksDir() {
   return fileURLToPath(new URL('./memes', import.meta.url))
 }
@@ -79,10 +79,12 @@ export function isPackDir(dir) {
 export function readPackMeta(dir, id = basename(dir), source = 'custom') {
   let name = id
   let description = ''
+  let version = ''
   try {
     const m = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8'))
     if (m && m.name) name = String(m.name)
     if (m && m.description) description = String(m.description)
+    if (m && m.version) version = String(m.version)
   } catch { /* 无 manifest 也能当包用 */ }
   let count = 0
   try {
@@ -90,7 +92,7 @@ export function readPackMeta(dir, id = basename(dir), source = 'custom') {
     count = Number(db.prepare('SELECT COUNT(*) AS n FROM memes').get().n) || 0
     db.close()
   } catch { /* 空库或坏库 */ }
-  return { id, name, description, count, path: resolve(dir), source }
+  return { id, name, description, version, count, path: resolve(dir), source }
 }
 
 /**
@@ -122,8 +124,11 @@ export function resolveActiveRoot(settings = {}, configRoot) {
     const hit = packs.find((p) => p.id === packId)
     if (hit) return hit.path
   }
-  if (settings.memeRoot) return settings.memeRoot
-  if (configRoot) return configRoot
+  // 记住的 memeRoot 可能已经不存在了(比如内置包在升级后被移除/用户删掉了图库目录)。
+  // 这里只认真正有 index.db 的目录,否则一路回落到内置默认包——历史教训:把死路径
+  // 传给 MemesStore 会抛错,调用方 return,整个插件都装不起来。
+  if (settings.memeRoot && isPackDir(settings.memeRoot)) return settings.memeRoot
+  if (configRoot && isPackDir(configRoot)) return configRoot
   return defaultMemeRoot()
 }
 

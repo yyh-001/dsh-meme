@@ -75,3 +75,18 @@ test('matchDesc index 未加载时仍可走分词兜底', () => {
   assert.equal(T.matchDesc('无语', null, search), 'u-speechless')
   assert.equal(T.matchDesc('无语', null, null), null)
 })
+
+test('compareVersions:数值段比较、v 前缀、长度不足补 0', () => {
+  const C = T.compareVersions
+  assert.equal(C('1.2.0', '1.2.0'), 0)
+  assert.equal(C('v1.2.0', '1.2.0'), 0)
+  assert.equal(C('1.3.0', '1.2.0'), 1)
+  assert.equal(C('1.2.0', '1.3.0'), -1)
+  assert.equal(C('1.2', '1.2.0'), 0)
+  assert.equal(C('1.10.0', '1.9.0'), 1, '按数值比而不是字符串')
+  assert.equal(C('2.0.0', '1.99.99'), 1)
+  assert.equal(C('1.2.0', '1.2.0-beta'), 1, '1.2.0 比 1.2.0-beta 新')
+  assert.equal(C('', '1.0.0'), 0, '缺版本 = 无法判断')
+  assert.equal(C('1.0.0', undefined), 0)
+  assert.equal(C('beta', '1.0.0'), -1, '非数字段退化比较')
+})
