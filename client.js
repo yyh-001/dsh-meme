@@ -85,6 +85,9 @@ window.__ModuleLoader__.load({
       '.mk-acts button{padding:3px 12px;font-size:12px;border-radius:6px}',
       '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
       '.mk-empty{width:100%;color:var(--dsw-alias-label-secondary);padding:20px;text-align:center;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;font-size:12px}',
+      '.meme-panel .meme-footer{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-panel .meme-footer a{color:var(--dsw-alias-brand-primary);text-decoration:none;white-space:nowrap}',
+      '.meme-panel .meme-footer a:hover{text-decoration:underline}',
     ].join('')
 
     // 分类中文显示(仅 UI,存储/搜索仍是英文 tag)
@@ -972,6 +975,13 @@ window.__ModuleLoader__.load({
         ) : null,
         rootNotice ? h('div', { className: 'notice' }, rootNotice) : null,
         marketResult ? h('a', { href: marketResult, target: '_blank', rel: 'noopener noreferrer' }, '打开 GitHub 投稿页') : null,
+        // 页脚:求 star + 反馈入口
+        h('div', { className: 'meme-footer' },
+          h('span', null, '觉得好用？'),
+          h('a', { href: 'https://github.com/yyh-001/dsh-meme', target: '_blank', rel: 'noopener noreferrer' }, '⭐ 去 GitHub 点个 Star'),
+          h('span', null, '·'),
+          h('a', { href: 'https://github.com/yyh-001/dsh-meme/issues', target: '_blank', rel: 'noopener noreferrer' }, '💬 反馈建议 / 提 issue'),
+        ),
         packDialog ? h('div', { className: 'meme-modal-mask' },
           h('div', { className: 'meme-modal' },
             h('h3', null, packDialog === 'create' ? '新建图包库' : packDialog === 'delete' ? '删除图库' : '投稿'),
