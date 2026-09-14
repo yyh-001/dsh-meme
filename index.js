@@ -135,6 +135,20 @@ const MIME = {
 }
 const ROUTE = '/dsh-memes'
 
+/**
+ * 内置图库目录源,按顺序试第一个能用的。
+ * raw 放前面:jsDelivr 对 @main 是「按仓库缓存 12h」,push 之后它会继续吐旧内容
+ * (实测带 ?t= 时间戳也绕不过它的 shield 缓存),市场改了 catalog 客户端半天看不到。
+ * jsDelivr 留作 raw 被墙时的兜底,加了新 catalog 记得 purge:
+ * `curl https://purge.jsdelivr.net/gh/yyh-001/dsh-meme-packs@main/catalog.json`
+ */
+export const DEFAULT_REMOTE_DIR_URLS = [
+  'https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json',
+  'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme-packs@main/catalog.json',
+  'https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/remote-packs.json',
+  'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme@main/docs/remote-packs.json',
+]
+
 export function apply(ctx, config) {
   // 图库目录设置存 ~/.dsh(稳定,不受包升级/图库变化影响):
   // 优先级 用户设置(settings) > patch 配置(config.memeRoot) > 包内默认
@@ -564,14 +578,9 @@ export function apply(ctx, config) {
     const REMOTE_CONCURRENCY = 4
     const REMOTE_MAX_ITEMS = 500
     const SIDECAR_NAME = '.dsh-remote.json'
-    // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认(jsDelivr/raw 双源)。
+    // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认。
     // 每次请求现读 settings:改配置文件即刻生效,不用重启。
-    const remoteDirUrls = () => readSettings().remoteDirUrl || config?.remoteDirUrl || [
-      'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme-packs@main/catalog.json',
-      'https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json',
-      'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme@main/docs/remote-packs.json',
-      'https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/remote-packs.json',
-    ]
+    const remoteDirUrls = () => readSettings().remoteDirUrl || config?.remoteDirUrl || DEFAULT_REMOTE_DIR_URLS
     const remoteSubs = () => {
       const subs = readSettings().remoteSubs
       return Array.isArray(subs) ? subs : []
@@ -583,8 +592,8 @@ export function apply(ctx, config) {
         try {
           let res
           try {
-            // 带时间戳:jsDelivr 对 @main 的边缘缓存是 12h,裸 URL 会拿到旧目录
-            // (表现:catalog 里改了封面/版本,客户端半天看不到)
+            // 带时间戳:挡一层中间层的透明代理缓存。
+            // (jsDelivr 那种「按仓库缓存 @main」的节点时间戳也绕不过——所以源顺序里 raw 在前)
             const busted = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()
             res = await fetch(busted, { signal: AbortSignal.timeout(8000) })
           } catch (error) {

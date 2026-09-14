@@ -538,10 +538,19 @@ test('resolveActiveRoot 忽略已经不存在或没有索引的目录', () => {
 })
 
 
-test('拉图库目录带时间戳,绕开 CDN 边缘缓存', () => {
+test('拉图库目录带时间戳(挡中间层缓存)', () => {
   const hits = fetchedUrls.filter((u) => u.split('?')[0] === '/catalog.json')
   assert.ok(hits.length > 0, '本轮应该拉过图库目录')
-  // jsDelivr 对 @main 的边缘缓存 12h:不带时间戳就会一直拿旧目录
-  // (表现:catalog 里换了封面/版本,客户端半天看不到)
+  // 中间层(透明代理等)会缓存 JSON:不带时间戳可能一直拿旧目录
   assert.ok(hits.every((u) => /[?&]t=\d+$/.test(u)), '每次都该带时间戳: ' + JSON.stringify(hits))
+})
+
+
+test('目录源顺序:raw 在前(jsDelivr 的 @main 缓存会滞留旧内容)', () => {
+  const urls = mod.DEFAULT_REMOTE_DIR_URLS
+  assert.ok(urls.length >= 2)
+  const rawIdx = urls.findIndex((u) => u.includes('githubusercontent.com') && u.includes('catalog.json'))
+  const jsdIdx = urls.findIndex((u) => u.includes('jsdelivr') && u.includes('catalog.json'))
+  assert.ok(rawIdx >= 0 && jsdIdx >= 0, '两个源都要在: ' + JSON.stringify(urls))
+  assert.ok(rawIdx < jsdIdx, 'raw 必须排在 jsDelivr 前面,否则会一直拿到缓存里的旧 catalog')
 })
