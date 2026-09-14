@@ -59,7 +59,12 @@ window.__ModuleLoader__.load({
       '.meme-modal .field{display:flex;flex-direction:column;gap:4px}',
       '.meme-modal input[type=text],.meme-modal select,.meme-modal textarea{box-sizing:border-box;width:100%}',
       '.meme-modal .field label{font-size:11px;color:var(--dsw-alias-label-secondary)}',
-      '.meme-modal .modal-acts{display:flex;gap:8px;justify-content:flex-end}',
+      '.meme-modal .hint{font-size:11px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',
+      // 即时校验:字段不合法时标签和边框变红,而不是等提交后在面板顶部报错
+      '.meme-modal .field.bad label{color:#e5484d}',
+      '.meme-modal .field.bad input[type=text]{border-color:#e5484d}',
+      '.meme-modal .modal-acts{display:flex;gap:8px;justify-content:flex-end;margin-top:2px}',
+      '.meme-modal .modal-acts button{padding:6px 14px}',
       '.mk-tabs{display:flex;gap:18px;border-bottom:1px solid var(--dsw-alias-border-l1);width:100%}',
       '.meme-panel .mk-tab{border:none;background:transparent;cursor:pointer;font-size:13px;color:var(--dsw-alias-label-secondary);padding:4px 2px 8px;border-bottom:2px solid transparent;margin-bottom:-1px;border-radius:0;transition:color .12s}',
       '.meme-panel .mk-tab:hover{color:var(--dsw-alias-label-primary);background:transparent;border-color:transparent;border-bottom-color:transparent}',
@@ -425,6 +430,14 @@ window.__ModuleLoader__.load({
       const [packDialog, setPackDialog] = React.useState('')
       const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
       const [packSaving, setPackSaving] = React.useState(false)
+      // 新建弹窗的即时校验:规则与服务端 createMemePack 一致,不合法就别让点「创建」。
+      // 红框只在碰过那个字段之后才显示——刚打开就一片红太吓人,空名字靠禁用按钮表达。
+      const [packTouched, setPackTouched] = React.useState({})
+      const packIdOk = /^[a-z0-9][a-z0-9_-]{0,39}$/.test(packDraft.id.trim())
+      const packNameOk = packDraft.name.trim().length > 0
+      const packDraftOk = packIdOk && packNameOk
+      const packBad = (key) => !!packTouched[key] && !(key === 'id' ? packIdOk : packNameOk)
+      const packSubmitOnEnter = (e) => { if (e.key === 'Enter' && packDraftOk && !packSaving) savePack() }
       // 应用内确认弹窗(不用浏览器原生 confirm):{title, lines, confirmLabel, onConfirm}
       const [confirmBox, setConfirmBox] = React.useState(null)
       const [previewPack, setPreviewPack] = React.useState(null) // 预览弹窗
@@ -911,7 +924,7 @@ window.__ModuleLoader__.load({
           )
           : h(React.Fragment, null,
             h('div', { className: 'row', style: { width: '100%' } },
-              h('button', { className: 'btn-primary', disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackDialog('create') } }, '新建图包库'),
+              h('button', { className: 'btn-primary', disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackTouched({}); setPackDialog('create') } }, '新建图包库'),
               h('button', { disabled: uploading, onClick: () => importFileRef.current && importFileRef.current.click() }, '导入图库'),
             ),
             h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
@@ -1098,22 +1111,63 @@ window.__ModuleLoader__.load({
             target: '_blank', rel: 'noopener noreferrer',
           }, '💬 反馈建议 / 提 issue'),
         ),
-        packDialog ? h('div', { className: 'meme-modal-mask' },
-          h('div', { className: 'meme-modal' },
-            h('h3', null, packDialog === 'create' ? '新建图包库' : '投稿'),
-            rootNotice ? h('p', { role: 'status' }, rootNotice) : null,
+        packDialog ? h('div', { className: 'meme-modal-mask', onClick: () => { if (!packSaving) setPackDialog('') } },
+          h('div', {
+            className: 'meme-modal',
+            style: { width: packDialog === 'create' ? 400 : 440 },
+            onClick: (e) => e.stopPropagation(),
+          },
+            h('div', { className: 'meme-modal-head' },
+              h('h3', null, packDialog === 'create' ? '新建图包库' : '投稿到市场'),
+              h('button', {
+                className: 'meme-x', title: '关闭', 'aria-label': '关闭', disabled: packSaving,
+                onClick: () => setPackDialog(''),
+              }, '×'),
+            ),
+            rootNotice ? h('div', { className: 'notice', role: 'status' }, rootNotice) : null,
             packDialog === 'create' ? h(React.Fragment, null,
-              ...[['name', '图库名称'], ['id', '图库 ID'], ['description', '简介 / 图片来源']].map(([key, label]) =>
-                h('label', { key, style: { display: 'block', marginBottom: 12 } }, label,
-                  h('input', { value: packDraft[key], maxLength: key === 'id' ? 40 : key === 'name' ? 60 : 200,
-                    onChange: e => setPackDraft({ ...packDraft, [key]: e.target.value }), disabled: packSaving }))),
+              h('div', { className: 'field' + (packBad('name') ? ' bad' : '') },
+                h('label', null, '图库名称'),
+                h('input', {
+                  type: 'text', value: packDraft.name, maxLength: 60, autoFocus: true,
+                  placeholder: '如：大肥鱼、官方表情包1号', disabled: packSaving,
+                  onChange: (e) => { setPackTouched({ ...packTouched, name: true }); setPackDraft({ ...packDraft, name: e.target.value }) },
+                  onKeyDown: packSubmitOnEnter,
+                }),
+                packBad('name') ? h('div', { className: 'hint' }, '起个名字——图库列表和模型都用它认这套图') : null,
+              ),
+              h('div', { className: 'field' + (packBad('id') ? ' bad' : '') },
+                h('label', null, '图库 ID'),
+                h('input', {
+                  type: 'text', value: packDraft.id, maxLength: 40, disabled: packSaving,
+                  placeholder: '如：my-cat-pack',
+                  onChange: (e) => { setPackTouched({ ...packTouched, id: true }); setPackDraft({ ...packDraft, id: e.target.value }) },
+                  onKeyDown: packSubmitOnEnter,
+                }),
+                h('div', { className: 'hint' }, packBad('id')
+                  ? '只能用小写字母、数字、- 和 _，首字符不能是 - 或 _（1–40 位）'
+                  : '图库就装在这个文件夹名下；以后分享给别人时保持 ID 不变'),
+              ),
+              h('div', { className: 'field' },
+                h('label', null, '简介 / 图片来源（可选）'),
+                h('textarea', {
+                  value: packDraft.description, rows: 2, maxLength: 200, disabled: packSaving,
+                  placeholder: '如：图是谁画的、来自哪个仓库、什么许可',
+                  onChange: (e) => setPackDraft({ ...packDraft, description: e.target.value }),
+                }),
+              ),
             ) : h(React.Fragment, null,
               h('p', null, '自动导出当前图库 ZIP，并打开预填好的 GitHub 投稿页。'),
               h('p', null, '登录 GitHub 后，将下载的 ZIP 拖入“图库 ZIP”一栏，补充图片来源和许可，再提交。审核通过后收录到市场。'),
             ),
-            h('div', { className: 'row', style: { marginTop: 16 } },
-              h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
-              h('button', { disabled: packSaving, onClick: () => { setPackDialog('') } }, '取消'),
+            h('div', { className: 'modal-acts' },
+              h('button', { disabled: packSaving, onClick: () => setPackDialog('') }, '取消'),
+              h('button', {
+                className: 'btn-primary',
+                disabled: packSaving || (packDialog === 'create' && !packDraftOk),
+                title: packDialog === 'create' && !packDraftOk ? '先填图库名称和合法的图库 ID' : undefined,
+                onClick: packDialog === 'create' ? savePack : submitPack,
+              }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
             ),
           ),
         ) : null,

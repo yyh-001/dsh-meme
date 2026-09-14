@@ -158,6 +158,14 @@ const findClickable = (tree, label) => {
   walk(tree, (n) => { if (hit || !n.props || typeof n.props.onClick !== 'function') return; if (textOf(n).includes(label)) hit = n })
   return hit
 }
+const findInput = (tree, placeholderPart) => {
+  let hit = null
+  walk(tree, (n) => {
+    if (hit || n.type !== 'input' || !n.props) return
+    if (String(n.props.placeholder || '').includes(placeholderPart)) hit = n
+  })
+  return hit
+}
 const findCover = (tree) => {
   let hit = null
   walk(tree, (n) => { if (!hit && n.props && n.props.className === 'mk-cover-img' && n.props.style) hit = n.props.style.backgroundImage })
@@ -240,6 +248,18 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   findButton(render(), '图库列表').props.onClick()
   findButton(render(), '新建图包库').props.onClick()
   assert.ok(allText(render()).includes('图库 ID'), '新建图包库弹窗应渲染')
+
+  // 新建弹窗:名称没填时不能点创建,填了才放行(ID 不合法又会被挡回去)
+  const createBtn = () => findButton(render(), '创建并切换')
+  assert.equal(createBtn().props.disabled, true, '名称为空时「创建并切换」应禁用')
+  findInput(render(), '如：大肥鱼').props.onChange({ target: { value: '我的图库' } })
+  assert.equal(createBtn().props.disabled, false, '名称和自动生成的 ID 都合法时应可点')
+  assert.ok(findInput(render(), '如：大肥鱼'), '名称框应保留输入内容')
+  findInput(render(), 'my-cat-pack').props.onChange({ target: { value: '猫图库' } })
+  assert.equal(createBtn().props.disabled, true, 'ID 非法时应禁用')
+  assert.ok(allText(render()).includes('只能用小写字母'), 'ID 非法时应给出提示: ' + allText(render()).slice(0, 200))
+  findButton(render(), '×').props.onClick()
+  assert.ok(!allText(render()).includes('图库 ID'), '× 应关掉弹窗')
 
   findButton(render(), '删除').props.onClick()
   assert.ok(allText(render()).includes('不可恢复'), '删除确认弹窗应渲染')
