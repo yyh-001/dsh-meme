@@ -1235,8 +1235,11 @@ window.__ModuleLoader__.load({
 
       // 输入框快捷发图(QQ 式)。
       const store = makeMemeStore()
-      // 组件类型必须在 render 回调外创建一次:回调内调 makeMemeButton 会每次重渲染
-      // 都造出新类型,React 视作新节点卸载重建,拖累宿主主线程(issue #15)。
+      // Hoisted out of the render callback on purpose: makeMemeButton() returns a fresh
+      // function component on every call, so creating it inside the slot render callback
+      // hands React a new component type on every re-render → the trigger button is
+      // unmounted and remounted each time (measured 20+ rebuilds/second while a turn is
+      // streaming), which in turn wakes every full-body MutationObserver in the host.
       const MemeButton = makeMemeButton(store)
       slots.inject('conversation.input.left', () => slots.register(
         { name: 'conversation.input.left', id: 'meme-picker', order: 5, label: '表情包' },
