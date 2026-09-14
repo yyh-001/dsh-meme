@@ -346,15 +346,32 @@ window.__ModuleLoader__.load({
           packId: row.packId || '', name: row.name || '', meta: row.meta || '',
           desc: row.desc || '', tags: row.tags || [],
           images: [...new Set(catalogImages)].filter(Boolean),
-          total: Number(entry.count) || 0, loading: !!(row.downloaded && row.packId),
+          total: Number(entry.count) || 0,
+          // 已装的读本地图库、清单包读清单:这两种拿到的都是图库自己的图,能说「显示前 N 张」
+          loading: !!(row.downloaded && row.packId) || !!entry.manifestUrl,
         })
-        if (!row.downloaded || !row.packId) return
+        // 清单热链的包:没装也能看它列出的图(清单里有全部 128 条,比目录里那 19 张精选全)
+        if ((!row.downloaded || !row.packId) && entry.manifestUrl) {
+          try {
+            const res = await apiPost({ op: 'previewManifest', manifestUrl: entry.manifestUrl })
+            if (res && res.ok && Array.isArray(res.urls) && res.urls.length) {
+              setPreviewPack((cur) => (cur && cur.packId === row.packId
+                ? { ...cur, images: res.urls, total: Number(res.total) || res.urls.length, loading: false, fromPack: true }
+                : cur))
+              return
+            }
+          } catch (e) { /* 清单读不到就用目录里的预览图 */ }
+        }
+        if (!row.downloaded || !row.packId) {
+          setPreviewPack((cur) => (cur && cur.packId === row.packId ? { ...cur, loading: false } : cur))
+          return
+        }
         try {
           const res = await fetch('/dsh-memes-api?packId=' + encodeURIComponent(row.packId)).then((r) => r.json())
           const urls = (res && Array.isArray(res.memes)) ? res.memes.map((m) => m.url).filter(Boolean) : []
           if (urls.length) {
             setPreviewPack((cur) => (cur && cur.packId === row.packId
-              ? { ...cur, images: urls.slice(0, 40), total: urls.length, loading: false, local: true }
+              ? { ...cur, images: urls.slice(0, 60), total: urls.length, loading: false, fromPack: true }
               : cur))
             return
           }
@@ -1116,7 +1133,7 @@ window.__ModuleLoader__.load({
               : (previewPack.loading ? null : h('div', { className: 'empty' }, '这个图库没有提供预览图')),
             previewPack.images.length && previewPack.total > previewPack.images.length
               ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
-                previewPack.local
+                previewPack.fromPack
                   ? '共 ' + previewPack.total + ' 张，这里显示前 ' + previewPack.images.length + ' 张'
                   : '目录里提供 ' + previewPack.images.length + ' 张预览；这个图库共 ' + previewPack.total + ' 张，安装后可以看全部')
               : null,

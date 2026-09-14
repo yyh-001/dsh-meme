@@ -600,6 +600,7 @@ export function apply(ctx, config) {
     const REMOTE_ARCHIVE_MAX = 100 * 1024 * 1024
     const REMOTE_CONCURRENCY = 4
     const REMOTE_MAX_ITEMS = 500
+    const PREVIEW_MAX = 60      // 预览弹窗最多列这么多张(清单包里可能上百张)
     const SIDECAR_NAME = '.dsh-remote.json'
     // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认。
     // 每次请求现读 settings:改配置文件即刻生效,不用重启。
@@ -1255,6 +1256,17 @@ export function apply(ctx, config) {
               }
             }
             json(res, { ok: true, ...jobSnapshot(startRemoteJob(manifest, manifestUrl, 'fresh')) })
+          } else if (op === 'previewManifest') {
+            // 清单热链的包没装也能预览:服务端读清单,把它列的图片地址交给前端
+            // (前端直接 fetch 清单要受 CORS 限制,而且清单可能托管在任意主机)
+            const manifestUrl = String(body.manifestUrl || '').trim()
+            const raw = await fetchRemoteJson(manifestUrl)
+            const manifest = normalizeRemoteManifest(raw, '', manifestUrl)
+            json(res, {
+              ok: true,
+              total: manifest.items.length,
+              urls: manifest.items.slice(0, PREVIEW_MAX).map((m) => m.url),
+            })
           } else if (op === 'remoteJobStatus') {
             const job = remoteJobs.get(String(body.jobId || '').trim())
             if (!job) throw new Error('未知任务: ' + String(body.jobId || ''))

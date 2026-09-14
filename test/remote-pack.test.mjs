@@ -629,3 +629,21 @@ test('下载量:按图库 id 汇总多个版本,清单包没有就不显示', ()
   // 目录里带 downloads 字段(发现页卡片显示用);测试目录是本地地址,没有 release 可数
   assert.equal(typeof mod.parseDownloadCounts, 'function')
 })
+
+
+test('previewManifest:没装的清单包也能拿到全部图片地址(封顶 60)', async () => {
+  currentManifest = v1
+  const res = await post({ op: 'previewManifest', manifestUrl: base + '/manifest.json' })
+  assert.equal(res.statusCode, 200, res.body)
+  const out = JSON.parse(res.body)
+  assert.equal(out.ok, true)
+  assert.equal(out.total, 3, '清单里 4 条,其中一条 tag 非法被跳过')
+  assert.equal(out.urls.length, 3)
+  assert.ok(out.urls.every((u) => /^https?:\/\//.test(u)), 'URL 要是绝对的')
+  // 超过 60 条要封顶
+  const many = { ...v1, id: 'many', memes: Array.from({ length: 75 }, (_, i) => ({ url: base + '/img/' + i + '.jpg', tag: 'happy', caption: 'c' + i })) }
+  currentManifest = many
+  const big = JSON.parse((await post({ op: 'previewManifest', manifestUrl: base + '/manifest.json' })).body)
+  assert.equal(big.total, 75)
+  assert.equal(big.urls.length, 60, '预览最多 60 张,别把上百张图一次塞给弹窗')
+})
