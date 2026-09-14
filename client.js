@@ -44,7 +44,8 @@ window.__ModuleLoader__.load({
       '.meme-panel .meme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}',
       '.meme-panel .meme-card{border:1px solid var(--dsw-alias-border-l1);border-radius:10px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:transform .12s ease,box-shadow .12s ease}',
       '.meme-panel .meme-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
-      '.meme-panel .meme-card img{width:100%!important;height:120px!important;object-fit:contain!important;display:block;background:var(--dsw-alias-bg-base);padding:4px;box-sizing:border-box}',
+      '.meme-panel .meme-thumb{width:100%;height:120px;background-size:contain;background-position:center center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
+      '.meme-modal .meme-shot{width:100%;height:220px;border-radius:8px;background-size:contain;background-position:center center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
       '.meme-panel .meta{padding:8px 10px;display:flex;flex-direction:column;gap:5px;min-height:80px}',
       '.meme-panel .tag{display:inline-block;align-self:flex-start;font-size:11px;color:var(--dsw-alias-brand-primary);text-transform:lowercase;background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);border-radius:999px;padding:1px 8px}',
       '.meme-panel .cap{font-size:12px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}',
@@ -55,7 +56,6 @@ window.__ModuleLoader__.load({
       '.meme-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}',
       '.meme-modal{background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;width:340px;max-width:100%;box-shadow:0 10px 36px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:10px}',
       '.meme-modal h3{margin:0;font-size:14px;font-weight:600}',
-      '.meme-modal img{width:100%!important;height:220px!important;object-fit:contain!important;border-radius:8px;background:var(--dsw-alias-bg-base);padding:6px;box-sizing:border-box}',
       '.meme-modal .field{display:flex;flex-direction:column;gap:4px}',
       '.meme-modal input[type=text],.meme-modal select,.meme-modal textarea{box-sizing:border-box;width:100%}',
       '.meme-modal .field label{font-size:11px;color:var(--dsw-alias-label-secondary)}',
@@ -741,7 +741,8 @@ window.__ModuleLoader__.load({
 
       const curPack = packs.find((p) => p.id === packId) || null
       const cards = memes.map((m) => h('div', { key: m.path, className: 'meme-card' },
-        h('img', { src: m.url, alt: m.path, loading: 'lazy' }),
+        // 用背景层而不是 <img>:宿主对 img 的全局样式会把图挤到左边(封面那次踩过)
+        h('div', { className: 'meme-thumb', style: { backgroundImage: 'url("' + m.url + '")' }, title: m.caption || m.file_name }),
         h('div', { className: 'meta' },
           h('div', { className: 'tag' }, tagZh(m.tag)),
           h('div', { className: 'cap' }, m.caption || m.file_name),
@@ -936,7 +937,10 @@ window.__ModuleLoader__.load({
         edit ? h('div', { className: 'meme-modal-mask', onClick: () => setEdit(null) },
           h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
             h('h3', null, '编辑表情包'),
-            h('img', { src: memes.find((m) => m.path === edit.path)?.url, alt: edit.path }),
+            h('div', {
+              className: 'meme-shot',
+              style: { backgroundImage: 'url("' + (memes.find((m) => m.path === edit.path)?.url || '') + '")' },
+            }),
             h('div', { className: 'field' },
               h('label', null, '分类'),
               h('div', { className: 'row', style: { width: '100%' } },
@@ -969,7 +973,11 @@ window.__ModuleLoader__.load({
           h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
             h('h3', null, '上传表情包'),
             upFile
-              ? h('img', { src: upPreview, alt: upFile.name })
+              ? h('div', {
+                className: 'meme-shot',
+                style: { backgroundImage: 'url("' + upPreview + '")' },
+                title: upFile.name,
+              })
               : h('div', { className: 'empty', style: { padding: '24px', border: '1px dashed var(--dsw-alias-border-l1)', borderRadius: 8 } },
                   h('button', { onClick: () => fileRef.current && fileRef.current.click() }, '选择图片'),
                 ),
