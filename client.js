@@ -85,6 +85,10 @@ window.__ModuleLoader__.load({
       '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
       '.mk-empty{width:100%;color:var(--dsw-alias-label-secondary);padding:20px;text-align:center;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;font-size:12px}',
       '.mk-card-open{cursor:pointer}',
+      '.meme-modal-head{display:flex;align-items:flex-start;gap:8px;margin:-4px -4px 0 0}',
+      '.meme-modal-head h3{flex:1;margin:0}',
+      '.meme-panel .meme-x{flex:none;border:none;background:transparent;cursor:pointer;font-size:18px;line-height:1;padding:2px 8px;border-radius:6px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-panel .meme-x:hover{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border-color:transparent}',
       '.mk-preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px;max-height:300px;overflow:auto;padding:2px}',
       '.mk-preview a{display:block;height:84px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background-size:contain;background-position:center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
       '.meme-panel .meme-footer{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-secondary)}',
@@ -1068,7 +1072,13 @@ window.__ModuleLoader__.load({
             className: 'meme-modal', style: { width: 560, maxHeight: '82vh', overflow: 'auto' },
             onClick: (e) => e.stopPropagation(),
           },
-            h('h3', null, previewPack.name),
+            h('div', { className: 'meme-modal-head' },
+              h('h3', null, previewPack.name),
+              h('button', {
+                className: 'meme-x', title: '关闭', 'aria-label': '关闭',
+                onClick: () => setPreviewPack(null),
+              }, '×'),
+            ),
             previewPack.meta ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, previewPack.meta) : null,
             previewPack.desc ? h('p', { style: { margin: 0, fontSize: 12 } }, previewPack.desc) : null,
             previewPack.tags.length
@@ -1085,9 +1095,6 @@ window.__ModuleLoader__.load({
               ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
                 '共 ' + previewPack.total + ' 张，这里显示前 ' + previewPack.images.length + ' 张')
               : null,
-            h('div', { className: 'row', style: { marginTop: 12 } },
-              h('button', { onClick: () => setPreviewPack(null) }, '关闭'),
-            ),
           ),
         ) : null,
         // 应用内确认弹窗(原生 confirm 在桌面壳里观感不一致)

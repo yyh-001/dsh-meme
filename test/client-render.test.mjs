@@ -181,7 +181,12 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   assert.ok(card, '发现页卡片应可点开预览')
   card.props.onClick()
   const previewTree = render()
-  assert.ok(findButton(previewTree, '关闭'), '预览弹窗应有关闭按钮')
+  const closeBtn = findButton(previewTree, '×')
+  assert.ok(closeBtn, '预览弹窗右上角应有 × 关闭按钮')
+  assert.equal(closeBtn.props.title, '关闭')
+  let head = null
+  walk(previewTree, (n) => { if (!head && n.props && n.props.className === 'meme-modal-head') head = n })
+  assert.ok(head && head.kids.some((k) => k === closeBtn), '× 应该和标题在同一行(右上角)')
   let grid = null
   walk(previewTree, (n) => { if (!grid && n.props && n.props.className === 'mk-preview') grid = n })
   assert.ok(grid, '预览弹窗应有图片网格')
