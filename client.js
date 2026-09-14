@@ -85,6 +85,9 @@ window.__ModuleLoader__.load({
       '.mk-acts button{padding:3px 12px;font-size:12px;border-radius:6px}',
       '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
       '.mk-empty{width:100%;color:var(--dsw-alias-label-secondary);padding:20px;text-align:center;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;font-size:12px}',
+      '.mk-card-open{cursor:pointer}',
+      '.mk-preview{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:6px;max-height:300px;overflow:auto;padding:2px}',
+      '.mk-preview a{display:block;height:84px;border-radius:8px;border:1px solid var(--dsw-alias-border-l1);background-size:contain;background-position:center;background-repeat:no-repeat;background-color:var(--dsw-alias-bg-base)}',
       '.meme-panel .meme-footer{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:8px;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l1);font-size:12px;color:var(--dsw-alias-label-secondary)}',
       '.meme-panel .meme-footer a{color:var(--dsw-alias-brand-primary);text-decoration:none;white-space:nowrap}',
       '.meme-panel .meme-footer a:hover{text-decoration:underline}',
@@ -327,6 +330,32 @@ window.__ModuleLoader__.load({
           await load('', '')
         } catch (error) { setRootNotice(error.message || '删除失败') }
       }
+      // 预览弹窗:已装的图库列它自己的图,没装的用目录里带的预览图
+      const openPreview = async (row) => {
+        const entry = row.entry || {}
+        const catalogImages = [
+          ...(entry.preview ? [entry.preview] : []),
+          ...(Array.isArray(entry.previews) ? entry.previews : []),
+        ]
+        setPreviewPack({
+          packId: row.packId || '', name: row.name || '', meta: row.meta || '',
+          desc: row.desc || '', tags: row.tags || [],
+          images: [...new Set(catalogImages)].filter(Boolean),
+          total: 0, loading: !!(row.downloaded && row.packId),
+        })
+        if (!row.downloaded || !row.packId) return
+        try {
+          const res = await fetch('/dsh-memes-api?packId=' + encodeURIComponent(row.packId)).then((r) => r.json())
+          const urls = (res && Array.isArray(res.memes)) ? res.memes.map((m) => m.url).filter(Boolean) : []
+          if (urls.length) {
+            setPreviewPack((cur) => (cur && cur.packId === row.packId
+              ? { ...cur, images: urls.slice(0, 40), total: urls.length, loading: false, local: true }
+              : cur))
+            return
+          }
+        } catch (e) { /* 读不到就用目录里的预览图 */ }
+        setPreviewPack((cur) => (cur && cur.packId === row.packId ? { ...cur, loading: false } : cur))
+      }
       const onDeletePackPrompt = (row) => {
         setRootNotice('')
         setConfirmBox({
@@ -373,6 +402,7 @@ window.__ModuleLoader__.load({
       const [packSaving, setPackSaving] = React.useState(false)
       // 应用内确认弹窗(不用浏览器原生 confirm):{title, lines, confirmLabel, onConfirm}
       const [confirmBox, setConfirmBox] = React.useState(null)
+      const [previewPack, setPreviewPack] = React.useState(null) // 预览弹窗
       const [marketResult, setMarketResult] = React.useState('')
       const savePack = async () => {
         if (packSaving) return
@@ -754,10 +784,15 @@ window.__ModuleLoader__.load({
       })()
 
       // 市场/图库共用的卡片:封面 + 名称 + 徽标 + meta + 标签 + 进度 + 操作
-      const packCard = (row, acts) => {
+      const packCard = (row, acts, onOpen) => {
         const job = row.job
         const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
-        return h('div', { key: row.key, className: 'mk-card' },
+        return h('div', {
+          key: row.key,
+          className: 'mk-card' + (onOpen ? ' mk-card-open' : ''),
+          // 整卡可点 = 打开预览;卡片内的按钮自己 stopPropagation,不会误触发
+          ...(onOpen ? { onClick: () => onOpen(row), title: '点击预览图库图片' } : {}),
+        },
           // 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
           // 全局样式影响(之前实测在宿主里图片没铺满,露出一块空底色很难看)
           row.cover
@@ -795,7 +830,7 @@ window.__ModuleLoader__.load({
               h('div', { className: 'mk-progress' }, h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })),
               h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + ' ' + pct + '%'),
             ) : null,
-            h('div', { className: 'mk-acts' }, acts),
+            h('div', { className: 'mk-acts', onClick: (e) => e.stopPropagation() }, acts),
           ),
         )
       }
@@ -963,7 +998,7 @@ window.__ModuleLoader__.load({
                 : startRemote(row.entry.manifestUrl, row.entry.id || ''),
               disabled: remoteBusy || !!row.job,
             }, row.job ? '下载中…' : '安装'),
-          ].filter(Boolean)))),
+          ].filter(Boolean), () => openPreview(row)))),
         h('div', { className: 'row', style: { width: '100%' } },
           h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '高级:粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
           h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
@@ -1035,6 +1070,34 @@ window.__ModuleLoader__.load({
             h('div', { className: 'row', style: { marginTop: 16 } },
               h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
               h('button', { disabled: packSaving, onClick: () => { setPackDialog('') } }, '取消'),
+            ),
+          ),
+        ) : null,
+        // 图库预览弹窗:点卡片打开
+        previewPack ? h('div', { className: 'meme-modal-mask', onClick: () => setPreviewPack(null) },
+          h('div', {
+            className: 'meme-modal', style: { width: 560, maxHeight: '82vh', overflow: 'auto' },
+            onClick: (e) => e.stopPropagation(),
+          },
+            h('h3', null, previewPack.name),
+            previewPack.meta ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, previewPack.meta) : null,
+            previewPack.desc ? h('p', { style: { margin: 0, fontSize: 12 } }, previewPack.desc) : null,
+            previewPack.tags.length
+              ? h('div', { className: 'mk-chips' }, previewPack.tags.map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
+              : null,
+            previewPack.loading ? h('div', { className: 'notice' }, '正在读取图库图片…') : null,
+            previewPack.images.length
+              ? h('div', { className: 'mk-preview' }, previewPack.images.map((u, i) => h('a', {
+                key: u + '#' + i, href: coverUrl(u), target: '_blank', rel: 'noopener noreferrer', title: '点开原图',
+                style: { backgroundImage: 'url("' + coverUrl(u) + '")' },
+              })))
+              : (previewPack.loading ? null : h('div', { className: 'empty' }, '这个图库没有提供预览图')),
+            previewPack.local && previewPack.total > previewPack.images.length
+              ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
+                '共 ' + previewPack.total + ' 张，这里显示前 ' + previewPack.images.length + ' 张')
+              : null,
+            h('div', { className: 'row', style: { marginTop: 12 } },
+              h('button', { onClick: () => setPreviewPack(null) }, '关闭'),
             ),
           ),
         ) : null,

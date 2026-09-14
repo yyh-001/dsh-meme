@@ -142,6 +142,11 @@ const findButton = (tree, label) => {
   walk(tree, (n) => { if (hit || n.type !== 'button' || !n.props || typeof n.props.onClick !== 'function') return; if (textOf(n).includes(label)) hit = n })
   return hit
 }
+const findClickable = (tree, label) => {
+  let hit = null
+  walk(tree, (n) => { if (hit || !n.props || typeof n.props.onClick !== 'function') return; if (textOf(n).includes(label)) hit = n })
+  return hit
+}
 const findCover = (tree) => {
   let hit = null
   walk(tree, (n) => { if (!hit && n.props && n.props.className === 'mk-cover' && n.props.style) hit = n.props.style.backgroundImage })
@@ -170,6 +175,16 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   assert.ok(text.includes('远程包'), '发现页应列出远程条目: ' + text.slice(0, 200))
   assert.equal(findCover(discover), 'url("https://cdn.jsdelivr.net/gh/o/r@main/previews/p2.jpg")', '远程封面应换 jsDelivr 镜像')
   assert.ok(text.includes('安装'), '未安装的条目应给安装按钮')
+
+  // 发现页点卡片 → 预览弹窗(没装的走目录里的预览图)
+  const card = findClickable(render(), '远程包')
+  assert.ok(card, '发现页卡片应可点开预览')
+  card.props.onClick()
+  const previewTree = render()
+  assert.ok(findButton(previewTree, '关闭'), '预览弹窗应有关闭按钮')
+  let grid = null
+  walk(previewTree, (n) => { if (!grid && n.props && n.props.className === 'mk-preview') grid = n })
+  assert.ok(grid, '预览弹窗应有图片网格')
 
   // 设置页:提示词开关与扫描目录
   findButton(discover, '设置').props.onClick()
