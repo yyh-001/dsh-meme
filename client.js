@@ -81,7 +81,7 @@ window.__ModuleLoader__.load({
       '.mk-progress{height:4px;border-radius:999px;background:var(--dsw-alias-bg-layer-2);overflow:hidden}',
       '.mk-progress-bar{height:100%;background:var(--dsw-alias-brand-primary);border-radius:999px;transition:width .3s ease}',
       '.mk-progress-text{font-size:10px;color:var(--dsw-alias-label-secondary)}',
-      '.mk-acts{display:flex;gap:6px;margin-top:auto}',
+      '.mk-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:auto}',
       '.mk-acts button{padding:3px 12px;font-size:12px;border-radius:6px}',
       '.mk-acts button.mk-danger:hover{border-color:#e5484d;color:#e5484d}',
       '.mk-empty{width:100%;color:var(--dsw-alias-label-secondary);padding:20px;text-align:center;border:1px dashed var(--dsw-alias-border-l1);border-radius:10px;font-size:12px}',
@@ -183,6 +183,8 @@ window.__ModuleLoader__.load({
           installed: true, job: null, activePack: p.id === packId,
           downloaded: true,
           builtin: isBundled,
+          enabled: p.enabled === true,
+          onToggle: (next) => onTogglePack(p.id, next),
           pack: p,
         }
       })
@@ -310,6 +312,25 @@ window.__ModuleLoader__.load({
           setRootNotice(error.message || '导出失败，请重试')
         }
       }
+      // 图库卡片开关:打开后模型可以用这个图库发图
+      const onTogglePack = async (id, next) => {
+        try {
+          const res = await apiPost({ op: 'setPackEnabled', packId: id, enabled: next })
+          if (!res || !res.ok) throw new Error((res && res.error) || '操作失败')
+          applyRoot(res)
+          setRootNotice(res.message || '')
+        } catch (error) { setRootNotice(error.message || '操作失败') }
+      }
+      const onDeletePack = async (id) => {
+        try {
+          const res = await apiPost({ op: 'deleteMemePack', packId: id })
+          if (!res || !res.ok) throw new Error((res && res.error) || '删除失败')
+          applyRoot(res)
+          if (packView === id) setPackView('')
+          setRootNotice(res.message || '已删除')
+        } catch (error) { setRootNotice(error.message || '删除失败') }
+        setPackDialog('')
+      }
       // 图库卡片「编辑」:先切到该图库(上传/改/删只作用于当前图库),再进它的表情包页
       const onEditPack = async (id) => {
         const next = String(id || '').trim()
@@ -340,6 +361,7 @@ window.__ModuleLoader__.load({
       }
       const [packDialog, setPackDialog] = React.useState('')
       const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
+      const [packTarget, setPackTarget] = React.useState(null) // 删除确认弹窗的目标图库
       const [packSaving, setPackSaving] = React.useState(false)
       const [marketResult, setMarketResult] = React.useState('')
       const savePack = async () => {
@@ -711,9 +733,19 @@ window.__ModuleLoader__.load({
           h('div', { className: 'mk-body' },
             h('div', { className: 'mk-title' },
               h('span', { className: 'mk-name', title: row.name }, row.name),
-              row.activePack
-                ? h('span', { className: 'mk-badge' }, '使用中')
-                : (row.installed ? h('span', { className: 'mk-badge' }, '已安装') : null),
+              h('span', { style: { display: 'flex', alignItems: 'center', gap: 6, flex: 'none' } },
+                row.activePack
+                  ? h('span', { className: 'mk-badge' }, '使用中')
+                  : (row.installed ? h('span', { className: 'mk-badge' }, '已安装') : null),
+                // 开关:打开后模型可以用这个图库发图(可以同时开多个)
+                row.onToggle
+                  ? h('span', {
+                    className: 'switch' + (row.enabled ? ' on' : ''),
+                    title: row.enabled ? '模型正在使用这个图库,点击关闭' : '点击打开:模型可以用这个图库发图',
+                    onClick: () => row.onToggle(!row.enabled),
+                  })
+                  : null,
+              ),
             ),
             row.meta ? h('div', { className: 'mk-meta', title: row.meta }, row.meta) : null,
             row.desc ? h('div', { className: 'mk-desc', title: row.desc }, row.desc) : null,
@@ -767,7 +799,6 @@ window.__ModuleLoader__.load({
             h('div', { className: 'row', style: { width: '100%' } },
               h('button', { className: 'btn-primary', disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackDialog('create') } }, '新建图包库'),
               h('button', { disabled: uploading, onClick: () => importFileRef.current && importFileRef.current.click() }, '导入图库'),
-              h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '点卡片上的「编辑」进入该图库的表情包页'),
             ),
             h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
             libraryCards.length === 0
@@ -780,9 +811,12 @@ window.__ModuleLoader__.load({
                   ? h('button', { key: 'export', onClick: () => onExportPack(row.packId, row.name) }, '导出')
                   : null,
                 row.packId === packId && curPack && curPack.count > 0
-                  ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿到市场')
+                  ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿')
                   : null,
                 (row.sub || row.entry) ? updateBtn(row) : null,
+                row.downloaded && !row.builtin && !row.sub
+                  ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => { setPackTarget({ id: row.packId, name: row.name }); setRootNotice(''); setPackDialog('delete') } }, '删除')
+                  : null,
                 row.sub && row.downloaded ? h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载') : null,
               ].filter(Boolean)))),
           )
@@ -940,19 +974,27 @@ window.__ModuleLoader__.load({
         marketResult ? h('a', { href: marketResult, target: '_blank', rel: 'noopener noreferrer' }, '打开 GitHub 投稿页') : null,
         packDialog ? h('div', { className: 'meme-modal-mask' },
           h('div', { className: 'meme-modal' },
-            h('h3', null, packDialog === 'create' ? '新建图包库' : '投稿到市场'),
+            h('h3', null, packDialog === 'create' ? '新建图包库' : packDialog === 'delete' ? '删除图库' : '投稿'),
             rootNotice ? h('p', { role: 'status' }, rootNotice) : null,
             packDialog === 'create' ? h(React.Fragment, null,
               ...[['name', '图库名称'], ['id', '图库 ID'], ['description', '简介 / 图片来源']].map(([key, label]) =>
                 h('label', { key, style: { display: 'block', marginBottom: 12 } }, label,
                   h('input', { value: packDraft[key], maxLength: key === 'id' ? 40 : key === 'name' ? 60 : 200,
                     onChange: e => setPackDraft({ ...packDraft, [key]: e.target.value }), disabled: packSaving }))),
+            ) : packDialog === 'delete' ? h(React.Fragment, null,
+              h('p', null, '确认删除图库「' + ((packTarget && packTarget.name) || '') + '」？'),
+              h('p', null, '该图库的目录和里面的图片都会被删掉，不可恢复。'),
             ) : h(React.Fragment, null,
               h('p', null, '自动导出当前图库 ZIP，并打开预填好的 GitHub 投稿页。'),
               h('p', null, '登录 GitHub 后，将下载的 ZIP 拖入“图库 ZIP”一栏，补充图片来源和许可，再提交。审核通过后收录到市场。'),
             ),
             h('div', { className: 'row', style: { marginTop: 16 } },
-              h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
+              packDialog === 'delete'
+                ? h('button', {
+                  className: 'btn-primary', disabled: packSaving,
+                  onClick: () => packTarget && onDeletePack(packTarget.id),
+                }, packSaving ? '处理中…' : '删除')
+                : h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
               h('button', { disabled: packSaving, onClick: () => { setPackDialog('') } }, '取消'),
             ),
           ),

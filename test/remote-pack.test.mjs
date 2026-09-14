@@ -66,10 +66,11 @@ const webServer = {
   tapIndex() {},
 }
 const onHandlers = {}
+const tools = []
 const ctx = {
   on(name, fn) { (onHandlers[name] ||= []).push(fn) },
   get(name) { return name === 'webServer' ? webServer : undefined },
-  tools: { register() {} },
+  tools: { register(tool) { tools.push(tool) } },
   agentDefaultModel: null,
 }
 const mod = await import('../index.js')
@@ -423,4 +424,79 @@ test('setPromptEnabled 关掉后不再注入陪伴提示词,开启后恢复', as
   const on = JSON.parse((await post({ op: 'setPromptEnabled', enabled: true })).body)
   assert.equal(on.promptEnabled, true)
   assert.ok((await run()).sections.some((s) => s.name === 'dsh-expression:companion'), '开回来应恢复注入')
+})
+
+
+test('图库开关:可同时打开多个,关掉的图库不进候选', async () => {
+  const tool = tools.find((t) => t.name === 'send_meme')
+  assert.ok(tool, '应注册 send_meme 工具')
+
+  // 两个各自只有一张图的图库,候选里出现谁的 caption 就说明抽到了谁
+  const a = JSON.parse((await post({ op: 'createMemePack', id: 'switch-a', name: '开关A' })).body)
+  assert.equal(a.ok, true)
+  await post({ op: 'upload', tag: 'happy', fileName: 'a.jpg', dataBase64: imgBytes.toString('base64'), caption: 'A图专属' })
+  const b = JSON.parse((await post({ op: 'createMemePack', id: 'switch-b', name: '开关B' })).body)
+  assert.equal(b.ok, true)
+  await post({ op: 'upload', tag: 'happy', fileName: 'b.jpg', dataBase64: imgBytes.toString('base64'), caption: 'B图专属' })
+  assert.equal(a.packs.find((p) => p.id === 'switch-a').enabled, true, '新建的图库会打开开关,已有的开关状态保留')
+  assert.equal(b.packs.find((p) => p.id === 'switch-b').enabled, true, '新建的图库默认打开开关')
+
+  // 全部关掉 = 模型没有图可用,且给出人话原因
+  for (const p of b.packs) await post({ op: 'setPackEnabled', packId: p.id, enabled: false })
+  const none = await tool.execute({ tag: 'happy', limit: 20 })
+  assert.equal(none.ok, false)
+  assert.match(none.message, /没有打开任何图库/)
+
+  // 只开 A
+  const onlyA = JSON.parse((await post({ op: 'setPackEnabled', packId: 'switch-a', enabled: true })).body)
+  assert.equal(onlyA.packs.find((p) => p.id === 'switch-a').enabled, true)
+  const one = await tool.execute({ tag: 'happy', limit: 20 })
+  assert.equal(one.ok, true)
+  assert.match(one.message, /A图专属/)
+  assert.doesNotMatch(one.message, /B图专属/)
+
+  // A + B 同时开:两个图库的候选都在
+  const both = JSON.parse((await post({ op: 'setPackEnabled', packId: 'switch-b', enabled: true })).body)
+  assert.deepEqual(both.enabledPacks.slice().sort(), ['switch-a', 'switch-b'].concat(both.enabledPacks.filter((id) => !['switch-a', 'switch-b'].includes(id))).sort())
+  const merged = await tool.execute({ tag: 'happy', limit: 20 })
+  assert.match(merged.message, /A图专属/)
+  assert.match(merged.message, /B图专属/)
+
+  // 不存在的图库应报错
+  assert.equal((await post({ op: 'setPackEnabled', packId: 'nope', enabled: true })).statusCode, 400)
+})
+
+
+test('deleteMemePack:能删自建图库,内置/当前/订阅的拒绝', async () => {
+  // 当前图库不能删
+  const active = JSON.parse((await post({ op: 'setPack', packId: 'switch-b' })).body)
+  assert.equal(active.ok, true)
+  const delActive = await post({ op: 'deleteMemePack', packId: 'switch-b' })
+  assert.equal(delActive.statusCode, 400)
+  assert.match(delActive.body, /先切到别的图库/)
+
+  // 内置包不能删
+  const delBundled = await post({ op: 'deleteMemePack', packId: 'dafeiyu-001' })
+  assert.equal(delBundled.statusCode, 400)
+  assert.match(delBundled.body, /内置图库不能删除/)
+
+  // 市场订阅的包走「卸载」(前面的用例已把订阅卸掉,这里重新装一个)
+  const installed = await post({
+    op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
+    sha256: archiveSha256, packId: 'market-test',
+  })
+  assert.equal(installed.statusCode, 200, installed.body)
+  const delRemote = await post({ op: 'deleteMemePack', packId: 'market-test' })
+  assert.equal(delRemote.statusCode, 400)
+  assert.match(delRemote.body, /卸载/)
+
+  // 切走后可以删自建图库,目录真的没了
+  await post({ op: 'setPack', packId: 'switch-a' })
+  const dir = join(home, '.dsh', 'meme-packs', 'switch-b')
+  assert.ok(existsSync(dir), '删除前目录应存在')
+  const done = JSON.parse((await post({ op: 'deleteMemePack', packId: 'switch-b' })).body)
+  assert.equal(done.ok, true)
+  assert.equal(existsSync(dir), false, '删除后目录应消失')
+  assert.ok(!done.packs.some((p) => p.id === 'switch-b'))
+  assert.ok(!done.enabledPacks.includes('switch-b'), '开关列表里不应留脏 id')
 })

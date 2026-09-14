@@ -21,7 +21,7 @@ import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta,
-  resolveActiveRoot, liveStore, registerSendMemeTool, dshHome,
+  resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -243,6 +243,76 @@ export function apply(ctx, config) {
     urlPrefix = base + ROUTE
   }
 
+  // ---- 模型可用的图库:设置页每张卡片一个开关,可以同时开多个 ----
+  // 管理相关的 memes.* 仍只作用于「当前图库」(上传/改/删/学图),
+  // send_meme 抽候选则跨所有打开的图库——这里包一层 sampler 给工具用。
+  const packRows = () => {
+    try { return listAllPacks() } catch { return [] }
+  }
+  const activePackId = () => {
+    const s = readSettings()
+    const packs = packRows()
+    return s.packId || (packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || ''
+  }
+  const enabledIds = () => enabledPackIds(readSettings(), packRows(), activePackId())
+  const sampler = {
+    get root() { return memes.root },
+    list: (...a) => memes.list(...a),
+    replace: (...a) => memes.replace(...a),
+    sampleMood(tag, query, n) {
+      const ids = enabledIds()
+      if (ids.length === 0) {
+        const { memes: rows, tags } = memes.list()
+        return { mood: resolveMoodName(tag, query, tags), memes: [], tags, reason: '当前没有打开任何图库，去设置页把要用的图库开关打开' }
+      }
+      if (ids.length === 1 && ids[0] === activePackId()) return memes.sampleMood(tag, query, n)
+      const packs = packRows()
+      const per = Math.max(1, Math.ceil(n / ids.length))
+      const merged = []
+      let mood = ''
+      let tags = []
+      for (const id of ids) {
+        const hit = packs.find((p) => p.id === id)
+        if (!hit) continue
+        let store = null
+        try {
+          store = new MemesStore(hit.path)
+          const one = store.sampleMood(tag, query, per)
+          mood = mood || one.mood
+          tags = one.tags.length ? one.tags : tags
+          for (const row of one.memes) {
+            // 非当前图库的路径带上包前缀,QQ 通道发图时按前缀找对图库
+            merged.push(id === activePackId() ? row : { ...row, path: id + '/' + row.path })
+          }
+        } catch { /* 坏包跳过,不影响其他图库 */ } finally { if (store) store.close() }
+      }
+      if (!mood) return { mood: null, memes: [], tags }
+      return { mood, memes: pickShuffled(merged, n), tags }
+    },
+    resolveStored(stored) {
+      const raw = String(stored || '')
+      const slash = raw.indexOf('/')
+      const first = slash > 0 ? raw.slice(0, slash) : ''
+      if (first) {
+        const hit = packRows().find((p) => p.id === first)
+        if (hit) return resolve(join(hit.path, raw.slice(slash + 1)))
+      }
+      return memes.resolveStored(raw)
+    },
+  }
+  const pickShuffled = (rows, n) => {
+    const copy = rows.slice()
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const tmp = copy[i]; copy[i] = copy[j]; copy[j] = tmp
+    }
+    return copy.slice(0, n)
+  }
+  const resolveMoodName = (tag, query, tags) => {
+    // 没有可用图库时也要回一个合法情绪名(否则工具只会说「先选情绪」)
+    try { return memes.sampleMood(tag, query, 1).mood } catch { return null }
+  }
+
   // ---- 发送通道:QQ 优先,Web 兜底 ----
   const qq = ctx.get('companionQq')
   const sendImage = qq !== undefined && typeof qq.sendImage === 'function'
@@ -250,7 +320,7 @@ export function apply(ctx, config) {
     : null
   if (sendImage || urlPrefix) {
     try {
-      registerSendMemeTool(ctx, memes, sendImage, urlPrefix)
+      registerSendMemeTool(ctx, sampler, sendImage, urlPrefix)
       console.log(`[dsh-expression] send_meme 已注册(${sendImage ? 'QQ' : 'Web'}通道,${urlPrefix || '无路由'})`)
     } catch (error) {
       console.error('[dsh-expression] send_meme 注册失败(不影响 API/面板):', error instanceof Error ? error.message : String(error))
@@ -264,7 +334,7 @@ export function apply(ctx, config) {
     if (sendImage || urlPrefix) return
     const qqNow = ctx.get('companionQq')
     if (qqNow !== undefined && typeof qqNow.sendImage === 'function') {
-      registerSendMemeTool(ctx, memes, (path, caption) => qqNow.sendImage(path, caption), urlPrefix)
+      registerSendMemeTool(ctx, sampler, (path, caption) => qqNow.sendImage(path, caption), urlPrefix)
     }
   }
   ctx.on('companionQq/available', register)
@@ -290,11 +360,13 @@ export function apply(ctx, config) {
       const s = readSettings()
       const packs = listAllPacks()
       const packId = s.packId || (packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || ''
+      const enabled = enabledPackIds(s, packs, packId)
       return {
         memeRoot: memes.root,
         packId,
+        packs: packs.map((p) => ({ ...p, enabled: enabled.includes(p.id) })),
+        enabledPacks: enabled,
         packsDir: packsDirNow(),
-        packs,
         companionPrompt: readSettings().companionPrompt || '',
         defaultCompanionPrompt: DEFAULT_COMPANION_PROMPT,
         promptEnabled: readSettings().promptEnabled !== false,
@@ -916,7 +988,10 @@ export function apply(ctx, config) {
             mkdirSync(resolve(packsDirNow()), { recursive: true })
             mkdirSync(dir)
             writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ id, name, description: String(body.description || '').slice(0, 200), version: '1.0.0' }, null, 2))
+            // 保留已有开关状态,再把新建的图库打开(模型立即可用)
+            const wasEnabled = enabledPackIds(readSettings(), listAllPacks(), activePackId())
             reloadMemeStore(dir, id)
+            writeSettings({ enabledPacks: [...new Set([...wasEnabled, id])] })
             json(res, { ok: true, ...packPayload() })
           } else if (op === 'recognize') {
             // 上传弹窗的 AI 识别:只返回识别结果,不写入图库(用户确认后走 upload)
@@ -1071,6 +1146,9 @@ export function apply(ctx, config) {
               removedFiles = true
             }
             writeSettings({ remoteSubs: subs.filter((s) => s && s.id !== id) })
+            // 卸掉的图库从开关列表里摘掉,别留脏 id
+            const savedEnabled = readSettings().enabledPacks
+            if (Array.isArray(savedEnabled)) writeSettings({ enabledPacks: savedEnabled.filter((x) => x !== id) })
             json(res, { ok: true, removedFiles, ...packPayload(), message: removedFiles ? '已删除订阅及本地文件' : '已删除订阅(本地文件保留)' })
           } else if (op === 'getMemeRoot') {
 
@@ -1101,6 +1179,34 @@ export function apply(ctx, config) {
             const enabled = body.enabled !== false
             writeSettings({ promptEnabled: enabled })
             json(res, { ok: true, ...packPayload(), message: enabled ? '已开启陪伴提示词,下一条消息生效' : '已关闭陪伴提示词,下一条消息生效' })
+          } else if (op === 'setPackEnabled') {
+            // 每张卡片一个开关,可同时开多个;没设置过时以当前图库为初始值
+            const target = String(body.packId || '').trim()
+            const packs = listAllPacks()
+            if (!packs.some((p) => p.id === target)) throw new Error('图库不存在: ' + target)
+            const current = enabledPackIds(readSettings(), packs, packPayload().packId)
+            const next = body.enabled !== false
+              ? [...new Set([...current, target])]
+              : current.filter((id) => id !== target)
+            writeSettings({ enabledPacks: next })
+            json(res, { ok: true, ...packPayload(), message: next.includes(target) ? '已打开「' + target + '」,模型可以用它发图' : '已关闭「' + target + '」' })
+          } else if (op === 'deleteMemePack') {
+            // 删除图库目录:内置包不能删,市场订阅的走「卸载」,当前图库要先切走
+            const target = String(body.packId || '').trim()
+            const hit = listAllPacks().find((p) => p.id === target)
+            if (!hit) throw new Error('图库不存在: ' + target)
+            if (hit.source === 'bundled') throw new Error('内置图库不能删除')
+            if (remoteSubs().some((s) => s.id === target)) throw new Error('市场下载的图库请用「卸载」')
+            if (resolve(hit.path) === resolve(memes.root)) throw new Error('请先切到别的图库再删除')
+            const root = resolve(packsDirNow())
+            const dir = resolve(hit.path)
+            if (dir !== resolve(join(root, target)) && !dir.startsWith(root + sep)) throw new Error('图库目录越界,已拒绝删除')
+            if (hit.source === 'user' && !dir.startsWith(root + sep)) throw new Error('图库不在扫描目录内,已拒绝删除')
+            // 删除的图库从开关列表里摘掉,别留脏 id
+            const saved = readSettings().enabledPacks
+            if (Array.isArray(saved)) writeSettings({ enabledPacks: saved.filter((id) => id !== target) })
+            rmSync(dir, { recursive: true, force: true })
+            json(res, { ok: true, ...packPayload(), message: '已删除图库「' + (hit.name || target) + '」' })
           } else if (op === 'browse') {
             // 服务端列目录:宿主 0.1.5 的客户端没有 workspaces 服务,「选择目录」只能走自己的 API
             let dir = resolve(String(body.path || '').trim() || packsDirNow())

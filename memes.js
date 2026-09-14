@@ -36,6 +36,19 @@ export function defaultPacksDir() {
   return join(dshHome(), '.dsh', 'meme-packs')
 }
 
+/**
+ * 模型可以用的图库 id 列表(设置页每张卡片上的开关)。
+ * 没设置过 `enabledPacks` 时只算当前图库——保持「装完即用」的旧行为,
+ * 用户一旦拨过开关就以显式列表为准(可以同时开多个)。
+ * 已删除/已卸载的 id 会被过滤掉。
+ */
+export function enabledPackIds(settings = {}, packs = [], activeId = '') {
+  const saved = Array.isArray(settings.enabledPacks) ? settings.enabledPacks.map(String) : null
+  if (saved === null) return activeId ? [activeId] : []
+  const alive = new Set(packs.map((p) => p.id))
+  return saved.filter((id) => alive.has(id))
+}
+
 export function isPackDir(dir) {
   try {
     return statSync(dir).isDirectory() && existsSync(join(dir, 'index.db'))
@@ -326,17 +339,18 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
         return { ok: false, message: '没有可用发送通道: ' + absolute }
       }
 
-      const { mood, memes: candidates, tags } = memes.sampleMood(tag, query, limit)
+      const { mood, memes: candidates, tags, reason } = memes.sampleMood(tag, query, limit)
       if (!mood) {
         return {
           ok: false,
-          message: '先选一个情绪 tag 再搜。字典: ' + MOOD_DICT,
+          message: reason || ('先选一个情绪 tag 再搜。字典: ' + MOOD_DICT),
         }
       }
       if (candidates.length === 0) {
         return {
           ok: false,
-          message: '情绪「' + mood + '」下没有图。换一个: ' + MOOD_DICT,
+          // 没有可用图库时 sampler 会给 reason,直说比「情绪下没有图」清楚
+          message: reason || ('情绪「' + mood + '」下没有图。换一个: ' + MOOD_DICT),
         }
       }
       const lines = candidates.map((m, i) => {
