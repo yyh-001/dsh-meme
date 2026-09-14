@@ -81,10 +81,20 @@ const memes = [
   { path: 'memes/happy/a.jpg', tag: 'happy', file_name: 'a.jpg', caption: '甲', keywords: '', url: '/dsh-memes/p1/memes/happy/a.jpg' },
   { path: 'memes/happy/b.jpg', tag: 'happy', file_name: 'b.jpg', caption: '乙', keywords: '', url: '/dsh-memes/p1/memes/happy/b.jpg' },
 ]
-const remoteDir = [{
-  id: 'p2', name: '远程包', version: '2.0.0', count: 5, archiveUrl: 'https://example.com/p2.zip',
-  preview: 'https://raw.githubusercontent.com/o/r/main/previews/p2.jpg', keywords: ['测试'],
-}]
+const remoteDir = [
+  {
+    id: 'p2', name: '远程包', version: '2.0.0', count: 5, archiveUrl: 'https://example.com/p2.zip',
+    preview: 'https://raw.githubusercontent.com/o/r/main/previews/p2.jpg', keywords: ['测试'], downloads: 3,
+  },
+  {
+    id: 'p3', name: '热门包', version: '1.0.0', count: 9, archiveUrl: 'https://example.com/p3.zip',
+    preview: 'https://raw.githubusercontent.com/o/r/main/previews/p3.jpg', keywords: ['热门'], downloads: 1200,
+  },
+  {
+    id: 'p4', name: '清单包', version: '0.1.0', count: 2, manifestUrl: 'https://example.com/p4.json',
+    preview: 'https://raw.githubusercontent.com/o/r/main/previews/p4.jpg', keywords: ['清单'], downloads: 0,
+  },
+]
 const apiHit = []
 globalThis.fetch = async (url, init) => {
   const u = String(url)
@@ -173,7 +183,13 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   const discover = render()
   text = allText(discover)
   assert.ok(text.includes('远程包'), '发现页应列出远程条目: ' + text.slice(0, 200))
-  assert.equal(findCover(discover), 'url("https://cdn.jsdelivr.net/gh/o/r@main/previews/p2.jpg")', '远程封面应换 jsDelivr 镜像')
+  assert.ok(text.includes('↓ 1.2k'), '卡片应显示下载量: ' + text.slice(0, 200))
+  // 默认按下载量排序:热门包(1200) → 远程包(3) → 清单包(0)
+  const order = []
+  walk(discover, (n) => { if (n.props && n.props.className === 'mk-name') order.push(n.kids[0]) })
+  assert.deepEqual(order, ['热门包', '远程包', '清单包'], '发现页默认按下载量排序,没有下载量的排最后')
+  // 排序后第一张是「热门包」,顺带验证远程封面走了 jsDelivr 镜像
+  assert.equal(findCover(discover), 'url("https://cdn.jsdelivr.net/gh/o/r@main/previews/p3.jpg")', '远程封面应换 jsDelivr 镜像')
   assert.ok(text.includes('安装'), '未安装的条目应给安装按钮')
 
   // 发现页点卡片 → 预览弹窗(没装的走目录里的预览图)

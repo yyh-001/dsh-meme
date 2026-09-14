@@ -765,8 +765,12 @@ window.__ModuleLoader__.load({
             installed: !!sub || downloaded,
             job: jobFor(pid),
             downloaded,
+            downloads: Number(entry.downloads) || 0,
           })
         }
+        // 默认按下载量排序;没有下载量的(清单热链的包、或额度/网络拉不到)排最后,
+        // 同分保持目录原顺序(Array#sort 稳定)
+        cards.sort((a, b) => (b.downloads || 0) - (a.downloads || 0))
         return cards
       })()
       // 已安装:本地扫描到的图库(含内置/导入/自定义 + 下载的远程包)在前,订阅了但没扫到的追加在后
