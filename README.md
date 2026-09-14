@@ -74,7 +74,7 @@ pnpm add file:/path/to/dsh-meme
 输入框左侧点 **😊**（微信同款笑脸）直接选图一键发出，无需让模型代劳。
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/chat-example.png" alt="模型根据情绪主动发表情包" width="80%" />
+  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/chat-example.png" alt="斗图示例：用户发一张，模型接一张，前端把 [表情: 描述] 配成图" width="80%" />
 </p>
 
 ## 工具
