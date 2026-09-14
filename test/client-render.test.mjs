@@ -190,6 +190,7 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   let grid = null
   walk(previewTree, (n) => { if (!grid && n.props && n.props.className === 'mk-preview') grid = n })
   assert.ok(grid, '预览弹窗应有图片网格')
+  assert.ok(allText(previewTree).includes('安装后可以看全部'), '目录预览比图库张数少时要说明安装后能看全部')
 
   // 设置页:提示词开关与扫描目录
   findButton(discover, '设置').props.onClick()

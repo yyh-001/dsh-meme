@@ -343,7 +343,7 @@ window.__ModuleLoader__.load({
           packId: row.packId || '', name: row.name || '', meta: row.meta || '',
           desc: row.desc || '', tags: row.tags || [],
           images: [...new Set(catalogImages)].filter(Boolean),
-          total: 0, loading: !!(row.downloaded && row.packId),
+          total: Number(entry.count) || 0, loading: !!(row.downloaded && row.packId),
         })
         if (!row.downloaded || !row.packId) return
         try {
@@ -1091,9 +1091,11 @@ window.__ModuleLoader__.load({
                 style: { backgroundImage: 'url("' + coverUrl(u) + '")' },
               })))
               : (previewPack.loading ? null : h('div', { className: 'empty' }, '这个图库没有提供预览图')),
-            previewPack.local && previewPack.total > previewPack.images.length
+            previewPack.images.length && previewPack.total > previewPack.images.length
               ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
-                '共 ' + previewPack.total + ' 张，这里显示前 ' + previewPack.images.length + ' 张')
+                previewPack.local
+                  ? '共 ' + previewPack.total + ' 张，这里显示前 ' + previewPack.images.length + ' 张'
+                  : '目录里提供 ' + previewPack.images.length + ' 张预览；这个图库共 ' + previewPack.total + ' 张，安装后可以看全部')
               : null,
           ),
         ) : null,
