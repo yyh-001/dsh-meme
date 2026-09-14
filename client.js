@@ -149,7 +149,6 @@ window.__ModuleLoader__.load({
       const [promptDraft, setPromptDraft] = React.useState('') // 弹窗内草稿
       const [remoteSubs, setRemoteSubs] = React.useState([])
       const [remoteDir, setRemoteDir] = React.useState(null) // 服务端代拉的图库目录(null=暂不可用)
-      const [remoteUrl, setRemoteUrl] = React.useState('')
       const [remoteJobs, setRemoteJobs] = React.useState({})
       const [remoteBusy, setRemoteBusy] = React.useState(false)
       const [panelTab, setPanelTab] = React.useState('library')
@@ -250,7 +249,7 @@ window.__ModuleLoader__.load({
         return () => clearInterval(t)
       }, [remoteJobs])
       const startRemote = async (manifestUrl, packId) => {
-        const url = String(manifestUrl || remoteUrl || '').trim()
+        const url = String(manifestUrl || '').trim()
         if (!url) { setRootNotice('先填远程图库清单 JSON 地址'); return }
         setRemoteBusy(true)
         try {
@@ -980,8 +979,8 @@ window.__ModuleLoader__.load({
               mkQuery
                 ? '没有匹配的图库'
                 : (remoteDir === null
-                    ? '图库目录暂不可用,可在下方粘贴清单 JSON 地址订阅'
-                    : '目录暂无内容,可在下方粘贴清单 JSON 地址订阅'))
+                    ? '图库目录暂不可用(检查网络或稍后重试)'
+                    : '目录暂无内容'))
           : h('div', { className: 'mk-grid' }, discoverCards.map((row) => packCard(row, [
             // 发现页只负责装:装过的这里不给按钮,更新去图库页(有新版本才显示)
             row.downloaded ? null : h('button', {
@@ -993,10 +992,6 @@ window.__ModuleLoader__.load({
               disabled: remoteBusy || !!row.job,
             }, row.job ? '下载中…' : '安装'),
           ].filter(Boolean), () => openPreview(row)))),
-        h('div', { className: 'row', style: { width: '100%' } },
-          h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '高级:粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
-          h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
-        ),
 
         ) : null,
         panelTab === 'settings' ? h(React.Fragment, null,

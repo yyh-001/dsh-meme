@@ -103,7 +103,7 @@ pnpm add file:/path/to/dsh-meme
 - **更新**：只在市场里有更新版本时才显示（比对图库自己的版本与市场目录的版本）；发现页只负责安装，装过的条目不给按钮，要更新到图库页
 - **删除**：图库卡片上的「删除」——内置、市场下载、自建/导入都走这一个入口（二次确认在应用内弹窗里，不是浏览器原生框）。删市场下载的会连订阅记录一起清掉；内置包删了，插件升级或重装后会随包回来；当前图库要先切走
 - **投稿**：当前图库的卡片上，导出图库 ZIP 并打开预填好的 GitHub 投稿表单
-- **发现**：展示 GitHub 图库目录，**点卡片可预览图库的图片**（已安装的读本地图库，没装的用目录里的预览图，点图可开原图）；点「安装」下载 Release ZIP、校验 SHA-256 并自动切换；已安装的条目不显示按钮（更新在图库页）。底部可粘贴清单 JSON 地址订阅
+- **发现**：展示 GitHub 图库目录，**点卡片可预览图库的图片**（已安装的读本地图库，没装的用目录里的预览图，点图可开原图）；点「安装」下载 Release ZIP、校验 SHA-256 并自动切换；已安装的条目不显示按钮（更新在图库页）
 - **设置**：扫描目录（带「选择目录」应用内浏览器）、陪伴提示词开关（关掉后模型不再主动斗图）、编辑提示词
 - **上传弹窗**：选图预览 + 分类下拉（选择/新建/删除分类）+ 描述 + 关键词
 - **编辑弹窗**：同款分类下拉，改分类/描述/关键词
@@ -147,13 +147,13 @@ pnpm add file:/path/to/dsh-meme
 
 可选：把插件导出的那个 ZIP 挂到 GitHub Release，别人就能直接下载再导入。也可以 `git clone` 之后，把仓库放进扫描目录（设置页「扫描目录」里改路径，或用「选择目录」浏览）。
 
-## 图库市场与远程订阅
+## 图库市场
 
-设置页「图库市场 → 发现」默认读取 [`dsh-meme-packs/catalog.json`](https://github.com/yyh-001/dsh-meme-packs/blob/main/catalog.json)。用户点「安装」后，插件直接下载 GitHub Release ZIP、校验 SHA-256、安装并切换，不需要先手动下载。
+设置页「发现」默认读取 [`dsh-meme-packs/catalog.json`](https://github.com/yyh-001/dsh-meme-packs/blob/main/catalog.json)：点卡片可以预览图库里的图，点「安装」直接下载 GitHub Release ZIP、校验 SHA-256、安装并切换，不需要先手动下载。
 
-- GitHub Release ZIP 与旧版逐图清单两种格式都支持，规范见 **[docs/remote-pack-spec.md](./docs/remote-pack-spec.md)**
-- 已订阅的包再点「更新」走增量:只下载新增图片,已有图片仅刷新描述/关键词
-- 主目录走 jsDelivr/raw 双源；旧目录 [`docs/remote-packs.json`](./docs/remote-packs.json) 保留为兼容回退
+- GitHub Release ZIP 与逐图清单两种格式都支持，规范见 **[docs/remote-pack-spec.md](./docs/remote-pack-spec.md)**
+- 目录源可换：默认 raw 优先、jsDelivr 兜底（raw 更及时，jsDelivr 在部分网络下更通）；要换成自己的目录，写 `settings.remoteDirUrl` 或插件 patch 里的 `config.remoteDirUrl`
+- 界面暂时只提供「从目录安装」这一条路；按逐图清单订阅（增量拉图）的后端仍在，等需要了再把入口放出来
 
 ## 它做什么
 
