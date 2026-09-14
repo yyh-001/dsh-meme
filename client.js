@@ -695,6 +695,7 @@ window.__ModuleLoader__.load({
         onChange: onPickFile,
       })
 
+      const curPack = packs.find((p) => p.id === packId) || null
       const cards = memes.map((m) => h('div', { key: m.path, className: 'meme-card' },
         h('img', { src: m.url, alt: m.path, loading: 'lazy' }),
         h('div', { className: 'meta' },
@@ -822,7 +823,6 @@ window.__ModuleLoader__.load({
           : () => (row.entry.archiveUrl ? startArchive(row.entry) : startRemote(row.entry.manifestUrl, row.entry.id || '')),
         disabled: remoteBusy || !!row.job,
       }, row.downloaded ? '更新' : '安装')
-      const curPack = packs.find((p) => p.id === packId) || null
       return h('div', { className: 'meme-panel' },
         h('div', { className: 'mk-tabs', style: { width: '100%', marginBottom: 2 } },
           h('button', { className: 'mk-tab' + (panelTab === 'library' ? ' on' : ''), onClick: () => setPanelTab('library') }, '图库' + (packs.length ? ' (' + packs.length + ')' : '')),
