@@ -823,7 +823,7 @@ window.__ModuleLoader__.load({
           key: row.key,
           className: 'mk-card' + (onOpen ? ' mk-card-open' : ''),
           // 整卡可点 = 打开预览;卡片内的按钮自己 stopPropagation,不会误触发
-          ...(onOpen ? { onClick: () => onOpen(row), title: '点击预览图库图片' } : {}),
+          ...(onOpen ? { onClick: () => onOpen(row), title: '点击打开' } : {}),
         },
           // 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
           // 全局样式影响(之前实测在宿主里图片没铺满,露出一块空底色很难看)
@@ -850,7 +850,8 @@ window.__ModuleLoader__.load({
                 ? h('span', {
                   className: 'switch' + (row.enabled ? ' on' : ''),
                   title: row.enabled ? '模型正在使用这个图库,点击关闭' : '点击打开:模型可以用这个图库发图',
-                  onClick: () => row.onToggle(!row.enabled),
+                  // 开关自己吞掉点击:卡片整张可点(进表情包页 / 开预览),别误触发
+                  onClick: (e) => { e.stopPropagation(); row.onToggle(!row.enabled) },
                 })
                 : null,
             ),
@@ -915,9 +916,6 @@ window.__ModuleLoader__.load({
               ? h('div', { className: 'empty' }, '还没有图库')
               : h('div', { className: 'mk-grid' }, libraryCards.map((row) => packCard(row, [
                 row.downloaded
-                  ? h('button', { key: 'edit', onClick: () => onEditPack(row.packId), disabled: remoteBusy || !!row.job }, '编辑')
-                  : null,
-                row.downloaded
                   ? h('button', { key: 'export', onClick: () => onExportPack(row.packId, row.name) }, '导出')
                   : null,
                 row.packId === packId && curPack && curPack.count > 0
@@ -929,7 +927,7 @@ window.__ModuleLoader__.load({
                 row.downloaded
                   ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => onDeletePackPrompt(row) }, '删除')
                   : null,
-              ].filter(Boolean)))),
+              ].filter(Boolean), () => onEditPack(row.packId)))),
           )
         ) : null,
         // 编辑弹窗

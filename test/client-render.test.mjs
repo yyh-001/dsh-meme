@@ -175,7 +175,8 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   let text = allText(library)
   assert.ok(text.includes('包一'), '图库页应列出图库: ' + text.slice(0, 200))
   assert.equal(findCover(library), 'url("/dsh-memes/p1/memes/happy/a.jpg")', '图库卡片封面用本地路由')
-  assert.ok(findButton(library, '编辑'), '图库卡片应有编辑按钮')
+  assert.ok(findClickable(library, '包一'), '图库卡片应可点(点进表情包页)')
+  assert.equal(findButton(library, '编辑'), null, '不该再有专门的编辑按钮')
 
   // 发现页:远程条目 + 远程封面走 jsDelivr 镜像
   const market = render()
@@ -217,7 +218,7 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   // 详情页:点「编辑」进去,这条路径以前因为 TDZ 整页空白
   findButton(settings, '图库').props.onClick()
   const library2 = render()
-  findButton(library2, '编辑').props.onClick()
+  findClickable(library2, '包一').props.onClick()   // 点卡片即进入
   await flush()
   const detail = render()
   text = allText(detail)
