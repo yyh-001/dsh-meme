@@ -303,19 +303,6 @@ window.__ModuleLoader__.load({
         }
         setRemoteBusy(false)
       }
-      const onRemoveRemote = async (sub) => {
-        if (!window.confirm('删除订阅「' + (sub.name || sub.id) + '」及已下载的本地图片?')) return
-        try {
-          const res = await apiPost({ op: 'removeRemoteSub', id: sub.id, deleteFiles: true })
-          if (res && res.ok) {
-            applyRoot(res)
-            setRootNotice(res.message || '已删除')
-            await load('', '')
-          } else {
-            setRootNotice('删除失败: ' + ((res && res.error) || ''))
-          }
-        } catch (e) { setRootNotice('删除失败') }
-      }
       // 图库卡片「导出」:导出指定图库的 ZIP(不必先切过去)
       const onExportPack = async (id, name) => {
         try {
@@ -352,8 +339,21 @@ window.__ModuleLoader__.load({
           applyRoot(res)
           if (packView === id) setPackView('')
           setRootNotice(res.message || '已删除')
+          await load('', '')
         } catch (error) { setRootNotice(error.message || '删除失败') }
-        setPackDialog('')
+      }
+      const onDeletePackPrompt = (row) => {
+        setRootNotice('')
+        setConfirmBox({
+          title: '删除图库',
+          lines: [
+            '确认删除图库「' + (row.name || row.packId) + '」？',
+            '该图库的目录和里面的图片都会被删掉，不可恢复。',
+            ...(row.builtin ? ['这是插件自带的内置图库，升级或重装插件后它会重新出现。'] : []),
+          ],
+          confirmLabel: '删除',
+          onConfirm: () => onDeletePack(row.packId),
+        })
       }
       // 图库卡片「编辑」:先切到该图库(上传/改/删只作用于当前图库),再进它的表情包页
       const onEditPack = async (id) => {
@@ -385,8 +385,9 @@ window.__ModuleLoader__.load({
       }
       const [packDialog, setPackDialog] = React.useState('')
       const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
-      const [packTarget, setPackTarget] = React.useState(null) // 删除确认弹窗的目标图库
       const [packSaving, setPackSaving] = React.useState(false)
+      // 应用内确认弹窗(不用浏览器原生 confirm):{title, lines, confirmLabel, onConfirm}
+      const [confirmBox, setConfirmBox] = React.useState(null)
       const [marketResult, setMarketResult] = React.useState('')
       const savePack = async () => {
         if (packSaving) return
@@ -533,10 +534,20 @@ window.__ModuleLoader__.load({
       }
       React.useEffect(() => { load('', '') }, [])
 
-      const onDeleteTag = async (tagArg) => {
+      const onDeleteTag = (tagArg) => {
         const tag = tagArg || (upTag === '__new__' ? '' : String(upTag || '').trim())
         if (!tag) return
-        if (!window.confirm('删除分类「' + tagZh(tag) + ' (' + tag + ')」及其中所有表情包?此操作不可恢复')) return
+        setConfirmBox({
+          title: '删除分类',
+          lines: [
+            '确认删除分类「' + tagZh(tag) + ' (' + tag + ')」？',
+            '这个分类下的表情包会一起删掉，不可恢复。',
+          ],
+          confirmLabel: '删除分类',
+          onConfirm: () => doDeleteTag(tag),
+        })
+      }
+      const doDeleteTag = async (tag) => {
         try {
           const res = await apiPost({ op: 'deleteTag', tag })
           setNotice(res && res.ok ? '已删除分类,共 ' + (res.deleted || 0) + ' 张' : '删除失败: ' + (res && res.error || ''))
@@ -646,8 +657,15 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const onDelete = async (m) => {
-        if (!window.confirm('删除 ' + m.path + ' ?')) return
+      const onDelete = (m) => {
+        setConfirmBox({
+          title: '删除表情包',
+          lines: ['确认删除这张表情包？', m.path, '不可恢复。'],
+          confirmLabel: '删除',
+          onConfirm: () => doDelete(m),
+        })
+      }
+      const doDelete = async (m) => {
         try {
           const res = await apiPost({ op: 'delete', path: m.path })
           setNotice(res && res.ok ? '已删除' : '删除失败: ' + (res && res.error || ''))
@@ -842,10 +860,10 @@ window.__ModuleLoader__.load({
                   : null,
                 // 没下载的给「安装」,下载了且真有新版本才给「更新」
                 (!row.downloaded || row.hasUpdate) ? updateBtn(row) : null,
-                row.downloaded && !row.sub
-                  ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => { setPackTarget({ id: row.packId, name: row.name, builtin: !!row.builtin }); setRootNotice(''); setPackDialog('delete') } }, '删除')
+                // 删除是唯一入口:内置、市场下载、自建/导入都走它(服务端也只留这一个 op)
+                row.downloaded
+                  ? h('button', { key: 'delete', className: 'mk-danger', disabled: packSaving, onClick: () => onDeletePackPrompt(row) }, '删除')
                   : null,
-                row.sub && row.downloaded ? h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载') : null,
               ].filter(Boolean)))),
           )
         ) : null,
@@ -1010,31 +1028,34 @@ window.__ModuleLoader__.load({
         ),
         packDialog ? h('div', { className: 'meme-modal-mask' },
           h('div', { className: 'meme-modal' },
-            h('h3', null, packDialog === 'create' ? '新建图包库' : packDialog === 'delete' ? '删除图库' : '投稿'),
+            h('h3', null, packDialog === 'create' ? '新建图包库' : '投稿'),
             rootNotice ? h('p', { role: 'status' }, rootNotice) : null,
             packDialog === 'create' ? h(React.Fragment, null,
               ...[['name', '图库名称'], ['id', '图库 ID'], ['description', '简介 / 图片来源']].map(([key, label]) =>
                 h('label', { key, style: { display: 'block', marginBottom: 12 } }, label,
                   h('input', { value: packDraft[key], maxLength: key === 'id' ? 40 : key === 'name' ? 60 : 200,
                     onChange: e => setPackDraft({ ...packDraft, [key]: e.target.value }), disabled: packSaving }))),
-            ) : packDialog === 'delete' ? h(React.Fragment, null,
-              h('p', null, '确认删除图库「' + ((packTarget && packTarget.name) || '') + '」？'),
-              h('p', null, '该图库的目录和里面的图片都会被删掉，不可恢复。'),
-              packTarget && packTarget.builtin
-                ? h('p', null, '这是插件自带的内置图库，升级或重装插件后它会重新出现。')
-                : null,
             ) : h(React.Fragment, null,
               h('p', null, '自动导出当前图库 ZIP，并打开预填好的 GitHub 投稿页。'),
               h('p', null, '登录 GitHub 后，将下载的 ZIP 拖入“图库 ZIP”一栏，补充图片来源和许可，再提交。审核通过后收录到市场。'),
             ),
             h('div', { className: 'row', style: { marginTop: 16 } },
-              packDialog === 'delete'
-                ? h('button', {
-                  className: 'btn-primary', disabled: packSaving,
-                  onClick: () => packTarget && onDeletePack(packTarget.id),
-                }, packSaving ? '处理中…' : '删除')
-                : h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
+              h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
               h('button', { disabled: packSaving, onClick: () => { setPackDialog('') } }, '取消'),
+            ),
+          ),
+        ) : null,
+        // 应用内确认弹窗(原生 confirm 在桌面壳里观感不一致)
+        confirmBox ? h('div', { className: 'meme-modal-mask', onClick: () => setConfirmBox(null) },
+          h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
+            h('h3', null, confirmBox.title),
+            (confirmBox.lines || []).map((line, i) => h('p', { key: i }, line)),
+            h('div', { className: 'row', style: { marginTop: 16 } },
+              h('button', {
+                className: 'btn-primary',
+                onClick: () => { const run = confirmBox.onConfirm; setConfirmBox(null); if (run) run() },
+              }, confirmBox.confirmLabel || '确认'),
+              h('button', { onClick: () => setConfirmBox(null) }, '取消'),
             ),
           ),
         ) : null,

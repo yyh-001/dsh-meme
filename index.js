@@ -1143,25 +1143,6 @@ export function apply(ctx, config) {
               }
             }
             json(res, { ok: true, ...jobSnapshot(startRemoteJob(manifest, sub.url, 'update')) })
-          } else if (op === 'removeRemoteSub') {
-            const id = String(body.id || '').trim()
-            const subs = remoteSubs()
-            if (!subs.some((s) => s && s.id === id)) throw new Error('未找到订阅: ' + id)
-            let removedFiles = false
-            if (body.deleteFiles) {
-              const root = resolve(packsDirNow())
-              const target = resolve(join(root, id))
-              if (!target.startsWith(root + sep)) throw new Error('目录越界')
-              if (!existsSync(join(target, SIDECAR_NAME))) throw new Error('该图库不是远程订阅下载的,请手动处理其目录')
-              if (resolve(memes.root) === target) throw new Error('该图库正在使用中,请先切换到其他图库')
-              rmSync(target, { recursive: true, force: true })
-              removedFiles = true
-            }
-            writeSettings({ remoteSubs: subs.filter((s) => s && s.id !== id) })
-            // 卸掉的图库从开关列表里摘掉,别留脏 id
-            const savedEnabled = readSettings().enabledPacks
-            if (Array.isArray(savedEnabled)) writeSettings({ enabledPacks: savedEnabled.filter((x) => x !== id) })
-            json(res, { ok: true, removedFiles, ...packPayload(), message: removedFiles ? '已删除订阅及本地文件' : '已删除订阅(本地文件保留)' })
           } else if (op === 'getMemeRoot') {
 
             json(res, { ok: true, ...packPayload() })
@@ -1203,17 +1184,22 @@ export function apply(ctx, config) {
             writeSettings({ enabledPacks: next })
             json(res, { ok: true, ...packPayload(), message: next.includes(target) ? '已打开「' + target + '」,模型可以用它发图' : '已关闭「' + target + '」' })
           } else if (op === 'deleteMemePack') {
-            // 删除图库目录:内置包也能删(升级/重装会回来),订阅的走「卸载」,当前图库要先切走
+            // 唯一的删除入口:不管是内置、市场下载还是自建/导入,都用这一个 op。
+            // 内置包删了升级/重装会回来;市场下载的顺便把订阅记录摘掉。
             const target = String(body.packId || '').trim()
             const hit = listAllPacks().find((p) => p.id === target)
             if (!hit) throw new Error('图库不存在: ' + target)
-            if (remoteSubs().some((s) => s.id === target)) throw new Error('市场下载的图库请用「卸载」')
             if (resolve(hit.path) === resolve(memes.root)) throw new Error('请先切到别的图库再删除')
             // 只允许删「扫描目录/<id>」或「插件包内 memes/<id>」,其余路径一律拒绝
             const dir = packDeleteDir(hit, packsDirNow())
+            const settingsNow = readSettings()
+            if (remoteSubs().some((s) => s && s.id === target)) {
+              writeSettings({ remoteSubs: remoteSubs().filter((s) => s && s.id !== target) })
+            }
             // 删除的图库从开关列表里摘掉,别留脏 id
-            const saved = readSettings().enabledPacks
-            if (Array.isArray(saved)) writeSettings({ enabledPacks: saved.filter((id) => id !== target) })
+            if (Array.isArray(settingsNow.enabledPacks)) {
+              writeSettings({ enabledPacks: settingsNow.enabledPacks.filter((id) => id !== target) })
+            }
             rmSync(dir, { recursive: true, force: true })
             json(res, { ok: true, ...packPayload(), message: '已删除图库「' + (hit.name || target) + '」' + (hit.source === 'bundled' ? '(内置包,升级或重装后会回来)' : '') })
           } else if (op === 'browse') {

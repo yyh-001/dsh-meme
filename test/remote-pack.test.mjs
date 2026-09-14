@@ -291,30 +291,22 @@ test('超限图片计入失败,任务不崩', async () => {
   rmSync(packDir(), { recursive: true, force: true })
 })
 
-test('removeRemoteSub:使用中的包拒绝删除,切走后可删', async () => {
+test('deleteMemePack:市场下载的包也能删,删完连订阅记录一起清掉', async () => {
   // 先补一个干净的远程包并处于激活态
   currentManifest = v1
   const res = await post({ op: 'subscribeRemote', manifestUrl: base + '/manifest.json' })
   await waitJob(JSON.parse(res.body).id)
-  const active = await post({ op: 'removeRemoteSub', id: 'remote-test', deleteFiles: true })
+  const active = await post({ op: 'deleteMemePack', packId: 'remote-test' })
   assert.equal(active.statusCode, 400)
-  assert.match(active.body, /正在使用/)
+  assert.match(active.body, /先切到别的图库/)
 
   const sw = await post({ op: 'setPack', packId: 'dafeiyu-001' })
   assert.equal(JSON.parse(sw.body).ok, true)
-  const del = await post({ op: 'removeRemoteSub', id: 'remote-test', deleteFiles: true })
-  assert.equal(JSON.parse(del.body).ok, true)
-  assert.equal(JSON.parse(del.body).removedFiles, true)
+  const del = JSON.parse((await post({ op: 'deleteMemePack', packId: 'remote-test' })).body)
+  assert.equal(del.ok, true)
   assert.ok(!existsSync(packDir()))
-  const list = await get()
-  assert.equal(list.json.remoteSubs.length, 0)
-  assert.ok(!list.json.packs.some((p) => p.id === 'remote-test'))
-})
-
-test('非远程包不能走 removeRemoteSub 删除', async () => {
-  const res = await post({ op: 'removeRemoteSub', id: 'dafeiyu-001', deleteFiles: true })
-  assert.equal(res.statusCode, 400)
-  assert.match(res.body, /未找到订阅/)
+  assert.equal(del.remoteSubs.length, 0, '订阅记录要一起清掉')
+  assert.ok(!del.packs.some((p) => p.id === 'remote-test'))
 })
 
 test('installRemoteArchive:下载、校验并安装市场 ZIP', async () => {
@@ -501,15 +493,17 @@ test('deleteMemePack:能删自建图库,当前/订阅的拒绝', async () => {
   const bundledPath = join(memesMod.bundledPacksDir(), 'dafeiyu-001')
   assert.equal(memesMod.packDeleteDir({ id: 'dafeiyu-001', path: bundledPath, source: 'bundled' }, join(home, '.dsh', 'meme-packs')), bundledPath)
 
-  // 市场订阅的包走「卸载」(前面的用例已把订阅卸掉,这里重新装一个)
+  // 市场订阅的包同样走「删除」,删完订阅记录也不该留着
   const installed = await post({
     op: 'installRemoteArchive', archiveUrl: base + '/pack.zip',
     sha256: archiveSha256, packId: 'market-test',
   })
   assert.equal(installed.statusCode, 200, installed.body)
-  const delRemote = await post({ op: 'deleteMemePack', packId: 'market-test' })
-  assert.equal(delRemote.statusCode, 400)
-  assert.match(delRemote.body, /卸载/)
+  await post({ op: 'setPack', packId: 'switch-a' })
+  const delRemote = JSON.parse((await post({ op: 'deleteMemePack', packId: 'market-test' })).body)
+  assert.equal(delRemote.ok, true)
+  assert.ok(!delRemote.remoteSubs.some((s) => s.id === 'market-test'))
+  assert.ok(!existsSync(join(home, '.dsh', 'meme-packs', 'market-test')))
 
   // 切走后可以删自建图库,目录真的没了
   await post({ op: 'setPack', packId: 'switch-a' })
