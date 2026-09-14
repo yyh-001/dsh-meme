@@ -919,6 +919,17 @@ export function apply(ctx, config) {
             json(res, { ok: true, remoteDir: await fetchRemoteDirectory() })
             return
           }
+          // 读取型 GET 同样需要同源校验,避免任意网络访问者未经授权读取全部表情库数据
+          // (与下方写操作的 CSRF 策略一致:缺失 Origin 的本地脚本/curl 放行,不同源一律 403)。
+          const readOrigin = req.headers.origin
+          if (readOrigin) {
+            let readSameOrigin = false
+            try { readSameOrigin = new URL(readOrigin).host === String(req.headers.host || '') } catch { readSameOrigin = false }
+            if (!readSameOrigin) {
+              json(res, { ok: false, error: '跨站请求被拒绝' }, 403)
+              return
+            }
+          }
           const packs = listAllPacks()
           const activeId = readSettings().packId
             || ((packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || '')
