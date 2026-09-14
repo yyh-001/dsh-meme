@@ -127,7 +127,7 @@ pnpm add file:/path/to/dsh-meme
   <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-settings.png" alt="设置页：扫描目录与提示词开关" width="80%" />
 </p>
 
-输入框 😊 一键发表情包：点开面板 → 搜索 / 浏览缩略图 → 点一张直接发出。
+输入框 😊 一键发表情包：点开面板 → 上面是图包标签页（内置、导入、市场下载的都在）→ 搜索或直接浏览缩略图 → 点一张直接发出。
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/quick-picker.png" alt="输入框一键发表情包" width="80%" />
