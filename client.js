@@ -153,6 +153,22 @@ window.__ModuleLoader__.load({
       const [panelTab, setPanelTab] = React.useState('library')
       const [remoteQuery, setRemoteQuery] = React.useState('')
       const [packView, setPackView] = React.useState('') // 非空 = 进入该图库的表情包页(二级页,不是标签页)
+      const [failedCovers, setFailedCovers] = React.useState({}) // 封面加载失败的卡片 key
+      // 封面挂了先换 jsDelivr 镜像重试(raw.githubusercontent 在部分网络下不稳),
+      // 还失败才退回首字母占位——不然界面上就是一个破图标
+      const coverMirror = (u) => {
+        const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(String(u || ''))
+        return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : ''
+      }
+      const onCoverError = (key, src, el) => {
+        const mirror = coverMirror(src)
+        if (mirror && el && el.dataset.mirrored !== '1') {
+          el.dataset.mirrored = '1'
+          el.src = mirror
+          return
+        }
+        setFailedCovers((prev) => (prev[key] ? prev : { ...prev, [key]: 1 }))
+      }
       const [promptOn, setPromptOn] = React.useState(true)
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -730,8 +746,11 @@ window.__ModuleLoader__.load({
         const job = row.job
         const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
         return h('div', { key: row.key, className: 'mk-card' },
-          row.cover
-            ? h('img', { className: 'mk-cover', src: row.cover, alt: '', loading: 'lazy' })
+          row.cover && !failedCovers[row.key]
+            ? h('img', {
+              className: 'mk-cover', src: row.cover, alt: '', loading: 'lazy',
+              onError: (e) => onCoverError(row.key, row.cover, e.target),
+            })
             : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
           h('div', { className: 'mk-body' },
             h('div', { className: 'mk-title' },

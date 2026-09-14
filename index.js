@@ -2,7 +2,7 @@
  * dsh-meme — selfloom 表情包层作为 DeepSeek Harness 的插件。
  * npm 包名 dsh-meme;插件 id 仍为 dsh-expression(兼容已有安装)。
  *
- * 图库:随插件分发 memes/official-001 与 memes/dafeiyu-001;
+ * 图库:随插件分发 memes/dafeiyu-001(official-001 已改为市场安装);
  * 设置页扫描用户目录(~/.dsh/meme-packs)下拉切换。SQLite 索引 + memes/<tag>/。
  *
  * 发送(双通道):
@@ -583,7 +583,10 @@ export function apply(ctx, config) {
         try {
           let res
           try {
-            res = await fetch(u, { signal: AbortSignal.timeout(8000) })
+            // 带时间戳:jsDelivr 对 @main 的边缘缓存是 12h,裸 URL 会拿到旧目录
+            // (表现:catalog 里改了封面/版本,客户端半天看不到)
+            const busted = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()
+            res = await fetch(busted, { signal: AbortSignal.timeout(8000) })
           } catch (error) {
             const cause = error && error.cause
             throw new Error(cause ? (cause.code || cause.message) : String(error && error.message || error))

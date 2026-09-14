@@ -15,7 +15,9 @@ const imgBytes = readFileSync(join(fixtureDir, '..', 'memes', 'dafeiyu-001', 'me
 let currentManifest = null
 let archiveBytes = Buffer.alloc(0)
 let archiveSha256 = ''
+const fetchedUrls = []
 const fixture = createServer((req, res) => {
+  fetchedUrls.push(req.url || '')
   const url = (req.url || '').split('?')[0]
   if (url === '/manifest.json') {
     res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -477,8 +479,8 @@ test('packDeleteDir 只放行扫描目录/插件内置目录下的图库', () =>
   assert.throws(() => memesMod.packDeleteDir({ id: 'mine', path: join(packsDir, 'other'), source: 'user' }, packsDir), /预期不符/)
   // 内置包:只认插件包内 memes/<id>
   const bundled = memesMod.bundledPacksDir()
-  assert.equal(memesMod.packDeleteDir({ id: 'official-001', path: join(bundled, 'official-001'), source: 'bundled' }, packsDir), join(bundled, 'official-001'))
-  assert.throws(() => memesMod.packDeleteDir({ id: 'official-001', path: packsDir, source: 'bundled' }, packsDir), /预期不符/)
+  assert.equal(memesMod.packDeleteDir({ id: 'dafeiyu-001', path: join(bundled, 'dafeiyu-001'), source: 'bundled' }, packsDir), join(bundled, 'dafeiyu-001'))
+  assert.throws(() => memesMod.packDeleteDir({ id: 'dafeiyu-001', path: packsDir, source: 'bundled' }, packsDir), /预期不符/)
   // 缺信息 / 越界 id 一律拒绝
   assert.throws(() => memesMod.packDeleteDir(null, packsDir), /不完整/)
   assert.throws(() => memesMod.packDeleteDir({ id: '', path: packsDir }, packsDir), /不完整/)
@@ -517,4 +519,28 @@ test('deleteMemePack:能删自建图库,当前/订阅的拒绝', async () => {
   assert.equal(existsSync(dir), false, '删除后目录应消失')
   assert.ok(!done.packs.some((p) => p.id === 'switch-b'))
   assert.ok(!done.enabledPacks.includes('switch-b'), '开关列表里不应留脏 id')
+})
+
+
+test('resolveActiveRoot 忽略已经不存在或没有索引的目录', () => {
+  const liveDir = join(home, '.dsh', 'meme-packs', 'live-test')
+  mkdirSync(liveDir, { recursive: true })
+  writeFileSync(join(liveDir, 'index.db'), '')
+  // 还在的目录照用
+  assert.equal(memesMod.resolveActiveRoot({ memeRoot: liveDir }), liveDir)
+  // 死路径(比如内置包在升级后被移除)不能交给 MemesStore,否则插件整个起不来
+  const stale = join(home, '.dsh', 'meme-packs', 'official-001')
+  assert.equal(memesMod.resolveActiveRoot({ memeRoot: stale, packId: 'official-001' }), memesMod.defaultMemeRoot())
+  // config 兜底(patch 里的 memeRoot)同样要求是真目录
+  assert.equal(memesMod.resolveActiveRoot({ memeRoot: stale }, liveDir), liveDir)
+  assert.equal(memesMod.resolveActiveRoot({ memeRoot: stale }, join(home, 'nope')), memesMod.defaultMemeRoot())
+})
+
+
+test('拉图库目录带时间戳,绕开 CDN 边缘缓存', () => {
+  const hits = fetchedUrls.filter((u) => u.split('?')[0] === '/catalog.json')
+  assert.ok(hits.length > 0, '本轮应该拉过图库目录')
+  // jsDelivr 对 @main 的边缘缓存 12h:不带时间戳就会一直拿旧目录
+  // (表现:catalog 里换了封面/版本,客户端半天看不到)
+  assert.ok(hits.every((u) => /[?&]t=\d+$/.test(u)), '每次都该带时间戳: ' + JSON.stringify(hits))
 })
