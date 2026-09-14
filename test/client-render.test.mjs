@@ -73,6 +73,7 @@ const packPayload = () => ({
   companionPrompt: '',
   defaultCompanionPrompt: '内置默认提示词',
   promptEnabled: true,
+  pluginVersion: '9.9.9',
   remoteSubs: [],
   remoteDirUrl: [],
   configured: true,
@@ -208,6 +209,13 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   walk(previewTree, (n) => { if (!grid && n.props && n.props.className === 'mk-preview') grid = n })
   assert.ok(grid, '预览弹窗应有图片网格')
   assert.ok(allText(previewTree).includes('安装后可以看全部'), '目录预览比图库张数少时要说明安装后能看全部')
+
+  // 页脚:反馈入口应指向预填好的 issue 表单(不是裸 issues 列表)
+  let feedback = null
+  walk(discover, (n) => { if (!feedback && n.type === 'a' && String((n.props || {}).href || '').includes('issues/new')) feedback = n })
+  assert.ok(feedback, '页脚应有反馈入口')
+  assert.match(feedback.props.href, /template=feedback\.yml/, '要带 issue 模板: ' + feedback.props.href)
+  assert.match(feedback.props.href, /version=/, '要预填插件版本: ' + feedback.props.href)
 
   // 设置页:提示词开关与扫描目录
   findButton(discover, '设置').props.onClick()

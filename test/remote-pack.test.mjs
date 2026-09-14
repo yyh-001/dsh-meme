@@ -647,3 +647,9 @@ test('previewManifest:没装的清单包也能拿到全部图片地址(封顶 60
   assert.equal(big.total, 75)
   assert.equal(big.urls.length, 60, '预览最多 60 张,别把上百张图一次塞给弹窗')
 })
+
+
+test('payload 带插件版本(反馈表单预填用)', async () => {
+  const out = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  assert.match(String(out.pluginVersion || ''), /^\d+\.\d+\.\d+/, '版本应来自 package.json: ' + out.pluginVersion)
+})

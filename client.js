@@ -162,12 +162,14 @@ window.__ModuleLoader__.load({
       const [remoteQuery, setRemoteQuery] = React.useState('')
       const [packView, setPackView] = React.useState('') // 非空 = 进入该图库的表情包页(二级页,不是标签页)
       const [promptOn, setPromptOn] = React.useState(true)
+      const [pluginVersion, setPluginVersion] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
         setMemeRoot(res.memeRoot || '')
         setPackId(res.packId || '')
         setPacks(Array.isArray(res.packs) ? res.packs : [])
         setPromptOn(res.promptEnabled !== false)
+        setPluginVersion(res.pluginVersion || '')
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
         setCompanionPrompt(res.companionPrompt || '')
@@ -1083,7 +1085,10 @@ window.__ModuleLoader__.load({
           h('span', null, '觉得好用？'),
           h('a', { href: 'https://github.com/yyh-001/dsh-meme', target: '_blank', rel: 'noopener noreferrer' }, '⭐ 去 GitHub 点个 Star'),
           h('span', null, '·'),
-          h('a', { href: 'https://github.com/yyh-001/dsh-meme/issues', target: '_blank', rel: 'noopener noreferrer' }, '💬 反馈建议 / 提 issue'),
+          h('a', {
+            href: issueFormUrl(pluginVersion),
+            target: '_blank', rel: 'noopener noreferrer',
+          }, '💬 反馈建议 / 提 issue'),
         ),
         packDialog ? h('div', { className: 'meme-modal-mask' },
           h('div', { className: 'meme-modal' },
@@ -1239,6 +1244,19 @@ window.__ModuleLoader__.load({
       const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(raw)
       // 远端预览图优先走 jsDelivr 镜像(raw.githubusercontent 在部分网络下不稳)
       return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : raw
+    }
+
+    /**
+     * 反馈入口:直接打开仓库里的「反馈 / Bug」表单,尽量替用户填好能自动拿到的信息
+     * (插件版本来自 payload;运行环境只有浏览器 UA 可读,dsh 版本得让用户补)。
+     */
+    function issueFormUrl(version) {
+      const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || ''
+      const env = ua ? (/Windows/i.test(ua) ? 'Windows' : /Mac/i.test(ua) ? 'macOS' : /Linux/i.test(ua) ? 'Linux' : '') + (/(Electron\/[\d.]+)/.exec(ua) ? ' · ' + /(Electron\/[\d.]+)/.exec(ua)[1] : '') : ''
+      const qs = new URLSearchParams({ template: 'feedback.yml' })
+      if (version) qs.set('version', String(version))
+      if (env) qs.set('env', env)
+      return 'https://github.com/yyh-001/dsh-meme/issues/new?' + qs.toString()
     }
 
     /** 下载量显示:上千折成 1.2k,省得数字把卡片撑爆 */

@@ -1,0 +1,67 @@
+name: 反馈 / Bug
+description: 报告一个问题、提个建议，或者说说用起来别扭的地方
+title: "[反馈] "
+labels:
+  - feedback
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 类型
+      options:
+        - 问题反馈（有东西坏了）
+        - 功能建议（希望加什么）
+        - 用起来别扭 / 体验问题
+        - 其它
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 插件版本
+      description: 设置页「插件」里能看到；从 dsh 插件页打开本表单时会自动带上。
+      placeholder: 例如 0.1.42
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境
+      description: dsh 版本 + 操作系统，例如「dsh 0.1.5-rc.2 / Windows 11」。
+      placeholder: dsh 版本 / 系统
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 具体现象。有报错信息就贴上来。
+    validations:
+      required: true
+  - type: textarea
+    id: expect
+    attributes:
+      label: 你期望的结果
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开哪里、点了什么开始写；能稳定复现的话写清楚。
+    validations:
+      required: false
+  - type: textarea
+    id: extra
+    attributes:
+      label: 附加信息
+      description: 截图、用的哪套图库、装过哪些插件等。
+    validations:
+      required: false
+  - type: checkboxes
+    id: checked
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我搜过已有 issue，没找到重复的
+          required: false

@@ -170,6 +170,13 @@ export const DEFAULT_REMOTE_DIR_URLS = [
 export function apply(ctx, config) {
   // 图库目录设置存 ~/.dsh(稳定,不受包升级/图库变化影响):
   // 优先级 用户设置(settings) > patch 配置(config.memeRoot) > 包内默认
+  // 插件版本:反馈表单预填要用(从包内 package.json 读,不写死在代码里)
+  const pluginVersion = (() => {
+    try {
+      const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'package.json'), 'utf8'))
+      return String(pkg.version || '').trim()
+    } catch { return '' }
+  })()
   const settingsFile = join(dshHome(), '.dsh', 'dsh-expression.json')
   const readSettings = () => {
     try { return JSON.parse(readFileSync(settingsFile, 'utf8')) } catch (e) { return {} }
@@ -407,6 +414,7 @@ export function apply(ctx, config) {
         companionPrompt: readSettings().companionPrompt || '',
         defaultCompanionPrompt: DEFAULT_COMPANION_PROMPT,
         promptEnabled: readSettings().promptEnabled !== false,
+        pluginVersion,
         remoteSubs: remoteSubs(),
         remoteDirUrl: remoteDirUrls(),
         configured: !!(s.memeRoot || s.packId),

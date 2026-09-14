@@ -30,6 +30,8 @@
 
 交流 / 反馈：**QQ 群 [993579665](https://qm.qq.com/q/7AD2g70HqS)**（[点击加入](https://qm.qq.com/q/7AD2g70HqS)）
 
+提 issue：设置页面板底部有「反馈建议 / 提 issue」，点开会直接打开仓库的[「反馈 / Bug」表单](https://github.com/yyh-001/dsh-meme/issues/new?template=feedback.yml)，并自动填好插件版本与运行环境。也可以自己到 [Issues](https://github.com/yyh-001/dsh-meme/issues/new/choose) 选模板。
+
 ---
 
 ## 安装
