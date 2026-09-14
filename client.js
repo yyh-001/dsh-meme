@@ -1235,9 +1235,12 @@ window.__ModuleLoader__.load({
 
       // 输入框快捷发图(QQ 式)。
       const store = makeMemeStore()
+      // 组件类型必须在 render 回调外创建一次:回调内调 makeMemeButton 会每次重渲染
+      // 都造出新类型,React 视作新节点卸载重建,拖累宿主主线程(issue #15)。
+      const MemeButton = makeMemeButton(store)
       slots.inject('conversation.input.left', () => slots.register(
         { name: 'conversation.input.left', id: 'meme-picker', order: 5, label: '表情包' },
-        (props) => React.createElement(makeMemeButton(store), { input: props.input }),
+        (props) => React.createElement(MemeButton, { input: props.input }),
       ))
       slots.inject('conversation.input.overlay', () => slots.register(
         { name: 'conversation.input.overlay', id: 'meme-picker', order: 5, label: '表情包' },
