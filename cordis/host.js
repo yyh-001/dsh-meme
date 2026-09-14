@@ -110,11 +110,24 @@ function mimeOf(name) {
 
 // ---------- 加载器 ----------
 
+/** 校验 configRoot:必须是绝对路径且不含 .. 穿越段,防止越界读取图库目录外的文件。 */
+function safeConfigRoot(root) {
+  const value = String(root)
+  const normalized = value.replace(/\\/g, '/')
+  if (value.includes('\0') || normalized.split('/').some((seg) => seg === '..')) {
+    throw new Error('memeRoot 含非法路径穿越序列')
+  }
+  if (!normalized.startsWith('/') && !normalized.startsWith('~/')) {
+    throw new Error('memeRoot 必须是绝对路径')
+  }
+  return value
+}
+
 /** 优先:python3 + 标准库 sqlite3 读 index.db 与 manifest.json(单次调用)。 */
 async function loadViaPython(shell, configRoot) {
   // 外层 shell 双引号,Python 代码内全部单引号,避免引号嵌套。
   const py = "import sqlite3,json,sys,os; root=sys.argv[1] if len(sys.argv)>1 else os.path.expanduser('~/.hermes/meme-packs/official-001'); c=sqlite3.connect(os.path.join(root,'index.db')); rows=c.execute('SELECT path,tag,file_name,caption,keywords FROM memes').fetchall(); cats={}; mf=os.path.join(root,'manifest.json'); cats=json.load(open(mf)).get('categories',{}) if os.path.exists(mf) else {}; print(json.dumps({'root':root,'memes':[{'path':r[0],'tag':r[1],'file_name':r[2],'caption':r[3] or '','keywords':r[4] or ''} for r in rows],'categories':cats},ensure_ascii=False))"
-  const rootArg = configRoot ? ` '${String(configRoot).replace(/'/g, "'\\''")}'` : ''
+  const rootArg = configRoot ? ` '${safeConfigRoot(configRoot).replace(/'/g, "'\\''")}'` : ''
   // stdoutMaxBytes:读库 JSON 约 100KB,默认 stdout 只保留尾部会截断,必须指定预算。
   const result = await shell.run(shell.resolve({ command: `python3 -c "${py}"${rootArg}`, timeoutMs: 15000, stdoutMaxBytes: 300 * 1024 }))
   if (result.exitCode !== 0) throw new Error(result.stderr && result.stderr.text ? String(result.stderr.text).slice(0, 500) : 'python3 退出码 ' + result.exitCode)
