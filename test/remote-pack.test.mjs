@@ -345,3 +345,38 @@ after(() => {
   fixture.close()
   rmSync(archiveWork, { recursive: true, force: true })
 })
+
+
+test('createMemePack creates an empty library and protects duplicate IDs and paths', async () => {
+  const invalid = await post({ op: 'createMemePack', id: '../escape', name: 'invalid' })
+  assert.equal(invalid.statusCode, 400)
+  const created = await post({ op: 'createMemePack', id: 'personal-test', name: '我的图包', description: '原创' })
+  const data = JSON.parse(created.body)
+  assert.equal(data.ok, true)
+  assert.equal(data.packId, 'personal-test')
+  assert.equal(data.packs.find(p => p.id === 'personal-test').count, 0)
+  const duplicate = await post({ op: 'createMemePack', id: 'personal-test', name: '覆盖' })
+  assert.equal(duplicate.statusCode, 400)
+
+})
+
+
+test('submission export guards the selected pack and produces an importable ZIP', async () => {
+  const exporter = handlers.find(h => h.path === '/dsh-memes-export')
+  const download = (packId) => {
+    const res = { status: 0, body: null, writeHead(status) { this.status = status }, end(body) { this.body = body } }
+    exporter.handler({ method: 'GET', url: '/dsh-memes-export?packId=' + packId }, res)
+    return res
+  }
+  assert.equal(download('old-pack').status, 500)
+  assert.match(String(download('personal-test').body), /空图库/)
+  const upload = await post({ op: 'upload', tag: 'happy', fileName: 'test.jpg', dataBase64: imgBytes.toString('base64'), caption: '测试投稿' })
+  assert.equal(JSON.parse(upload.body).ok, true)
+  const result = download('personal-test')
+  assert.equal(result.status, 200)
+  const entries = mod.unzipStore(result.body)
+  assert.ok(entries.has('index.db'))
+  const manifest = JSON.parse(entries.get('manifest.json'))
+  assert.equal(manifest.id, 'personal-test')
+  assert.ok([...entries.keys()].some(name => name.startsWith('memes/happy/')))
+})

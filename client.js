@@ -153,18 +153,43 @@ window.__ModuleLoader__.load({
       const [remoteTab, setRemoteTab] = React.useState('discover')
       const [panelTab, setPanelTab] = React.useState('library')
       const [remoteQuery, setRemoteQuery] = React.useState('')
+      const [localPackState, setLocalPackState] = React.useState([])
       const applyRoot = (res) => {
         if (!res || !res.ok) return
         setMemeRoot(res.memeRoot || '')
         setMemeRootInput(res.memeRoot || '')
         setPackId(res.packId || '')
         setPacks(Array.isArray(res.packs) ? res.packs : [])
+        setLocalPackState(Array.isArray(res.packs) ? res.packs : [])
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
         setCompanionPrompt(res.companionPrompt || '')
         setDefaultPrompt(res.defaultCompanionPrompt || '')
         setRemoteSubs(Array.isArray(res.remoteSubs) ? res.remoteSubs : [])
       }
+      const localPackCards = localPackState.map((p) => {
+        const entry = (remoteDir || []).find((e) => e.id === p.id) || null
+        const sub = remoteSubs.find((s) => s.id === p.id) || null
+        const isBundled = p.source === 'bundled'
+        const isUserPack = p.source === 'user'
+        const count = p.count || 0
+        return {
+          key: 'pack-' + p.id, packId: p.id,
+          name: p.name || p.id, desc: '',
+          cover: entry && entry.preview ? entry.preview : null,
+          meta: [
+            isBundled ? '内置' : (isUserPack ? '导入' : '自定义'),
+            entry && entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '',
+            count ? count + ' 张' : '',
+          ].filter(Boolean).join(' · '),
+          tags: (entry && (entry.keywords || entry.tags)) || [],
+          entry, sub,
+          installed: true, job: null, activePack: p.id === packId,
+          downloaded: true,
+          builtin: isBundled,
+          pack: p,
+        }
+      })
       const onSaveCompanionPrompt = async () => {
         try {
           const res = await apiPost({ op: 'setCompanionPrompt', text: promptDraft })
@@ -280,6 +305,61 @@ window.__ModuleLoader__.load({
           }
         } catch (e) { setRootNotice('切换失败') }
       }
+      const [packDialog, setPackDialog] = React.useState('')
+      const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
+      const [packSaving, setPackSaving] = React.useState(false)
+      const [marketResult, setMarketResult] = React.useState('')
+      const savePack = async () => {
+        if (packSaving) return
+        setPackSaving(true)
+        setRootNotice('正在新建图库…')
+        try {
+          const res = await apiPost({ op: 'createMemePack', ...packDraft })
+          if (!res || !res.ok) throw new Error(res && res.error || '操作失败')
+          applyRoot(res)
+          await load('', '')
+          setQ('')
+          setTagFilter('')
+          setRootNotice('图库已新建并切换，可以开始添加图片')
+          setPackDialog('')
+        } catch (error) { setRootNotice(error.message || '操作失败，请重试') }
+        finally { setPackSaving(false) }
+      }
+      const submitPack = async () => {
+        if (packSaving) return
+        const pack = packs.find(p => p.id === packId)
+        if (!pack || !pack.count) { setRootNotice('空图库不能投稿，请先添加图片'); return }
+        const params = new URLSearchParams({ template: 'submit-pack.yml',
+          title: '[投稿] ' + pack.name, name: pack.name,
+          description: (pack.description || '') + '\n图片数量：' + pack.count + '\n图库 ID：' + pack.id })
+        const issueUrl = 'https://github.com/yyh-001/dsh-meme-packs/issues/new?' + params
+        // Open synchronously in the click handler so browsers do not block the tab.
+        const issueWindow = window.open('about:blank', '_blank')
+        if (issueWindow) issueWindow.opener = null
+        setPackSaving(true)
+        setMarketResult('')
+        setRootNotice('正在导出投稿 ZIP…')
+        try {
+          const response = await fetch('/dsh-memes-export?packId=' + encodeURIComponent(pack.id))
+          if (!response.ok) throw new Error(await response.text() || '导出失败')
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'dsh-meme-' + pack.id + '.zip'
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          setTimeout(() => URL.revokeObjectURL(url), 60000)
+          setMarketResult(issueUrl)
+          if (issueWindow && !issueWindow.closed) issueWindow.location.href = issueUrl
+          setPackDialog('')
+          setRootNotice('已发起 ZIP 下载。请在 GitHub 投稿页登录，拖入下载的 ZIP，补充来源和许可后提交。尚未提交或收录；如果页面未打开，请点击下方链接。')
+        } catch (error) {
+          if (issueWindow && !issueWindow.closed) issueWindow.close()
+          setRootNotice(error.message || '导出失败，请重试')
+        } finally { setPackSaving(false) }
+      }
       const onSetPack = async (id) => {
         const packIdNext = String(id || '').trim()
         if (!packIdNext) return
@@ -390,6 +470,7 @@ window.__ModuleLoader__.load({
             setMemes(res.memes)
             setTags(res.tags)
             setTotal(res.total)
+            if (Array.isArray(res.packs)) setPacks(previous => previous.map(p => ({ ...p, count: (res.packs.find(next => next.id === p.id) || p).count })))
             setNotice('')
           } else {
             setNotice('加载失败' + (res && res.error ? ': ' + res.error : ''))
@@ -586,6 +667,7 @@ window.__ModuleLoader__.load({
               tags: keywords, entry, sub,
               installed: !!sub || (pid && packs.some((p) => p.id === pid)),
               job: jobFor(pid), activePack: pid && packId === pid,
+              downloaded: !!(pid && packs.some((p) => p.id === pid)),
             })
           }
         } else {
@@ -601,9 +683,17 @@ window.__ModuleLoader__.load({
               downloaded: packs.some((p) => p.id === s.id),
             })
           }
+          const seen = new Set(cards.map((c) => c.packId))
+          for (const c of localPackCards) {
+            if (seen.has(c.packId)) continue
+            const hay = ((c.name || '') + ' ' + c.packId + ' ' + (c.tags || []).join(' ') + ' ' + c.meta).toLowerCase()
+            if (!mkMatch(hay)) continue
+            cards.push(c)
+          }
         }
         return cards
       })()
+      const installedCount = remoteSubs.length + localPackCards.filter((c) => !remoteSubs.some((s) => s.id === c.packId)).length
 
       return h('div', { className: 'meme-panel' },
         h('div', { className: 'mk-tabs', style: { width: '100%', marginBottom: 2 } },
@@ -613,6 +703,10 @@ window.__ModuleLoader__.load({
         ),
         panelTab === 'library' ? h(React.Fragment, null,
         h('div', { className: 'section-title' }, '当前图库'),
+        h('div', { className: 'row' },
+          h('button', { disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackDialog('create') } }, '新建图包库'),
+          h('button', { disabled: packSaving || !packs.some(p => p.id === packId && p.count > 0), onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿到市场'),
+        ),
         h('div', { className: 'row', style: { width: '100%' } },
           h('div', { className: 'pack-dd' },
             h('button', {
@@ -740,7 +834,7 @@ window.__ModuleLoader__.load({
         panelTab === 'remote' ? h(React.Fragment, null,
         h('div', { className: 'mk-tabs' },
           h('button', { className: 'mk-tab' + (remoteTab === 'discover' ? ' on' : ''), onClick: () => setRemoteTab('discover') }, '发现'),
-          h('button', { className: 'mk-tab' + (remoteTab === 'installed' ? ' on' : ''), onClick: () => setRemoteTab('installed') }, '已安装 (' + remoteSubs.length + ')'),
+          h('button', { className: 'mk-tab' + (remoteTab === 'installed' ? ' on' : ''), onClick: () => setRemoteTab('installed') }, '已安装 (' + installedCount + ')'),
         ),
         h('div', { className: 'row', style: { width: '100%' } },
           h('input', {
@@ -756,7 +850,7 @@ window.__ModuleLoader__.load({
                     : (remoteDir === null
                         ? '图库目录暂不可用,可在下方粘贴清单 JSON 地址订阅'
                         : '目录暂无内容,可在下方粘贴清单 JSON 地址订阅'))
-                : (mkQuery ? '没有匹配的订阅' : '还没有已安装的远程图库,去「发现」逛逛'))
+                : (mkQuery ? '没有匹配的订阅' : '还没有已安装的图库,去「发现」逛逛'))
           : h('div', { className: 'mk-grid' }, mkCards.map((row) => {
             const job = row.job
             const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
@@ -790,15 +884,18 @@ window.__ModuleLoader__.load({
                       disabled: remoteBusy || !!job,
                     }, job ? '下载中…' : (row.installed ? '更新' : '安装'))
                     : [
-                      row.downloaded && !row.activePack
-                        ? h('button', { key: 'use', onClick: () => onUseRemote(row.sub) }, '使用')
+                      (row.sub || row.entry)
+                        ? h('button', {
+                          key: 'update',
+                          onClick: () => row.sub
+                            ? (row.sub.archiveUrl ? startArchive(row.sub) : startRemote(row.sub.url, row.sub.id))
+                            : (row.entry.archiveUrl ? startArchive(row.entry) : startRemote(row.entry.manifestUrl, row.entry.id || '')),
+                          disabled: remoteBusy || !!job,
+                        }, '更新')
                         : null,
-                      h('button', {
-                        key: 'update',
-                        onClick: () => row.sub.archiveUrl ? startArchive(row.sub) : startRemote(row.sub.url, row.sub.id),
-                        disabled: remoteBusy || !!job,
-                      }, '更新'),
-                      h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载'),
+                      row.sub
+                        ? h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载')
+                        : null,
                     ],
                 ),
               ),
@@ -851,6 +948,26 @@ window.__ModuleLoader__.load({
 
         ) : null,
         rootNotice ? h('div', { className: 'notice' }, rootNotice) : null,
+        marketResult ? h('a', { href: marketResult, target: '_blank', rel: 'noopener noreferrer' }, '打开 GitHub 投稿页') : null,
+        packDialog ? h('div', { className: 'meme-modal-mask' },
+          h('div', { className: 'meme-modal' },
+            h('h3', null, packDialog === 'create' ? '新建图包库' : '投稿到市场'),
+            rootNotice ? h('p', { role: 'status' }, rootNotice) : null,
+            packDialog === 'create' ? h(React.Fragment, null,
+              ...[['name', '图库名称'], ['id', '图库 ID'], ['description', '简介 / 图片来源']].map(([key, label]) =>
+                h('label', { key, style: { display: 'block', marginBottom: 12 } }, label,
+                  h('input', { value: packDraft[key], maxLength: key === 'id' ? 40 : key === 'name' ? 60 : 200,
+                    onChange: e => setPackDraft({ ...packDraft, [key]: e.target.value }), disabled: packSaving }))),
+            ) : h(React.Fragment, null,
+              h('p', null, '自动导出当前图库 ZIP，并打开预填好的 GitHub 投稿页。'),
+              h('p', null, '登录 GitHub 后，将下载的 ZIP 拖入“图库 ZIP”一栏，补充图片来源和许可，再提交。审核通过后收录到市场。'),
+            ),
+            h('div', { className: 'row', style: { marginTop: 16 } },
+              h('button', { className: 'btn-primary', disabled: packSaving, onClick: packDialog === 'create' ? savePack : submitPack }, packSaving ? '处理中…' : packDialog === 'create' ? '创建并切换' : '导出 ZIP 并打开投稿页'),
+              h('button', { disabled: packSaving, onClick: () => { setPackDialog('') } }, '取消'),
+            ),
+          ),
+        ) : null,
         // 目录浏览弹窗(WSL 无原生选择器,用 browse 能力前端浏览)
         browseOpen && browseList ? h('div', { className: 'meme-modal-mask', onClick: () => setBrowseOpen(false) },
           h('div', { className: 'meme-modal', style: { width: 420 }, onClick: (e) => e.stopPropagation() },

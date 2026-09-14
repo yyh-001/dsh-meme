@@ -903,7 +903,19 @@ export function apply(ctx, config) {
         }
         try {
           const op = String(body.op || '')
-          if (op === 'recognize') {
+          if (op === 'createMemePack') {
+            const id = String(body.id || '').trim()
+            const name = String(body.name || '').trim()
+            if (!/^[a-z0-9][a-z0-9_-]{0,39}$/.test(id)) throw new Error('ID 须为 1–40 位小写字母、数字、横线或下划线')
+            if (!name || name.length > 60) throw new Error('图库名称须为 1–60 字')
+            if (listAllPacks().some(p => p.id === id)) throw new Error('图库 ID 已存在')
+            const dir = join(resolve(packsDirNow()), id)
+            mkdirSync(resolve(packsDirNow()), { recursive: true })
+            mkdirSync(dir)
+            writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ id, name, description: String(body.description || '').slice(0, 200), version: '1.0.0' }, null, 2))
+            reloadMemeStore(dir, id)
+            json(res, { ok: true, ...packPayload() })
+          } else if (op === 'recognize') {
             // 上传弹窗的 AI 识别:只返回识别结果,不写入图库(用户确认后走 upload)
             const fileName = String(body.fileName || '').trim()
             const data = String(body.dataBase64 || '')
@@ -1101,6 +1113,10 @@ export function apply(ctx, config) {
           return
         }
         try {
+          const expectedPack = new URL(req.url || '/', 'http://localhost').searchParams.get('packId')
+          if (expectedPack !== null && expectedPack !== packPayload().packId) throw new Error('当前图库已切换，请重新投稿')
+          if (expectedPack !== null && !memes.list().memes.length) throw new Error('空图库不能投稿，请先添加图片')
+          adminDb.exec('PRAGMA wal_checkpoint(FULL)')
           // 只导出索引内的文件(index.db + manifest.json + 索引图片),
           // 不打包 .git/备份/缩略图等无关内容(历史教训:整目录遍历会带出 200MB 杂物)
           const files = [{ name: 'index.db', data: readFileSync(join(memes.root, 'index.db')) }]
