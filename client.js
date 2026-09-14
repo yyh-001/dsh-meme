@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
       '.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;width:100%}',
       '.mk-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;transition:transform .12s ease,box-shadow .12s ease}',
       '.mk-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
-      '.mk-cover{width:100%;height:92px;object-fit:cover;display:block;background:var(--dsw-alias-bg-base)}',
+      '.mk-cover{width:100%!important;height:104px!important;background-size:cover!important;background-position:center 28%!important;background-repeat:no-repeat!important;background-color:var(--dsw-alias-bg-base);display:block}',
       '.mk-cover-fallback{display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-2))}',
       '.mk-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}',
       '.mk-title{display:flex;align-items:center;justify-content:space-between;gap:8px}',
@@ -153,22 +153,6 @@ window.__ModuleLoader__.load({
       const [panelTab, setPanelTab] = React.useState('library')
       const [remoteQuery, setRemoteQuery] = React.useState('')
       const [packView, setPackView] = React.useState('') // 非空 = 进入该图库的表情包页(二级页,不是标签页)
-      const [failedCovers, setFailedCovers] = React.useState({}) // 封面加载失败的卡片 key
-      // 封面挂了先换 jsDelivr 镜像重试(raw.githubusercontent 在部分网络下不稳),
-      // 还失败才退回首字母占位——不然界面上就是一个破图标
-      const coverMirror = (u) => {
-        const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(String(u || ''))
-        return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : ''
-      }
-      const onCoverError = (key, src, el) => {
-        const mirror = coverMirror(src)
-        if (mirror && el && el.dataset.mirrored !== '1') {
-          el.dataset.mirrored = '1'
-          el.src = mirror
-          return
-        }
-        setFailedCovers((prev) => (prev[key] ? prev : { ...prev, [key]: 1 }))
-      }
       const [promptOn, setPromptOn] = React.useState(true)
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -773,10 +757,15 @@ window.__ModuleLoader__.load({
         const job = row.job
         const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
         return h('div', { key: row.key, className: 'mk-card' },
-          row.cover && !failedCovers[row.key]
-            ? h('img', {
-              className: 'mk-cover', src: row.cover, alt: '', loading: 'lazy',
-              onError: (e) => onCoverError(row.key, row.cover, e.target),
+          // 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
+          // 全局样式影响(之前实测在宿主里图片没铺满,露出一块空底色很难看)
+          row.cover
+            ? h('div', {
+              className: 'mk-cover',
+              style: {
+                backgroundImage: 'url("' + coverUrl(row.cover) + '")',
+                backgroundSize: 'cover', backgroundPosition: 'center 28%', backgroundRepeat: 'no-repeat',
+              },
             })
             : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
           h('div', { className: 'mk-body' },
@@ -1140,6 +1129,17 @@ window.__ModuleLoader__.load({
         if (x !== y) return x > y ? 1 : -1
       }
       return 0
+    }
+
+    /**
+     * 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
+     * 全局样式影响(实测在宿主里 <img> 没铺满卡片,露出一块空底色很难看)
+     */
+    function coverUrl(u) {
+      const raw = String(u || '')
+      const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(raw)
+      // 远端预览图优先走 jsDelivr 镜像(raw.githubusercontent 在部分网络下不稳)
+      return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : raw
     }
 
     function makeMemeStore() {
