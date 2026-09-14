@@ -113,7 +113,18 @@ pnpm add file:/path/to/dsh-meme
 - 分类筛选即时生效
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/settings-panel.png" alt="设置页表情包管理面板" width="80%" />
+  <b>图库</b>：已安装图库卡片列表，点卡片进它的表情包页<br />
+  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-library.png" alt="图库页：已安装图库卡片列表" width="80%" />
+</p>
+
+<p align="center">
+  <b>发现</b>：图库市场（点卡片预览图片、按下载量排序、安装带进度条）<br />
+  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-discover.png" alt="发现页：图库市场" width="80%" />
+</p>
+
+<p align="center">
+  <b>设置</b>：扫描目录与陪伴提示词开关<br />
+  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-settings.png" alt="设置页：扫描目录与提示词开关" width="80%" />
 </p>
 
 输入框 😊 一键发表情包：点开面板 → 搜索 / 浏览缩略图 → 点一张直接发出。
