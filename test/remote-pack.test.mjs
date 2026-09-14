@@ -296,15 +296,11 @@ test('deleteMemePack:市场下载的包也能删,删完连订阅记录一起清�
   currentManifest = v1
   const res = await post({ op: 'subscribeRemote', manifestUrl: base + '/manifest.json' })
   await waitJob(JSON.parse(res.body).id)
-  const active = await post({ op: 'deleteMemePack', packId: 'remote-test' })
-  assert.equal(active.statusCode, 400)
-  assert.match(active.body, /先切到别的图库/)
-
-  const sw = await post({ op: 'setPack', packId: 'dafeiyu-001' })
-  assert.equal(JSON.parse(sw.body).ok, true)
+  // 它正好是当前图库:服务端自动切走再删,不用人工先切
   const del = JSON.parse((await post({ op: 'deleteMemePack', packId: 'remote-test' })).body)
   assert.equal(del.ok, true)
-  assert.ok(!existsSync(packDir()))
+  assert.match(del.message, /当前图库已切到/)
+  assert.ok(!existsSync(packDir()), '目录应被删掉')
   assert.equal(del.remoteSubs.length, 0, '订阅记录要一起清掉')
   assert.ok(!del.packs.some((p) => p.id === 'remote-test'))
 })
@@ -490,12 +486,17 @@ test('packDeleteDir 只放行扫描目录/插件内置目录下的图库', () =>
 
 
 test('deleteMemePack:能删自建图库,当前/订阅的拒绝', async () => {
-  // 当前图库不能删
+  // 当前图库也能删:服务端先自动切到别的图库,再删(避免文件被占用删一半)
   const active = JSON.parse((await post({ op: 'setPack', packId: 'switch-b' })).body)
   assert.equal(active.ok, true)
-  const delActive = await post({ op: 'deleteMemePack', packId: 'switch-b' })
-  assert.equal(delActive.statusCode, 400)
-  assert.match(delActive.body, /先切到别的图库/)
+  const activeDir = join(home, '.dsh', 'meme-packs', 'switch-b')
+  assert.ok(existsSync(activeDir))
+  const delActive = JSON.parse((await post({ op: 'deleteMemePack', packId: 'switch-b' })).body)
+  assert.equal(delActive.ok, true)
+  assert.match(delActive.message, /当前图库已切到/)
+  assert.equal(existsSync(activeDir), false, '当前图库也应该被删掉')
+  assert.notEqual(delActive.packId, 'switch-b', '删完当前图库不能还指着它')
+  assert.ok(delActive.packs.some((p) => p.id === delActive.packId), '切换目标必须是真实存在的图库')
 
   // 内置包也能删(这里只验守卫放行,不真删仓库里的 memes/*;真删会毁掉工作区)
   const bundledPath = join(memesMod.bundledPacksDir(), 'dafeiyu-001')
@@ -514,15 +515,14 @@ test('deleteMemePack:能删自建图库,当前/订阅的拒绝', async () => {
   assert.ok(!delRemote.remoteSubs.some((s) => s.id === 'market-test'))
   assert.ok(!existsSync(join(home, '.dsh', 'meme-packs', 'market-test')))
 
-  // 切走后可以删自建图库,目录真的没了
-  await post({ op: 'setPack', packId: 'switch-a' })
-  const dir = join(home, '.dsh', 'meme-packs', 'switch-b')
+  // 非当前图库的删除路径(switch-a 还在)
+  const dir = join(home, '.dsh', 'meme-packs', 'switch-a')
   assert.ok(existsSync(dir), '删除前目录应存在')
-  const done = JSON.parse((await post({ op: 'deleteMemePack', packId: 'switch-b' })).body)
+  const done = JSON.parse((await post({ op: 'deleteMemePack', packId: 'switch-a' })).body)
   assert.equal(done.ok, true)
   assert.equal(existsSync(dir), false, '删除后目录应消失')
-  assert.ok(!done.packs.some((p) => p.id === 'switch-b'))
-  assert.ok(!done.enabledPacks.includes('switch-b'), '开关列表里不应留脏 id')
+  assert.ok(!done.packs.some((p) => p.id === 'switch-a'))
+  assert.ok(!done.enabledPacks.includes('switch-a'), '开关列表里不应留脏 id')
 })
 
 

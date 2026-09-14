@@ -367,6 +367,7 @@ window.__ModuleLoader__.load({
           lines: [
             '确认删除图库「' + (row.name || row.packId) + '」？',
             '该图库的目录和里面的图片都会被删掉，不可恢复。',
+            ...(row.packId === packId ? ['这是当前图库（编辑/上传写进的那个），删除后会自动切到别的图库。'] : []),
             ...(row.builtin ? ['这是插件自带的内置图库，升级或重装插件后它会重新出现。'] : []),
           ],
           confirmLabel: '删除',

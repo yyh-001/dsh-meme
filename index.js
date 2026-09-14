@@ -1280,14 +1280,24 @@ export function apply(ctx, config) {
             writeSettings({ enabledPacks: next })
             json(res, { ok: true, ...packPayload(), message: next.includes(target) ? '已打开「' + target + '」,模型可以用它发图' : '已关闭「' + target + '」' })
           } else if (op === 'deleteMemePack') {
-            // 唯一的删除入口:不管是内置、市场下载还是自建/导入,都用这一个 op。
-            // 内置包删了升级/重装会回来;市场下载的顺便把订阅记录摘掉。
+            // 唯一的删除入口:内置、市场下载、自建/导入都走它。
+            // 当前图库也能删——管理用的只读/可写连接挂在上面的包,不切走文件被占用
+            // (Windows 下 rmSync 会 EBUSY 删一半),所以这里自动先切到别的图库再删。
             const target = String(body.packId || '').trim()
-            const hit = listAllPacks().find((p) => p.id === target)
+            const packs = listAllPacks()
+            const hit = packs.find((p) => p.id === target)
             if (!hit) throw new Error('图库不存在: ' + target)
-            if (resolve(hit.path) === resolve(memes.root)) throw new Error('请先切到别的图库再删除')
-            // 只允许删「扫描目录/<id>」或「插件包内 memes/<id>」,其余路径一律拒绝
-            const dir = packDeleteDir(hit, packsDirNow())
+            const dir = packDeleteDir(hit, packsDirNow())   // 先过路径校验,再动运行时
+            let switchedTo = ''
+            if (resolve(hit.path) === resolve(memes.root)) {
+              const enabled = enabledPackIds(readSettings(), packs, target)
+              const others = packs.filter((p) => resolve(p.path) !== resolve(hit.path))
+              // 优先切到还在开着的图库,其次任意一个
+              const next = others.find((p) => enabled.includes(p.id)) || others[0]
+              if (!next) throw new Error('这是最后一个图库,删掉就没有图库可用了')
+              reloadMemeStore(next.path, next.id)
+              switchedTo = next.name || next.id
+            }
             const settingsNow = readSettings()
             if (remoteSubs().some((s) => s && s.id === target)) {
               writeSettings({ remoteSubs: remoteSubs().filter((s) => s && s.id !== target) })
@@ -1297,7 +1307,12 @@ export function apply(ctx, config) {
               writeSettings({ enabledPacks: settingsNow.enabledPacks.filter((id) => id !== target) })
             }
             rmSync(dir, { recursive: true, force: true })
-            json(res, { ok: true, ...packPayload(), message: '已删除图库「' + (hit.name || target) + '」' + (hit.source === 'bundled' ? '(内置包,升级或重装后会回来)' : '') })
+            json(res, {
+              ok: true, ...packPayload(),
+              message: '已删除图库「' + (hit.name || target) + '」'
+                + (switchedTo ? ',当前图库已切到「' + switchedTo + '」' : '')
+                + (hit.source === 'bundled' ? '(内置包,升级或重装后会回来)' : ''),
+            })
           } else if (op === 'browse') {
             // 服务端列目录:宿主 0.1.5 的客户端没有 workspaces 服务,「选择目录」只能走自己的 API
             let dir = resolve(String(body.path || '').trim() || packsDirNow())
