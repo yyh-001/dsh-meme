@@ -72,7 +72,6 @@ window.__ModuleLoader__.load({
       '.mk-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}',
       '.mk-title{display:flex;align-items:center;justify-content:space-between;gap:8px}',
       '.mk-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
-      '.mk-badge{flex:none;font-size:10px;color:var(--dsw-alias-brand-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 35%,transparent);border-radius:999px;padding:1px 7px;white-space:nowrap}',
       '.mk-meta{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       '.mk-desc{font-size:12px;color:var(--dsw-alias-label-secondary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}',
       '.mk-chips{display:flex;gap:4px;flex-wrap:wrap}',
@@ -191,7 +190,7 @@ window.__ModuleLoader__.load({
           ].filter(Boolean).join(' · '),
           tags: (entry && (entry.keywords || entry.tags)) || [],
           entry, sub,
-          installed: true, job: null, activePack: p.id === packId,
+          installed: true, job: null,
           downloaded: true,
           hasUpdate,
           builtin: isBundled,
@@ -753,7 +752,7 @@ window.__ModuleLoader__.load({
             meta: [author, entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '', entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
             tags: keywords, entry, sub,
             installed: !!sub || downloaded,
-            job: jobFor(pid), activePack: pid && packId === pid,
+            job: jobFor(pid),
             downloaded,
           })
         }
@@ -776,7 +775,7 @@ window.__ModuleLoader__.load({
             name: s.name || s.id, desc: s.url || s.archiveUrl, cover: null,
             meta: ['未下载', s.version, s.total ? s.total + ' 张' : ''].filter(Boolean).join(' · '),
             tags: [], entry: null, sub: s,
-            installed: true, job: jobFor(s.id), activePack: false,
+            installed: true, job: jobFor(s.id),
             downloaded: false,
           })
         }
@@ -807,19 +806,14 @@ window.__ModuleLoader__.load({
           h('div', { className: 'mk-body' },
             h('div', { className: 'mk-title' },
               h('span', { className: 'mk-name', title: row.name }, row.name),
-              h('span', { style: { display: 'flex', alignItems: 'center', gap: 6, flex: 'none' } },
-                row.activePack
-                  ? h('span', { className: 'mk-badge' }, '使用中')
-                  : (row.installed ? h('span', { className: 'mk-badge' }, '已安装') : null),
-                // 开关:打开后模型可以用这个图库发图(可以同时开多个)
-                row.onToggle
-                  ? h('span', {
-                    className: 'switch' + (row.enabled ? ' on' : ''),
-                    title: row.enabled ? '模型正在使用这个图库,点击关闭' : '点击打开:模型可以用这个图库发图',
-                    onClick: () => row.onToggle(!row.enabled),
-                  })
-                  : null,
-              ),
+              // 开关:打开后模型可以用这个图库发图(可以同时开多个)
+              row.onToggle
+                ? h('span', {
+                  className: 'switch' + (row.enabled ? ' on' : ''),
+                  title: row.enabled ? '模型正在使用这个图库,点击关闭' : '点击打开:模型可以用这个图库发图',
+                  onClick: () => row.onToggle(!row.enabled),
+                })
+                : null,
             ),
             row.meta ? h('div', { className: 'mk-meta', title: row.meta }, row.meta) : null,
             row.desc ? h('div', { className: 'mk-desc', title: row.desc }, row.desc) : null,
