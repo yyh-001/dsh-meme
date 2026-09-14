@@ -6,6 +6,7 @@
  */
 import { DatabaseSync } from 'node:sqlite'
 import { basename, join, resolve, sep } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -15,6 +16,16 @@ export function bundledPacksDir() {
   return fileURLToPath(new URL('./memes', import.meta.url))
 }
 
+/**
+ * dsh 的 home 目录(设置/图库扫描目录的根)。
+ * 用 os.homedir() 而不是 process.env.HOME:Windows 上通常没有 HOME,
+ * 回落成 '.' 会让设置文件和扫描目录跟着 CWD 走(历史 bug:.dsh\meme-packs 变相对路径)。
+ * 测试用 DSH_MEME_HOME 覆盖到临时目录。
+ */
+export function dshHome() {
+  return process.env.DSH_MEME_HOME || homedir()
+}
+
 /** 内置默认图库根：随插件分发的 memes/dafeiyu-001（大肥鱼）。可用 memeRoot 覆盖。 */
 export function defaultMemeRoot() {
   return join(bundledPacksDir(), 'dafeiyu-001')
@@ -22,7 +33,7 @@ export function defaultMemeRoot() {
 
 /** 用户导入/自建图库的扫描目录。 */
 export function defaultPacksDir() {
-  return join(process.env.HOME || '.', '.dsh', 'meme-packs')
+  return join(dshHome(), '.dsh', 'meme-packs')
 }
 
 export function isPackDir(dir) {

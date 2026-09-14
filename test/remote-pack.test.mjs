@@ -57,6 +57,8 @@ const base = 'http://127.0.0.1:' + fixture.address().port
 // ---- 启动插件(mock 宿主) ----
 const home = mkdtempSync(join(tmpdir(), 'dsh-meme-remote-'))
 process.env.HOME = home
+// 插件用 os.homedir()(Windows 上没有 HOME),测试靠 DSH_MEME_HOME 把家目录指到临时目录
+process.env.DSH_MEME_HOME = home
 const handlers = []
 const webServer = {
   host: '127.0.0.1', port: 3999,
@@ -362,24 +364,44 @@ test('createMemePack creates an empty library and protects duplicate IDs and pat
 })
 
 
-test('submission export guards the selected pack and produces an importable ZIP', async () => {
+test('图库导出:packId 选包导出,未知包报错,空图库不下发 ZIP', async () => {
   const exporter = handlers.find(h => h.path === '/dsh-memes-export')
-  const download = (packId) => {
+  const download = (qs) => {
     const res = { status: 0, body: null, writeHead(status) { this.status = status }, end(body) { this.body = body } }
-    exporter.handler({ method: 'GET', url: '/dsh-memes-export?packId=' + packId }, res)
+    exporter.handler({ method: 'GET', url: '/dsh-memes-export' + (qs || '') }, res)
     return res
   }
-  assert.equal(download('old-pack').status, 500)
-  assert.match(String(download('personal-test').body), /空图库/)
+  assert.equal(download('?packId=old-pack').status, 500, '未知图库应报错')
+  assert.match(String(download('?packId=personal-test').body), /空图库/)
   const upload = await post({ op: 'upload', tag: 'happy', fileName: 'test.jpg', dataBase64: imgBytes.toString('base64'), caption: '测试投稿' })
   assert.equal(JSON.parse(upload.body).ok, true)
-  const result = download('personal-test')
+  const result = download('?packId=personal-test')
   assert.equal(result.status, 200)
   const entries = mod.unzipStore(result.body)
   assert.ok(entries.has('index.db'))
   const manifest = JSON.parse(entries.get('manifest.json'))
   assert.equal(manifest.id, 'personal-test')
   assert.ok([...entries.keys()].some(name => name.startsWith('memes/happy/')))
+
+  // 不切当前图库也能导出别的包(图库页每张卡片都有「导出」)
+  assert.equal(JSON.parse((await post({ op: 'createMemePack', id: 'other-test', name: '另一个' })).body).ok, true)
+  const other = download('?packId=personal-test')
+  assert.equal(other.status, 200, '当前图库已切到 other-test,仍应能导出 personal-test')
+  assert.equal(JSON.parse(mod.unzipStore(other.body).get('manifest.json')).id, 'personal-test')
+})
+
+
+test('browse 列出目录(选择目录走插件自己的 API)', async () => {
+  const listed = JSON.parse((await post({ op: 'browse', path: home })).body)
+  assert.equal(listed.ok, true)
+  assert.equal(listed.path, home)
+  assert.ok(listed.entries.some((e) => e.name === '.dsh' && e.path.includes('.dsh')), '应列出 .dsh 目录')
+  assert.ok(listed.parent, '应给出上一级路径')
+  assert.ok(listed.breadcrumbs.length >= 2, '应给出面包屑')
+  // 路径不存在时退回 home,不报错
+  const fallback = JSON.parse((await post({ op: 'browse', path: join(home, 'nope-not-here') })).body)
+  assert.equal(fallback.ok, true)
+  assert.equal(fallback.path, home)
 })
 
 

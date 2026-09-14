@@ -15,13 +15,13 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, rmSync, readdirSync, renameSync, statSync } from 'node:fs'
-import { join, dirname, resolve, sep } from 'node:path'
+import { join, dirname, resolve, sep, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta,
-  resolveActiveRoot, liveStore, registerSendMemeTool,
+  resolveActiveRoot, liveStore, registerSendMemeTool, dshHome,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -138,13 +138,13 @@ const ROUTE = '/dsh-memes'
 export function apply(ctx, config) {
   // 图库目录设置存 ~/.dsh(稳定,不受包升级/图库变化影响):
   // 优先级 用户设置(settings) > patch 配置(config.memeRoot) > 包内默认
-  const settingsFile = join(process.env.HOME || '.', '.dsh', 'dsh-expression.json')
+  const settingsFile = join(dshHome(), '.dsh', 'dsh-expression.json')
   const readSettings = () => {
     try { return JSON.parse(readFileSync(settingsFile, 'utf8')) } catch (e) { return {} }
   }
   const writeSettings = (patch) => {
     try {
-      mkdirSync(join(process.env.HOME || '.', '.dsh'), { recursive: true })
+      mkdirSync(join(dshHome(), '.dsh'), { recursive: true })
       writeFileSync(settingsFile, JSON.stringify({ ...readSettings(), ...patch }, null, 2))
     } catch (e) {}
   }
@@ -1101,6 +1101,22 @@ export function apply(ctx, config) {
             const enabled = body.enabled !== false
             writeSettings({ promptEnabled: enabled })
             json(res, { ok: true, ...packPayload(), message: enabled ? '已开启陪伴提示词,下一条消息生效' : '已关闭陪伴提示词,下一条消息生效' })
+          } else if (op === 'browse') {
+            // 服务端列目录:宿主 0.1.5 的客户端没有 workspaces 服务,「选择目录」只能走自己的 API
+            let dir = resolve(String(body.path || '').trim() || packsDirNow())
+            if (!existsSync(dir)) dir = dshHome()
+            const entries = readdirSync(dir, { withFileTypes: true })
+              .filter((e) => e.isDirectory())
+              .map((e) => ({ name: e.name, path: join(dir, e.name) }))
+              .sort((a, b) => a.name.localeCompare(b.name))
+            const crumbs = []
+            for (let cur = dir; ;) {
+              const parent = dirname(cur)
+              crumbs.unshift({ name: cur === parent ? cur : basename(cur), path: cur })
+              if (cur === parent) break
+              cur = parent
+            }
+            json(res, { ok: true, path: dir, parent: dirname(dir) === dir ? '' : dirname(dir), entries, breadcrumbs: crumbs })
           } else {
             json(res, { ok: false, error: '未知操作: ' + op }, 400)
           }
@@ -1120,19 +1136,30 @@ export function apply(ctx, config) {
           return
         }
         try {
-          const expectedPack = new URL(req.url || '/', 'http://localhost').searchParams.get('packId')
-          if (expectedPack !== null && expectedPack !== packPayload().packId) throw new Error('当前图库已切换，请重新投稿')
-          if (expectedPack !== null && !memes.list().memes.length) throw new Error('空图库不能投稿，请先添加图片')
-          adminDb.exec('PRAGMA wal_checkpoint(FULL)')
+          // packId 指定要导出哪个图库(图库页每张卡片都能导出),不传就导出当前图库
+          const wanted = new URL(req.url || '/', 'http://localhost').searchParams.get('packId')
+          const target = wanted ? listAllPacks().find((p) => p.id === wanted) : null
+          if (wanted && !target) throw new Error('图库不存在: ' + wanted)
+          const root = resolve(target ? target.path : memes.root)
+          if (root === resolve(memes.root)) adminDb.exec('PRAGMA wal_checkpoint(FULL)')
           // 只导出索引内的文件(index.db + manifest.json + 索引图片),
           // 不打包 .git/备份/缩略图等无关内容(历史教训:整目录遍历会带出 200MB 杂物)
-          const files = [{ name: 'index.db', data: readFileSync(join(memes.root, 'index.db')) }]
-          if (existsSync(join(memes.root, 'manifest.json'))) {
-            files.push({ name: 'manifest.json', data: readFileSync(join(memes.root, 'manifest.json')) })
+          let paths = []
+          {
+            const db = new DatabaseSync(join(root, 'index.db'))
+            try {
+              if (root !== resolve(memes.root)) { try { db.exec('PRAGMA wal_checkpoint(FULL)') } catch { /* 只读库 */ } }
+              paths = db.prepare('SELECT path FROM memes').all().map((r) => String(r.path))
+            } finally { db.close() }
           }
-          for (const m of memes.list().memes) {
-            const full = join(memes.root, m.path)
-            if (existsSync(full)) files.push({ name: m.path, data: readFileSync(full) })
+          if (paths.length === 0) throw new Error('空图库没有可导出的图片')
+          const files = [{ name: 'index.db', data: readFileSync(join(root, 'index.db')) }]
+          if (existsSync(join(root, 'manifest.json'))) {
+            files.push({ name: 'manifest.json', data: readFileSync(join(root, 'manifest.json')) })
+          }
+          for (const rel of paths) {
+            const full = join(root, rel)
+            if (existsSync(full)) files.push({ name: rel, data: readFileSync(full) })
           }
           const zip = zipStore(files)
           const stamp = new Date().toISOString().slice(0, 10)

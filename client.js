@@ -130,14 +130,12 @@ window.__ModuleLoader__.load({
       const [recognizing, setRecognizing] = React.useState(false)
       const [uploadOpen, setUploadOpen] = React.useState(false)
       const [memeRoot, setMemeRoot] = React.useState('')
-      const [memeRootInput, setMemeRootInput] = React.useState('')
       const [packId, setPackId] = React.useState('')
       const [packs, setPacks] = React.useState([])
       const [packsDir, setPacksDir] = React.useState('')
       const [packsDirInput, setPacksDirInput] = React.useState('')
       const [rootNotice, setRootNotice] = React.useState('')
       const [browseOpen, setBrowseOpen] = React.useState(false)
-      const [browseMode, setBrowseMode] = React.useState('packsDir')
       const [browseList, setBrowseList] = React.useState(null)
       const [browseErr, setBrowseErr] = React.useState('')
       const [companionPrompt, setCompanionPrompt] = React.useState('') // 用户自定义覆盖(空=默认)
@@ -156,7 +154,6 @@ window.__ModuleLoader__.load({
       const applyRoot = (res) => {
         if (!res || !res.ok) return
         setMemeRoot(res.memeRoot || '')
-        setMemeRootInput(res.memeRoot || '')
         setPackId(res.packId || '')
         setPacks(Array.isArray(res.packs) ? res.packs : [])
         setPromptOn(res.promptEnabled !== false)
@@ -293,6 +290,26 @@ window.__ModuleLoader__.load({
           }
         } catch (e) { setRootNotice('删除失败') }
       }
+      // 图库卡片「导出」:导出指定图库的 ZIP(不必先切过去)
+      const onExportPack = async (id, name) => {
+        try {
+          setRootNotice('正在导出…')
+          const response = await fetch('/dsh-memes-export?packId=' + encodeURIComponent(id))
+          if (!response.ok) throw new Error((await response.text()) || '导出失败')
+          const blob = await response.blob()
+          const url = URL.createObjectURL(blob)
+          const link = document.createElement('a')
+          link.href = url
+          link.download = 'dsh-meme-' + id + '.zip'
+          document.body.appendChild(link)
+          link.click()
+          link.remove()
+          setTimeout(() => URL.revokeObjectURL(url), 60000)
+          setRootNotice('已导出「' + (name || id) + '」的 ZIP')
+        } catch (error) {
+          setRootNotice(error.message || '导出失败，请重试')
+        }
+      }
       // 图库卡片「编辑」:先切到该图库(上传/改/删只作用于当前图库),再进它的表情包页
       const onEditPack = async (id) => {
         const next = String(id || '').trim()
@@ -391,42 +408,31 @@ window.__ModuleLoader__.load({
           setRootNotice('保存失败')
         }
       }
-      const onSaveMemeRoot = async (dirArg) => {
-        const dir = String(dirArg !== undefined ? dirArg : memeRootInput || '').trim()
-        if (!dir) { setRootNotice('目录不能为空'); return }
-        try {
-          const res = await apiPost({ op: 'setMemeRoot', memeRoot: dir })
-          if (res && res.ok) {
-            applyRoot(res)
-            setRootNotice('已切换图库,立即生效')
-            await load(q, tagFilter)
-          } else {
-            setRootNotice('保存失败: ' + (res && res.error || ''))
-          }
-        } catch (e) {
-          setRootNotice('保存失败')
-        }
-      }
-      const onPickDir = async (mode) => {
-        setBrowseErr('')
-        setBrowseMode(mode || 'packsDir')
-        try {
-          const workspaces = ctx.get('workspaces')
-          if (!workspaces || typeof workspaces.listDirectory !== 'function') return
-          const start = mode === 'memeRoot'
-            ? String(memeRootInput || '').trim()
-            : String(packsDirInput || '').trim()
-          setBrowseList(await workspaces.listDirectory(start || undefined))
-          setBrowseOpen(true)
-        } catch (e) {}
+      // 目录浏览走插件自己的 API(宿主 0.1.5 的客户端没有 workspaces 服务,
+      // 之前依赖它 → 点了「选择目录」什么都不发生)
+      const browseFetch = async (path) => {
+        const res = await apiPost({ op: 'browse', path: path || '' })
+        if (!res || !res.ok) throw new Error((res && res.error) || '读取失败')
+        return { path: res.path, parent: res.parent, entries: res.entries, breadcrumbs: res.breadcrumbs }
       }
       const browseTo = async (path) => {
         setBrowseErr('')
         try {
-          setBrowseList(await ctx.get('workspaces').listDirectory(path))
+          setBrowseList(await browseFetch(path))
         } catch (e) {
           setBrowseErr('读取失败: ' + (e && e.message ? e.message : String(e)))
         }
+      }
+      const onPickDir = async () => {
+        setBrowseErr('')
+        setBrowseList(null)
+        try {
+          setBrowseList(await browseFetch(String(packsDirInput || '').trim()))
+        } catch (e) {
+          // 失败原因要说出来,否则用户看到的就是「点了没反应」
+          setRootNotice('打开目录浏览器失败: ' + (e && e.message ? e.message : String(e)))
+        }
+        setBrowseOpen(true)
       }
 
       const [upNewTag, setUpNewTag] = React.useState('')
@@ -760,13 +766,18 @@ window.__ModuleLoader__.load({
           : h(React.Fragment, null,
             h('div', { className: 'row', style: { width: '100%' } },
               h('button', { className: 'btn-primary', disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackDialog('create') } }, '新建图包库'),
+              h('button', { disabled: uploading, onClick: () => importFileRef.current && importFileRef.current.click() }, '导入图库'),
               h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '点卡片上的「编辑」进入该图库的表情包页'),
             ),
+            h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
             libraryCards.length === 0
               ? h('div', { className: 'empty' }, '还没有图库')
               : h('div', { className: 'mk-grid' }, libraryCards.map((row) => packCard(row, [
                 row.downloaded
                   ? h('button', { key: 'edit', onClick: () => onEditPack(row.packId), disabled: remoteBusy || !!row.job }, '编辑')
+                  : null,
+                row.downloaded
+                  ? h('button', { key: 'export', onClick: () => onExportPack(row.packId, row.name) }, '导出')
                   : null,
                 row.packId === packId && curPack && curPack.count > 0
                   ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿到市场')
@@ -904,11 +915,11 @@ window.__ModuleLoader__.load({
             ),
           ),
         ) : null,
-        // 底部:扫描目录 / 导入导出
+        // 底部:扫描目录 / 提示词(导入导出在图库页)
         h('div', { className: 'section-title' }, '扫描目录'),
         h('div', { className: 'row', style: { width: '100%' } },
           h('input', { type: 'text', value: packsDirInput, onChange: (e) => setPacksDirInput(e.target.value), placeholder: '自动扫描含 index.db 的子文件夹', style: { flex: 1, minWidth: 160 } }),
-          h('button', { onClick: () => onPickDir('packsDir') }, '选择目录'),
+          h('button', { onClick: () => onPickDir() }, '选择目录'),
           h('button', { className: 'btn-primary', onClick: () => onSavePacksDir() }, '保存'),
         ),
         h('div', { className: 'section-title' }, '陪伴提示词'),
@@ -922,12 +933,6 @@ window.__ModuleLoader__.load({
           h('button', { onClick: () => { setPromptDraft(companionPrompt || defaultPrompt); setPromptOpen(true) } }, '编辑提示词'),
           h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
             companionPrompt ? '已自定义' : '使用默认'),
-        ),
-        h('div', { className: 'row' },
-          h('button', { onClick: () => { window.location.href = '/dsh-memes-export' } }, '导出图库'),
-          h('button', { onClick: () => importFileRef.current && importFileRef.current.click() }, '导入图库'),
-          h('button', { onClick: () => onPickDir('memeRoot') }, '打开其他目录'),
-          h('input', { ref: importFileRef, type: 'file', accept: '.zip,application/zip', style: { display: 'none' }, onChange: onImportPack }),
         ),
 
         ) : null,
@@ -959,13 +964,8 @@ window.__ModuleLoader__.load({
             h('div', { className: 'total', style: { wordBreak: 'break-all' } }, browseList.path),
             h('div', { className: 'row', style: { flexWrap: 'wrap', gap: 4 } },
               h('button', {
-                onClick: () => {
-                  // 上一级 = 当前路径去掉最后一段(不依赖 breadcrumbs)
-                  const p = String(browseList.path || '')
-                  const parent = p.replace(/\/+[^\/]*\/?$/, '') || '/'
-                  if (parent !== p) browseTo(parent)
-                },
-                disabled: !String(browseList.path || '').includes('/'),
+                onClick: () => { if (browseList.parent) browseTo(browseList.parent) },
+                disabled: !browseList.parent,
                 style: { padding: '3px 8px', fontSize: 12 },
               }, '⬆ 上一级'),
               (browseList.breadcrumbs || []).map((c, i) =>
@@ -983,9 +983,7 @@ window.__ModuleLoader__.load({
             h('div', { className: 'modal-acts' },
               h('button', { onClick: () => setBrowseOpen(false) }, '取消'),
               h('button', { className: 'btn-primary', onClick: () => {
-                const p = browseList.path
-                if (browseMode === 'memeRoot') onSaveMemeRoot(p)
-                else onSavePacksDir(p)
+                onSavePacksDir(browseList.path)
                 setBrowseOpen(false)
               } }, '使用此目录'),
             ),
