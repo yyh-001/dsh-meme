@@ -6,7 +6,7 @@
 # 写错会导致新装用户 Cannot find package 'dsh-expression'。
 # 纯 insert(id/name)可热挂载免重启。图库目录不在这里写死——
 # 用户在设置页下拉切换图库,保存到 ~/.dsh/dsh-expression.json;
-# 默认用包内置图库(memes/official-001)。历史教训:patch 硬编码某台机器的
+# 默认用包内置图库(memes/dafeiyu-001)。历史教训:patch 硬编码某台机器的
 # memeRoot,其他用户安装后指向不存在的目录,插件直接起不来。
 - insert:
     - id: dsh-expression

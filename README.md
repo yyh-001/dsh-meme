@@ -57,7 +57,7 @@ pnpm add file:/path/to/dsh-meme
 
 ## 配置
 
-内置一套图库：`dafeiyu-001`（大肥鱼，49 张），开箱即用，**无需任何配置**。「官方表情包 1 号」（`official-001`）已不再随插件分发，需要的话到设置页「发现」里一键安装（市场里有带 SHA-256 校验的 Release ZIP）。
+内置一套图库：`dafeiyu-001`（大肥鱼，24 张），开箱即用，**无需任何配置**。「官方表情包 1 号」（`official-001`）已不再随插件分发，需要的话到设置页「发现」里一键安装（市场里有带 SHA-256 校验的 Release ZIP）。
 
 设置页「图库」页：点卡片上的「编辑」切入该图库（管理图片用），点卡片右上角的开关决定**模型能不能用这个图库发图**（可以同时开多个）。插件会扫描内置 `memes/*` 以及「扫描目录」（默认 `~/.dsh/meme-packs`）下带 `index.db` 的子文件夹。导入 ZIP 也会放进扫描目录并立刻切过去。设置存在 `~/.dsh/dsh-expression.json`，升级插件不丢。
 
@@ -190,10 +190,10 @@ learn_meme imageUrl="https://…"    # 收录任意图片 URL
 
 ## 图库来源
 
-内置两套：
+随插件内置的只有一套；另两套按需获取：
 
-- **大肥鱼**（`id: dafeiyu-001`，49 张鲸鱼娘 chibi），设置页可切过来：包含 `angry` 3 张、`confused` 4 张、`daily` 7 张、`happy` 12 张、`sad` 6 张、`shy` 4 张，以及 `baka` / `color` / `cpu` / `fool` / `givemoney` / `like` / `meow` / `morning` / `see` / `sigh` / `sleep` / `surprised` / `work` 各 1 张。
-  - 2026-08-20 新增 25 张自动学图表情，来自 [PR #3](https://github.com/yyh-001/dsh-meme/pull/3)，感谢 [hZsFN](https://github.com/hZsFN) 的补充。
+- **大肥鱼**（`id: dafeiyu-001`，24 张鲸鱼娘 chibi）内置：`happy` 3 张、`confused` 2 张、`sad` 2 张、`shy` 2 张，以及 `angry` / `baka` / `color` / `cpu` / `daily` / `fool` / `givemoney` / `like` / `meow` / `morning` / `see` / `sigh` / `sleep` / `surprised` / `work` 各 1 张。
+- **大肥鱼·学图**（`id: dafeiyu-learned`，25 张，维护者 [hZsFN](https://github.com/hZsFN)）**不内置**：来自 [PR #3](https://github.com/yyh-001/dsh-meme/pull/3) 的「自动学图」表情，原来是并进 dafeiyu-001 的，现已拆成独立图库。
 - **官方表情包1号**（`id: official-001`，已改为市场安装、不再内置）来自 **Astrbot mememanager 官方初始表情包**：
 
 - 上游仓库：[anka-afk/astrbot-meme-pack-official-01](https://github.com/anka-afk/astrbot-meme-pack-official-01)（`main` 分支），维护者 **anka-afk**
@@ -215,7 +215,7 @@ dsh-meme/
   client.js         前端：设置页面板(上传/编辑/删除) + 😊 悬浮窗 + [表情: 描述] 配图
   cordis.patch.yml  bundle patch(纯 insert,热挂载免重启)
   memes/
-    dafeiyu-001/    内置大肥鱼（49 张鲸鱼娘）
+    dafeiyu-001/    内置大肥鱼（24 张鲸鱼娘）
   package.json      name / inject / peer deps
   README.md
   LICENSE
