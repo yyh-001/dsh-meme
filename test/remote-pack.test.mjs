@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { createServer } from 'node:http'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -580,4 +580,53 @@ test('安装完的图库默认打开开关(模型直接可用)', async () => {
   const out = JSON.parse(res.body)
   assert.equal(out.packId, 'market-test', '装完应切到新图库')
   assert.ok(out.enabledPacks.includes('market-test'), '装完应把开关打开: ' + JSON.stringify(out.enabledPacks))
+})
+
+
+test('setPackCover:手动封面覆盖自动挑的,空路径恢复默认', async () => {
+  // cover-empty 由前面的用例创建;上传/列表都作用于当前图库,先切过去
+  assert.equal(JSON.parse((await post({ op: 'setPack', packId: 'cover-empty' })).body).ok, true)
+  const before = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  const pack = before.packs.find((p) => p.id === 'cover-empty')
+  assert.ok(pack, 'cover-empty 图库应存在')
+  assert.ok(pack.cover, '自动封面应存在')
+  assert.equal(pack.customCover, '')
+
+  await post({ op: 'upload', tag: 'happy', fileName: 'd.jpg', dataBase64: imgBytes.toString('base64'), caption: '第二张' })
+  const listed = await get('?packId=all')
+  const second = listed.json.memes.find((m) => m.caption === '第二张')
+  assert.ok(second, '刚上传的图应能列出来')
+
+  const set = JSON.parse((await post({ op: 'setPackCover', packId: 'cover-empty', path: second.path })).body)
+  assert.equal(set.ok, true)
+  const card = set.packs.find((p) => p.id === 'cover-empty')
+  assert.equal(card.customCover, second.path)
+  assert.equal(card.cover, '/dsh-memes/cover-empty/' + second.path)
+
+  // 越界 / 文件不存在 / 图库不存在都要拒绝
+  assert.equal((await post({ op: 'setPackCover', packId: 'cover-empty', path: '../../secret.jpg' })).statusCode, 400)
+  assert.equal((await post({ op: 'setPackCover', packId: 'cover-empty', path: 'memes/happy/nope.jpg' })).statusCode, 400)
+  assert.equal((await post({ op: 'setPackCover', packId: 'nope', path: 'x.jpg' })).statusCode, 400)
+
+  // 空路径 = 恢复默认
+  const reset = JSON.parse((await post({ op: 'setPackCover', packId: 'cover-empty', path: '' })).body)
+  assert.equal(reset.packs.find((p) => p.id === 'cover-empty').customCover, '')
+})
+
+
+test('清单没 id 时用 URL 派生 id,任务不会碰扫描目录本身', async () => {
+  // normalizeRemoteManifest 会用 URL 哈希兜底出 id;这条守住的是更重要的性质:
+  // 任务只在自己那个子目录里干活,绝不会动到 meme-packs 根目录
+  currentManifest = { ...v1, id: '', name: '无 id 清单' }
+  const packsDir = join(home, '.dsh', 'meme-packs')
+  const before = readdirSync(packsDir).slice().sort()
+  assert.ok(before.length > 0, '前置条件:扫描目录里应有图库')
+  const res = await post({ op: 'subscribeRemote', manifestUrl: base + '/manifest.json' })
+  const jobId = JSON.parse(res.body).id
+  const snap = await waitJob(jobId)
+  assert.match(String(snap.packId || ''), /^remote-[0-9a-f]{8}$/, '应派生出一个安全 id: ' + snap.packId)
+  const after = readdirSync(packsDir).slice().sort()
+  for (const name of before) assert.ok(after.includes(name), '原有图库不能被删: ' + name)
+  assert.ok(after.includes(snap.packId), '新图库应作为子目录出现')
+  assert.ok(existsSync(join(packsDir, snap.packId, 'index.db')))
 })

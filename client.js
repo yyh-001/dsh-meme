@@ -67,7 +67,7 @@ window.__ModuleLoader__.load({
       '.mk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;width:100%}',
       '.mk-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);display:flex;flex-direction:column;transition:transform .12s ease,box-shadow .12s ease}',
       '.mk-card:hover{transform:translateY(-2px);box-shadow:0 5px 14px rgba(0,0,0,.12)}',
-      '.mk-cover{width:100%!important;height:104px!important;background-size:cover!important;background-position:center 28%!important;background-repeat:no-repeat!important;background-color:var(--dsw-alias-bg-base);display:block}',
+      '.mk-cover{width:100%!important;height:136px!important;background-size:cover!important;background-position:center 28%!important;background-repeat:no-repeat!important;background-color:var(--dsw-alias-bg-base);display:block}',
       '.mk-cover-fallback{display:flex;align-items:center;justify-content:center;font-size:26px;color:var(--dsw-alias-label-secondary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 8%,var(--dsw-alias-bg-layer-2))}',
       '.mk-body{padding:10px 12px 12px;display:flex;flex-direction:column;gap:6px;flex:1}',
       '.mk-title{display:flex;align-items:center;justify-content:space-between;gap:8px}',
@@ -326,6 +326,17 @@ window.__ModuleLoader__.load({
           setRootNotice(res.message || '已删除')
           await load('', '')
         } catch (error) { setRootNotice(error.message || '删除失败') }
+      }
+      // 详情页「设为封面」:把这张图记成该图库的封面(空 = 恢复自动挑的)
+      const onSetCover = async (path) => {
+        const packIdNow = packView || packId
+        if (!packIdNow) return
+        try {
+          const res = await apiPost({ op: 'setPackCover', packId: packIdNow, path })
+          if (!res || !res.ok) throw new Error((res && res.error) || '操作失败')
+          applyRoot(res)
+          setRootNotice(res.message || '已设为封面')
+        } catch (error) { setRootNotice(error.message || '操作失败') }
       }
       const onDeletePackPrompt = (row) => {
         setRootNotice('')
@@ -691,6 +702,11 @@ window.__ModuleLoader__.load({
           h('div', { className: 'cap' }, m.caption || m.file_name),
           h('div', { className: 'acts' },
             h('button', { onClick: () => setEdit({ path: m.path, tag: m.tag, caption: m.caption || '', keywords: m.keywords || '' }) }, '编辑'),
+            // 卡片封面就是这一张时把按钮置灰,免得反复点
+            h('button', {
+              onClick: () => onSetCover(m.path),
+              disabled: !!(curPack && curPack.cover && m.url && curPack.cover === m.url),
+            }, (curPack && curPack.cover && m.url && curPack.cover === m.url) ? '当前封面' : '设为封面'),
             h('button', { className: 'danger', onClick: () => onDelete(m) }, '删除'),
           ),
         ),
@@ -827,6 +843,9 @@ window.__ModuleLoader__.load({
               h('button', { className: 'btn-primary', onClick: () => setUploadOpen(true) }, '上传表情包'),
               tagSelect,
               h('button', { onClick: () => load(q, tagFilter), disabled: busy }, '搜索'),
+              curPack && curPack.customCover
+                ? h('button', { onClick: () => onSetCover(''), title: '恢复成自动挑的那张' }, '恢复默认封面')
+                : null,
             ),
             notice ? h('div', { className: 'notice' }, notice) : null,
             memes.length === 0 && !busy
