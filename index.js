@@ -41,6 +41,24 @@ function crc32(buf) {
 }
 
 /** 打包文件列表为 ZIP(store 无压缩):[{name, data}] → Buffer */
+/**
+ * 从 GitHub releases 里按图库 id 汇总下载量。tag 形如 <id>-v1.2.0,
+ * 同一图库的多个版本相加(用户装过 1.2.0 再装 1.3.0 都算一次下载)。
+ * 抽成纯函数是为了能直接喂假数据测。
+ */
+export function parseDownloadCounts(releases) {
+  const out = {}
+  for (const r of (Array.isArray(releases) ? releases : [])) {
+    const tag = String((r && r.tag_name) || '')
+    const id = tag.replace(/-v[\d.]+$/i, '').trim()
+    if (!id || id === tag) continue
+    let sum = 0
+    for (const a of (Array.isArray(r && r.assets) ? r.assets : [])) sum += Number(a && a.download_count) || 0
+    out[id] = (out[id] || 0) + sum
+  }
+  return out
+}
+
 export function zipStore(files) {
   const parts = []
   const central = []
@@ -591,6 +609,37 @@ export function apply(ctx, config) {
       return Array.isArray(subs) ? subs : []
     }
     let remoteDirCache = null // {at, data},60s 内复用,面板每次挂载拉一次也不怕
+    let downloadCache = { at: 0, data: {}, key: '' }
+    /**
+     * 下载量是活数据,不进 catalog.json:服务端代拉 GitHub releases(一个请求拿全),
+     * 缓存 30 分钟。只认 archiveUrl 指向 github.com 的条目,清单热链的包没有 release
+     * 可数,就不显示。失败一律当「没有数据」,不影响目录本身。
+     */
+    const fetchDownloadCounts = async (entries) => {
+      const repos = new Set()
+      for (const e of (entries || [])) {
+        const m = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\//.exec(String((e && e.archiveUrl) || ''))
+        if (m) repos.add(m[1] + '/' + m[2])
+      }
+      const key = [...repos].sort().join(',')
+      if (!key) return {}
+      // 匿名 API 额度是 60 次/小时/IP:缓存 30 分钟,一次打开发现页最多触发一次
+      if (downloadCache.key === key && Date.now() - downloadCache.at < 1800000) return downloadCache.data
+      const merged = {}
+      for (const repo of repos) {
+        try {
+          const res = await fetch('https://api.github.com/repos/' + repo + '/releases?per_page=100', {
+            headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-meme' },
+            signal: AbortSignal.timeout(8000),
+          })
+          if (!res.ok) continue
+          Object.assign(merged, parseDownloadCounts(await res.json()))
+        } catch { /* 拉不到就少显示一个数字 */ }
+      }
+      downloadCache = { at: Date.now(), data: merged, key }
+      return merged
+    }
+
     const fetchRemoteDirectory = async () => {
       if (remoteDirCache && Date.now() - remoteDirCache.at < 60000) return remoteDirCache.data
       for (const u of [].concat(remoteDirUrls() || [])) {
@@ -1024,7 +1073,13 @@ export function apply(ctx, config) {
         if (req.method === 'GET') {
           const u = new URL(req.url || '/', 'http://localhost')
           if (u.searchParams.has('remoteDir')) {
-            json(res, { ok: true, remoteDir: await fetchRemoteDirectory() })
+            const dir = await fetchRemoteDirectory()
+            let counts = {}
+            try { counts = await fetchDownloadCounts(dir || []) } catch { /* 只是少个数字 */ }
+            json(res, {
+              ok: true,
+              remoteDir: (dir || []).map((e) => ({ ...e, downloads: counts[e.id] || 0 })),
+            })
             return
           }
           const packs = listAllPacks()

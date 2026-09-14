@@ -610,3 +610,22 @@ test('清单没 id 时用 URL 派生 id,任务不会碰扫描目录本身', asyn
   assert.ok(after.includes(snap.packId), '新图库应作为子目录出现')
   assert.ok(existsSync(join(packsDir, snap.packId, 'index.db')))
 })
+
+
+test('下载量:按图库 id 汇总多个版本,清单包没有就不显示', () => {
+  const releases = [
+    { tag_name: 'dafeiyu-001-v1.2.0', assets: [{ download_count: 120 }, { download_count: 5 }] },
+    { tag_name: 'dafeiyu-001-v1.3.0', assets: [{ download_count: 30 }] },
+    { tag_name: 'official-001-v1.0.0', assets: [{ download_count: 7 }] },
+    { tag_name: 'not-a-pack-tag', assets: [{ download_count: 999 }] },
+    { tag_name: 'dafeiyu-learned-v1.0.0', assets: [] },
+  ]
+  const counts = mod.parseDownloadCounts(releases)
+  assert.equal(counts['dafeiyu-001'], 155, '同一图库多个版本要相加')
+  assert.equal(counts['official-001'], 7)
+  assert.equal(counts['dafeiyu-learned'], 0)
+  assert.equal(counts['not-a-pack-tag'], undefined, '不是 <id>-v<版本> 的 tag 不算')
+  assert.deepEqual(mod.parseDownloadCounts(null), {})
+  // 目录里带 downloads 字段(发现页卡片显示用);测试目录是本地地址,没有 release 可数
+  assert.equal(typeof mod.parseDownloadCounts, 'function')
+})

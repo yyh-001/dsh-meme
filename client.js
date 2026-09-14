@@ -755,7 +755,12 @@ window.__ModuleLoader__.load({
             name: entry.name || pid, desc: entry.description || '',
             // 装过的用本地封面,没装的才用目录里的远程预览图
             cover: (downloaded && local.cover) ? local.cover : (entry.preview || (entry.previews || [])[0] || null),
-            meta: [author, entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '', entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
+            meta: [
+              author,
+              entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '',
+              entry.count ? entry.count + ' 张' : '',
+              entry.downloads ? '↓ ' + fmtCount(entry.downloads) : '',
+            ].filter(Boolean).join(' · '),
             tags: keywords, entry, sub,
             installed: !!sub || downloaded,
             job: jobFor(pid),
@@ -1208,6 +1213,12 @@ window.__ModuleLoader__.load({
       const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(raw)
       // 远端预览图优先走 jsDelivr 镜像(raw.githubusercontent 在部分网络下不稳)
       return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : raw
+    }
+
+    /** 下载量显示:上千折成 1.2k,省得数字把卡片撑爆 */
+    function fmtCount(n) {
+      const x = Number(n) || 0
+      return x >= 1000 ? (Math.round(x / 100) / 10) + 'k' : String(x)
     }
 
     function makeMemeStore() {
