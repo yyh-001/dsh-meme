@@ -63,8 +63,9 @@ const webServer = {
   register(r) { handlers.push(r) },
   tapIndex() {},
 }
+const onHandlers = {}
 const ctx = {
-  on() {},
+  on(name, fn) { (onHandlers[name] ||= []).push(fn) },
   get(name) { return name === 'webServer' ? webServer : undefined },
   tools: { register() {} },
   agentDefaultModel: null,
@@ -379,4 +380,25 @@ test('submission export guards the selected pack and produces an importable ZIP'
   const manifest = JSON.parse(entries.get('manifest.json'))
   assert.equal(manifest.id, 'personal-test')
   assert.ok([...entries.keys()].some(name => name.startsWith('memes/happy/')))
+})
+
+
+test('setPromptEnabled 关掉后不再注入陪伴提示词,开启后恢复', async () => {
+  const assemble = onHandlers['system-prompt/assemble'][0]
+  assert.ok(assemble, '应注册 system-prompt/assemble')
+  const run = async () => {
+    const assembled = { sections: [] }
+    return assemble({}, {}, async () => assembled)
+  }
+  const withPrompt = await run()
+  assert.ok(withPrompt.sections.some((s) => s.name === 'dsh-expression:companion'), '默认应注入陪伴提示词')
+
+  const off = JSON.parse((await post({ op: 'setPromptEnabled', enabled: false })).body)
+  assert.equal(off.ok, true)
+  assert.equal(off.promptEnabled, false)
+  assert.equal((await run()).sections.length, 0, '关掉后不应再注入')
+
+  const on = JSON.parse((await post({ op: 'setPromptEnabled', enabled: true })).body)
+  assert.equal(on.promptEnabled, true)
+  assert.ok((await run()).sections.some((s) => s.name === 'dsh-expression:companion'), '开回来应恢复注入')
 })

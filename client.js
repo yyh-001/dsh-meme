@@ -136,7 +136,6 @@ window.__ModuleLoader__.load({
       const [packsDir, setPacksDir] = React.useState('')
       const [packsDirInput, setPacksDirInput] = React.useState('')
       const [rootNotice, setRootNotice] = React.useState('')
-      const [packOpen, setPackOpen] = React.useState(false)
       const [browseOpen, setBrowseOpen] = React.useState(false)
       const [browseMode, setBrowseMode] = React.useState('packsDir')
       const [browseList, setBrowseList] = React.useState(null)
@@ -150,24 +149,24 @@ window.__ModuleLoader__.load({
       const [remoteUrl, setRemoteUrl] = React.useState('')
       const [remoteJobs, setRemoteJobs] = React.useState({})
       const [remoteBusy, setRemoteBusy] = React.useState(false)
-      const [remoteTab, setRemoteTab] = React.useState('discover')
       const [panelTab, setPanelTab] = React.useState('library')
       const [remoteQuery, setRemoteQuery] = React.useState('')
-      const [localPackState, setLocalPackState] = React.useState([])
+      const [packView, setPackView] = React.useState('') // 非空 = 进入该图库的表情包页(二级页,不是标签页)
+      const [promptOn, setPromptOn] = React.useState(true)
       const applyRoot = (res) => {
         if (!res || !res.ok) return
         setMemeRoot(res.memeRoot || '')
         setMemeRootInput(res.memeRoot || '')
         setPackId(res.packId || '')
         setPacks(Array.isArray(res.packs) ? res.packs : [])
-        setLocalPackState(Array.isArray(res.packs) ? res.packs : [])
+        setPromptOn(res.promptEnabled !== false)
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
         setCompanionPrompt(res.companionPrompt || '')
         setDefaultPrompt(res.defaultCompanionPrompt || '')
         setRemoteSubs(Array.isArray(res.remoteSubs) ? res.remoteSubs : [])
       }
-      const localPackCards = localPackState.map((p) => {
+      const localPackCards = packs.map((p) => {
         const entry = (remoteDir || []).find((e) => e.id === p.id) || null
         const sub = remoteSubs.find((s) => s.id === p.id) || null
         const isBundled = p.source === 'bundled'
@@ -176,7 +175,7 @@ window.__ModuleLoader__.load({
         return {
           key: 'pack-' + p.id, packId: p.id,
           name: p.name || p.id, desc: '',
-          cover: entry && entry.preview ? entry.preview : null,
+          cover: entry ? (entry.preview || (entry.previews || [])[0] || null) : null,
           meta: [
             isBundled ? '内置' : (isUserPack ? '导入' : '自定义'),
             entry && entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '',
@@ -294,16 +293,33 @@ window.__ModuleLoader__.load({
           }
         } catch (e) { setRootNotice('删除失败') }
       }
-      const onUseRemote = async (sub) => {
+      // 图库卡片「编辑」:先切到该图库(上传/改/删只作用于当前图库),再进它的表情包页
+      const onEditPack = async (id) => {
+        const next = String(id || '').trim()
+        if (!next) return
         try {
-          const res = await apiPost({ op: 'setPack', packId: sub.id })
+          if (next !== packId) {
+            const res = await apiPost({ op: 'setPack', packId: next })
+            if (!res || !res.ok) { setRootNotice('打开失败: ' + ((res && res.error) || '')); return }
+            applyRoot(res)
+          }
+          setPackView(next)
+          setQ('')
+          setTagFilter('')
+          await load('', '')
+        } catch (e) { setRootNotice('打开失败') }
+      }
+      const onTogglePrompt = async (next) => {
+        try {
+          const res = await apiPost({ op: 'setPromptEnabled', enabled: next })
           if (res && res.ok) {
             applyRoot(res)
-            setRootNotice('已切换到图库「' + (sub.name || sub.id) + '」')
+            setPromptOn(next)
+            setRootNotice(res.message || (next ? '已开启陪伴提示词' : '已关闭陪伴提示词'))
           } else {
-            setRootNotice('切换失败: ' + ((res && res.error) || ''))
+            setRootNotice('操作失败: ' + ((res && res.error) || ''))
           }
-        } catch (e) { setRootNotice('切换失败') }
+        } catch (e) { setRootNotice('操作失败') }
       }
       const [packDialog, setPackDialog] = React.useState('')
       const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
@@ -359,23 +375,6 @@ window.__ModuleLoader__.load({
           if (issueWindow && !issueWindow.closed) issueWindow.close()
           setRootNotice(error.message || '导出失败，请重试')
         } finally { setPackSaving(false) }
-      }
-      const onSetPack = async (id) => {
-        const packIdNext = String(id || '').trim()
-        if (!packIdNext) return
-        try {
-          setPackOpen(false)
-          const res = await apiPost({ op: 'setPack', packId: packIdNext })
-          if (res && res.ok) {
-            applyRoot(res)
-            setRootNotice('已切换图库,立即生效')
-            await load(q, tagFilter)
-          } else {
-            setRootNotice('切换失败: ' + (res && res.error || ''))
-          }
-        } catch (e) {
-          setRootNotice('切换失败')
-        }
       }
       const onSavePacksDir = async (dirArg) => {
         const dir = String(dirArg !== undefined ? dirArg : packsDirInput || '').trim()
@@ -642,113 +641,141 @@ window.__ModuleLoader__.load({
         ),
       ))
 
-      // 市场卡片:发现 = 目录条目;已安装 = 订阅记录。搜索按 空格分词 全命中。
+      // 市场卡片:发现 = 目录条目;图库页 = 已安装图库(订阅记录 + 扫描到的本地图库)。搜索按 空格分词 全命中。
       const mkQuery = remoteQuery.trim().toLowerCase()
       const mkMatch = (hay) => !mkQuery || mkQuery.split(/\s+/).filter(Boolean).every((t) => hay.includes(t))
       const jobFor = (pid) => Object.values(remoteJobs).find((j) => j.packId === pid && j.state === 'running')
-      const mkCards = (() => {
+      const discoverCards = (() => {
         const cards = []
-        if (remoteTab === 'discover') {
-          for (const entry of (remoteDir || [])) {
-            const pid = entry.id || ''
-            const sub = remoteSubs.find((s) => s.id === pid)
-              || remoteSubs.find((s) => s.url && s.url === entry.manifestUrl)
-              || remoteSubs.find((s) => s.archiveUrl && s.archiveUrl === entry.archiveUrl)
-              || null
-            const keywords = Array.isArray(entry.keywords) ? entry.keywords : (Array.isArray(entry.tags) ? entry.tags : [])
-            const author = entry.author || entry.maintainer || ''
-            const hay = ((entry.name || '') + ' ' + author + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
-            if (!mkMatch(hay)) continue
-            cards.push({
-              key: 'dir-' + (pid || entry.manifestUrl || entry.archiveUrl), packId: pid,
-              name: entry.name || pid, desc: entry.description || '',
-              cover: entry.preview || (entry.previews || [])[0] || null,
-              meta: [author, entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '', entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
-              tags: keywords, entry, sub,
-              installed: !!sub || (pid && packs.some((p) => p.id === pid)),
-              job: jobFor(pid), activePack: pid && packId === pid,
-              downloaded: !!(pid && packs.some((p) => p.id === pid)),
-            })
-          }
-        } else {
-          for (const s of remoteSubs) {
-            const hay = ((s.name || '') + ' ' + s.id + ' ' + (s.url || s.archiveUrl || '')).toLowerCase()
-            if (!mkMatch(hay)) continue
-            cards.push({
-              key: 'sub-' + s.id, packId: s.id,
-              name: s.name || s.id, desc: s.url || s.archiveUrl, cover: null,
-              meta: [packs.some((p) => p.id === s.id) ? '已下载' : '未下载', s.version, s.total ? s.total + ' 张' : ''].filter(Boolean).join(' · '),
-              tags: [], entry: null, sub: s,
-              installed: true, job: jobFor(s.id), activePack: packId === s.id,
-              downloaded: packs.some((p) => p.id === s.id),
-            })
-          }
-          const seen = new Set(cards.map((c) => c.packId))
-          for (const c of localPackCards) {
-            if (seen.has(c.packId)) continue
-            const hay = ((c.name || '') + ' ' + c.packId + ' ' + (c.tags || []).join(' ') + ' ' + c.meta).toLowerCase()
-            if (!mkMatch(hay)) continue
-            cards.push(c)
-          }
+        for (const entry of (remoteDir || [])) {
+          const pid = entry.id || ''
+          const sub = remoteSubs.find((s) => s.id === pid)
+            || remoteSubs.find((s) => s.url && s.url === entry.manifestUrl)
+            || remoteSubs.find((s) => s.archiveUrl && s.archiveUrl === entry.archiveUrl)
+            || null
+          const keywords = Array.isArray(entry.keywords) ? entry.keywords : (Array.isArray(entry.tags) ? entry.tags : [])
+          const author = entry.author || entry.maintainer || ''
+          const hay = ((entry.name || '') + ' ' + author + ' ' + (entry.description || '') + ' ' + keywords.join(' ') + ' ' + pid).toLowerCase()
+          if (!mkMatch(hay)) continue
+          cards.push({
+            key: 'dir-' + (pid || entry.manifestUrl || entry.archiveUrl), packId: pid,
+            name: entry.name || pid, desc: entry.description || '',
+            cover: entry.preview || (entry.previews || [])[0] || null,
+            meta: [author, entry.version ? 'v' + String(entry.version).replace(/^v/i, '') : '', entry.count ? entry.count + ' 张' : ''].filter(Boolean).join(' · '),
+            tags: keywords, entry, sub,
+            installed: !!sub || (pid && packs.some((p) => p.id === pid)),
+            job: jobFor(pid), activePack: pid && packId === pid,
+            downloaded: !!(pid && packs.some((p) => p.id === pid)),
+          })
         }
         return cards
       })()
-      const installedCount = remoteSubs.length + localPackCards.filter((c) => !remoteSubs.some((s) => s.id === c.packId)).length
+      // 已安装:本地扫描到的图库(含内置/导入/自定义 + 下载的远程包)在前,订阅了但没扫到的追加在后
+      const libraryCards = (() => {
+        const cards = []
+        for (const c of localPackCards) {
+          const hay = ((c.name || '') + ' ' + c.packId + ' ' + (c.tags || []).join(' ') + ' ' + c.meta).toLowerCase()
+          if (mkMatch(hay)) cards.push(c)
+        }
+        const seen = new Set(cards.map((c) => c.packId))
+        for (const s of remoteSubs) {
+          if (seen.has(s.id)) continue
+          const hay = ((s.name || '') + ' ' + s.id + ' ' + (s.url || s.archiveUrl || '')).toLowerCase()
+          if (!mkMatch(hay)) continue
+          cards.push({
+            key: 'sub-' + s.id, packId: s.id,
+            name: s.name || s.id, desc: s.url || s.archiveUrl, cover: null,
+            meta: ['未下载', s.version, s.total ? s.total + ' 张' : ''].filter(Boolean).join(' · '),
+            tags: [], entry: null, sub: s,
+            installed: true, job: jobFor(s.id), activePack: false,
+            downloaded: false,
+          })
+        }
+        return cards
+      })()
 
+      // 市场/图库共用的卡片:封面 + 名称 + 徽标 + meta + 标签 + 进度 + 操作
+      const packCard = (row, acts) => {
+        const job = row.job
+        const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
+        return h('div', { key: row.key, className: 'mk-card' },
+          row.cover
+            ? h('img', { className: 'mk-cover', src: row.cover, alt: '', loading: 'lazy' })
+            : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
+          h('div', { className: 'mk-body' },
+            h('div', { className: 'mk-title' },
+              h('span', { className: 'mk-name', title: row.name }, row.name),
+              row.activePack
+                ? h('span', { className: 'mk-badge' }, '使用中')
+                : (row.installed ? h('span', { className: 'mk-badge' }, '已安装') : null),
+            ),
+            row.meta ? h('div', { className: 'mk-meta', title: row.meta }, row.meta) : null,
+            row.desc ? h('div', { className: 'mk-desc', title: row.desc }, row.desc) : null,
+            row.tags && row.tags.length
+              ? h('div', { className: 'mk-chips' }, row.tags.slice(0, 4).map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
+              : null,
+            job ? h('div', { className: 'mk-progress-wrap' },
+              h('div', { className: 'mk-progress' }, h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })),
+              h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + ' ' + pct + '%'),
+            ) : null,
+            h('div', { className: 'mk-acts' }, acts),
+          ),
+        )
+      }
+      // 更新:有订阅走订阅,否则回落到目录条目;没下载过就是「安装」
+      const updateBtn = (row) => h('button', {
+        key: 'update',
+        onClick: row.sub
+          ? () => (row.sub.archiveUrl ? startArchive(row.sub) : startRemote(row.sub.url, row.sub.id))
+          : () => (row.entry.archiveUrl ? startArchive(row.entry) : startRemote(row.entry.manifestUrl, row.entry.id || '')),
+        disabled: remoteBusy || !!row.job,
+      }, row.downloaded ? '更新' : '安装')
+      const curPack = packs.find((p) => p.id === packId) || null
       return h('div', { className: 'meme-panel' },
         h('div', { className: 'mk-tabs', style: { width: '100%', marginBottom: 2 } },
-          h('button', { className: 'mk-tab' + (panelTab === 'library' ? ' on' : ''), onClick: () => setPanelTab('library') }, '图库' + (total ? ' (' + total + ')' : '')),
-          h('button', { className: 'mk-tab' + (panelTab === 'remote' ? ' on' : ''), onClick: () => setPanelTab('remote') }, '图库市场'),
+          h('button', { className: 'mk-tab' + (panelTab === 'library' ? ' on' : ''), onClick: () => setPanelTab('library') }, '图库' + (packs.length ? ' (' + packs.length + ')' : '')),
+          h('button', { className: 'mk-tab' + (panelTab === 'market' ? ' on' : ''), onClick: () => { setRootNotice(''); setPanelTab('market') } }, '发现'),
           h('button', { className: 'mk-tab' + (panelTab === 'settings' ? ' on' : ''), onClick: () => setPanelTab('settings') }, '设置'),
         ),
-        panelTab === 'library' ? h(React.Fragment, null,
-        h('div', { className: 'section-title' }, '当前图库'),
-        h('div', { className: 'row' },
-          h('button', { disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackDialog('create') } }, '新建图包库'),
-          h('button', { disabled: packSaving || !packs.some(p => p.id === packId && p.count > 0), onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿到市场'),
-        ),
-        h('div', { className: 'row', style: { width: '100%' } },
-          h('div', { className: 'pack-dd' },
-            h('button', {
-              type: 'button',
-              className: 'pack-dd-btn',
-              onClick: () => setPackOpen((v) => !v),
-            },
-              h('span', null, (() => {
-                const cur = packs.find((p) => p.id === packId)
-                return cur ? (cur.name + ' (' + (cur.count || 0) + ' 张)') : (packs.length ? '选择图库' : '暂无图库')
-              })()),
-              h('span', { className: 'caret' }, packOpen ? '▲' : '▼'),
+        // 图库页两态:已安装图库列表 ⇄ 某个图库的表情包页(二级页面,不是二级标签)
+        panelTab === 'library' ? (packView
+          ? h(React.Fragment, null,
+            h('div', { className: 'row', style: { width: '100%' } },
+              h('button', { onClick: () => { setPackView(''); setRootNotice('') } }, '← 图库列表'),
+              h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
+                (curPack ? curPack.name : packView) + ' · ' + total + ' 张'),
             ),
-            packOpen ? h('div', { className: 'pack-dd-menu' },
-              packs.length === 0
-                ? h('div', { className: 'empty', style: { padding: 12 } }, '还没有可切换的图库')
-                : packs.map((p) => h('button', {
-                  type: 'button',
-                  key: p.id,
-                  className: 'pack-dd-item' + (p.id === packId ? ' on' : ''),
-                  onClick: () => onSetPack(p.id),
-                },
-                  h('span', null, p.name),
-                  h('span', { className: 'hint' },
-                    (p.count || 0) + ' 张' +
-                    (p.source === 'bundled' ? '' : p.source === 'user' ? ' · 导入' : ' · 自定义')),
-                )),
-            ) : null,
-          ),
-        ),
-        memeRoot ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', wordBreak: 'break-all' } }, memeRoot) : null,
-        h('div', { className: 'section-title' }, '图库 (' + total + ' 张)'),
-        h('div', { className: 'row' },
-          searchInput,
-          h('button', { className: 'btn-primary', onClick: () => setUploadOpen(true) }, '上传表情包'),
-          tagSelect,
-          h('button', { onClick: () => load(q, tagFilter), disabled: busy }, '搜索'),
-        ),
-        notice ? h('div', { className: 'notice' }, notice) : null,
-        memes.length === 0 && !busy
-          ? h('div', { className: 'empty' }, '没有匹配的表情包')
-          : h('div', { className: 'meme-grid' }, cards),
+            memeRoot ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', wordBreak: 'break-all' } }, memeRoot) : null,
+            h('div', { className: 'row' },
+              searchInput,
+              h('button', { className: 'btn-primary', onClick: () => setUploadOpen(true) }, '上传表情包'),
+              tagSelect,
+              h('button', { onClick: () => load(q, tagFilter), disabled: busy }, '搜索'),
+            ),
+            notice ? h('div', { className: 'notice' }, notice) : null,
+            memes.length === 0 && !busy
+              ? h('div', { className: 'empty' }, '没有匹配的表情包')
+              : h('div', { className: 'meme-grid' }, cards),
+          )
+          : h(React.Fragment, null,
+            h('div', { className: 'row', style: { width: '100%' } },
+              h('button', { className: 'btn-primary', disabled: packSaving, onClick: () => { setPackDraft({ id: 'pack-' + Date.now().toString(36), name: '', description: '' }); setPackDialog('create') } }, '新建图包库'),
+              h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, '点卡片上的「编辑」进入该图库的表情包页'),
+            ),
+            libraryCards.length === 0
+              ? h('div', { className: 'empty' }, '还没有图库')
+              : h('div', { className: 'mk-grid' }, libraryCards.map((row) => packCard(row, [
+                row.downloaded
+                  ? h('button', { key: 'edit', onClick: () => onEditPack(row.packId), disabled: remoteBusy || !!row.job }, '编辑')
+                  : null,
+                row.packId === packId && curPack && curPack.count > 0
+                  ? h('button', { key: 'submit', disabled: packSaving, onClick: () => { setRootNotice(''); setPackDialog('submit') } }, '投稿到市场')
+                  : null,
+                (row.sub || row.entry) ? updateBtn(row) : null,
+                row.sub && row.downloaded ? h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载') : null,
+              ].filter(Boolean)))),
+          )
+        ) : null,
         // 编辑弹窗
         edit ? h('div', { className: 'meme-modal-mask', onClick: () => setEdit(null) },
           h('div', { className: 'meme-modal', onClick: (e) => e.stopPropagation() },
@@ -828,79 +855,30 @@ window.__ModuleLoader__.load({
           ),
         ) : null,
         fileInput,
-        // 陪伴提示词编辑弹窗:基于默认提示词修改,留空/恢复默认 = 内置规则
-
-        ) : null,
-        panelTab === 'remote' ? h(React.Fragment, null,
-        h('div', { className: 'mk-tabs' },
-          h('button', { className: 'mk-tab' + (remoteTab === 'discover' ? ' on' : ''), onClick: () => setRemoteTab('discover') }, '发现'),
-          h('button', { className: 'mk-tab' + (remoteTab === 'installed' ? ' on' : ''), onClick: () => setRemoteTab('installed') }, '已安装 (' + installedCount + ')'),
-        ),
+        panelTab === 'market' ? h(React.Fragment, null,
         h('div', { className: 'row', style: { width: '100%' } },
           h('input', {
             type: 'text', value: remoteQuery, onChange: (e) => setRemoteQuery(e.target.value),
             placeholder: '搜索图库…', style: { flex: 1, minWidth: 160 },
           }),
         ),
-        mkCards.length === 0
+        discoverCards.length === 0
           ? h('div', { className: 'mk-empty' },
-              remoteTab === 'discover'
-                ? (mkQuery
-                    ? '没有匹配的图库'
-                    : (remoteDir === null
-                        ? '图库目录暂不可用,可在下方粘贴清单 JSON 地址订阅'
-                        : '目录暂无内容,可在下方粘贴清单 JSON 地址订阅'))
-                : (mkQuery ? '没有匹配的订阅' : '还没有已安装的图库,去「发现」逛逛'))
-          : h('div', { className: 'mk-grid' }, mkCards.map((row) => {
-            const job = row.job
-            const pct = job && job.total ? Math.round(((job.done + job.failed) / job.total) * 100) : 0
-            return h('div', { key: row.key, className: 'mk-card' },
-              row.cover
-                ? h('img', { className: 'mk-cover', src: row.cover, alt: '', loading: 'lazy' })
-                : h('div', { className: 'mk-cover mk-cover-fallback' }, (row.name || '?').slice(0, 1)),
-              h('div', { className: 'mk-body' },
-                h('div', { className: 'mk-title' },
-                  h('span', { className: 'mk-name', title: row.name }, row.name),
-                  row.activePack
-                    ? h('span', { className: 'mk-badge' }, '使用中')
-                    : (row.installed ? h('span', { className: 'mk-badge' }, '已安装') : null),
-                ),
-                row.meta ? h('div', { className: 'mk-meta', title: row.meta }, row.meta) : null,
-                row.desc ? h('div', { className: 'mk-desc', title: row.desc }, row.desc) : null,
-                row.tags && row.tags.length
-                  ? h('div', { className: 'mk-chips' }, row.tags.slice(0, 4).map((t) => h('span', { key: t, className: 'mk-chip' }, t)))
-                  : null,
-                job ? h('div', { className: 'mk-progress-wrap' },
-                  h('div', { className: 'mk-progress' }, h('div', { className: 'mk-progress-bar', style: { width: pct + '%' } })),
-                  h('span', { className: 'mk-progress-text' }, (job.message || '下载中…') + ' ' + pct + '%'),
-                ) : null,
-                h('div', { className: 'mk-acts' },
-                  remoteTab === 'discover'
-                    ? h('button', {
-                      className: row.installed ? '' : 'btn-primary',
-                      onClick: () => row.entry.archiveUrl
-                        ? startArchive(row.entry)
-                        : startRemote(row.entry.manifestUrl, row.entry.id || ''),
-                      disabled: remoteBusy || !!job,
-                    }, job ? '下载中…' : (row.installed ? '更新' : '安装'))
-                    : [
-                      (row.sub || row.entry)
-                        ? h('button', {
-                          key: 'update',
-                          onClick: () => row.sub
-                            ? (row.sub.archiveUrl ? startArchive(row.sub) : startRemote(row.sub.url, row.sub.id))
-                            : (row.entry.archiveUrl ? startArchive(row.entry) : startRemote(row.entry.manifestUrl, row.entry.id || '')),
-                          disabled: remoteBusy || !!job,
-                        }, '更新')
-                        : null,
-                      row.sub
-                        ? h('button', { key: 'remove', className: 'mk-danger', onClick: () => onRemoveRemote(row.sub) }, '卸载')
-                        : null,
-                    ],
-                ),
-              ),
-            )
-          })),
+              mkQuery
+                ? '没有匹配的图库'
+                : (remoteDir === null
+                    ? '图库目录暂不可用,可在下方粘贴清单 JSON 地址订阅'
+                    : '目录暂无内容,可在下方粘贴清单 JSON 地址订阅'))
+          : h('div', { className: 'mk-grid' }, discoverCards.map((row) => packCard(row, [
+            h('button', {
+              key: 'install',
+              className: row.installed ? '' : 'btn-primary',
+              onClick: () => row.entry.archiveUrl
+                ? startArchive(row.entry)
+                : startRemote(row.entry.manifestUrl, row.entry.id || ''),
+              disabled: remoteBusy || !!row.job,
+            }, row.job ? '下载中…' : (row.installed ? '更新' : '安装')),
+          ]))),
         h('div', { className: 'row', style: { width: '100%' } },
           h('input', { type: 'text', value: remoteUrl, onChange: (e) => setRemoteUrl(e.target.value), placeholder: '高级:粘贴远程清单 JSON 地址(http/https)', style: { flex: 1, minWidth: 160 } }),
           h('button', { className: 'btn-primary', onClick: () => startRemote(), disabled: remoteBusy || !remoteUrl }, '订阅下载'),
@@ -935,7 +913,13 @@ window.__ModuleLoader__.load({
         ),
         h('div', { className: 'section-title' }, '陪伴提示词'),
         h('div', { className: 'row' },
-          h('button', { className: 'btn-primary', onClick: () => { setPromptDraft(companionPrompt || defaultPrompt); setPromptOpen(true) } }, '编辑提示词'),
+          h('span', {
+            className: 'switch' + (promptOn ? ' on' : ''),
+            title: promptOn ? '点击关闭:模型不再主动斗图' : '点击开启:模型主动斗图',
+            onClick: () => onTogglePrompt(!promptOn),
+          }),
+          h('span', { style: { fontSize: 12 } }, promptOn ? '已开启' : '已关闭'),
+          h('button', { onClick: () => { setPromptDraft(companionPrompt || defaultPrompt); setPromptOpen(true) } }, '编辑提示词'),
           h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
             companionPrompt ? '已自定义' : '使用默认'),
         ),

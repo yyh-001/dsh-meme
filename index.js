@@ -164,8 +164,10 @@ export function apply(ctx, config) {
   }
 
   // ---- 陪伴模式:系统提示注入,模型根据对话情绪主动斗图 ----
+  // 设置页可整段关掉这项注入(settings.promptEnabled === false),关掉后模型不再主动斗图。
   ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
     const assembled = await next()
+    if (readSettings().promptEnabled === false) return assembled
     assembled.sections.push({
       name: 'dsh-expression:companion',
       text: readSettings().companionPrompt || DEFAULT_COMPANION_PROMPT,
@@ -295,6 +297,7 @@ export function apply(ctx, config) {
         packs,
         companionPrompt: readSettings().companionPrompt || '',
         defaultCompanionPrompt: DEFAULT_COMPANION_PROMPT,
+        promptEnabled: readSettings().promptEnabled !== false,
         remoteSubs: remoteSubs(),
         remoteDirUrl: remoteDirUrls(),
         configured: !!(s.memeRoot || s.packId),
@@ -1094,6 +1097,10 @@ export function apply(ctx, config) {
             const text = String(body.text || '').trim()
             writeSettings({ companionPrompt: text })
             json(res, { ok: true, ...packPayload(), message: text ? '已保存,下一条消息生效' : '已恢复默认提示词' })
+          } else if (op === 'setPromptEnabled') {
+            const enabled = body.enabled !== false
+            writeSettings({ promptEnabled: enabled })
+            json(res, { ok: true, ...packPayload(), message: enabled ? '已开启陪伴提示词,下一条消息生效' : '已关闭陪伴提示词,下一条消息生效' })
           } else {
             json(res, { ok: false, error: '未知操作: ' + op }, 400)
           }
