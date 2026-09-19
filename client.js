@@ -1349,10 +1349,6 @@ window.__ModuleLoader__.load({
           title: '表情包',
           onClick: (e) => {
             e.preventDefault(); e.stopPropagation()
-            if (!store.get()) {
-              const d = props && props.input && typeof props.input.draft === 'string' ? props.input.draft : ''
-              store.setBase(d)
-            }
             store.toggle()
           },
         }, React.createElement('svg', { viewBox: '0 0 24 24', width: 20, height: 20, style: { display: 'block' } },
@@ -1366,6 +1362,14 @@ window.__ModuleLoader__.load({
       const h = React.createElement
       const store = props.store
       const actions = props.inputActions
+      // 当前草稿必须从宿主**实时**读：宿主给本 slot 的 props 只有 inputActions，
+      // 输入状态是通过 hooks 提供的（declaration: hooks: ["conversation","input"]
+      // ⇒ props 上出现 useConversation/useInput；宿主自己的输入栏就是 useInput((s)=>s)）。
+      // 以前这里读 props.input.draft —— 那个属性根本不存在，于是"打开面板时缓存"的 base
+      // 恒为空，send() 就把用户已经打好的字整段覆盖掉。
+      // 钩子不可用时退回旧缓存（绝不因为读不到就当作空）。
+      const useLiveInput = typeof props.useInput === 'function' ? props.useInput : (() => null)
+      const inputState = useLiveInput((s) => s)
       const open = React.useSyncExternalStore(store.subscribe, store.get)
       const [memes, setMemes] = React.useState([])
       const [packs, setPacks] = React.useState([]) // [{id,name,count}] 可切换的表情包组
@@ -1414,8 +1418,9 @@ window.__ModuleLoader__.load({
         const setText = (text) => { try { if (actions && actions.setDraft) actions.setDraft(text) } catch (e) {} }
         const desc = (m.caption || m.keywords || m.tag || '表情包').slice(0, 80)
         const text = '[表情: ' + desc + ']'
-        const cur = store.getBase() || ''
-        setText(cur ? (cur.trim() ? cur + '\n' + text : text) : text)
+        const cur0 = inputState && typeof inputState.draft === 'string' ? inputState.draft : null
+        const cur = cur0 !== null ? cur0 : (store.getBase() || '')
+        setText(cur.trim() ? cur + '\n' + text : text)
         try { if (actions && actions.submit) actions.submit() } catch (e) {}
         store.setBase('')
         store.set(false)
@@ -1667,6 +1672,7 @@ window.__ModuleLoader__.load({
         (props) => React.createElement(MemeBoard, {
           store,
           inputActions: props.inputActions,
+          useInput: props.useInput,
           getConversation: () => ctx.get('conversation'),
         }),
       ))
