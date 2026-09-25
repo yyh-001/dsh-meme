@@ -1329,15 +1329,12 @@ window.__ModuleLoader__.load({
 
     function makeMemeStore() {
       let open = false
-      let base = ''
       const subs = new Set()
       return {
         get: () => open,
         set: (v) => { open = !!v; subs.forEach((fn) => fn()) },
         toggle: () => { open = !open; subs.forEach((fn) => fn()) },
         subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn) },
-        setBase: (s) => { base = s || '' },
-        getBase: () => base,
       }
     }
 
@@ -1362,12 +1359,10 @@ window.__ModuleLoader__.load({
       const h = React.createElement
       const store = props.store
       const actions = props.inputActions
-      // 当前草稿必须从宿主**实时**读：宿主给本 slot 的 props 只有 inputActions，
-      // 输入状态是通过 hooks 提供的（declaration: hooks: ["conversation","input"]
-      // ⇒ props 上出现 useConversation/useInput；宿主自己的输入栏就是 useInput((s)=>s)）。
-      // 以前这里读 props.input.draft —— 那个属性根本不存在，于是"打开面板时缓存"的 base
-      // 恒为空，send() 就把用户已经打好的字整段覆盖掉。
-      // 钩子不可用时退回旧缓存（绝不因为读不到就当作空）。
+      // 草稿要从宿主实时读:本 slot 的 props 只有 inputActions 加 hooks 派生的 useInput
+      // (宿主输入栏就是 useInput((s) => s)),没有 props.input;读不存在的属性不报错,
+      // 只会静默拿到 undefined —— 别再回头去读 props.input.draft。
+      // 拿不到钩子(宿主侧改动)时兜底为空串,即修复前的行为,不因此崩。
       const useLiveInput = typeof props.useInput === 'function' ? props.useInput : (() => null)
       const inputState = useLiveInput((s) => s)
       const open = React.useSyncExternalStore(store.subscribe, store.get)
@@ -1418,11 +1413,9 @@ window.__ModuleLoader__.load({
         const setText = (text) => { try { if (actions && actions.setDraft) actions.setDraft(text) } catch (e) {} }
         const desc = (m.caption || m.keywords || m.tag || '表情包').slice(0, 80)
         const text = '[表情: ' + desc + ']'
-        const cur0 = inputState && typeof inputState.draft === 'string' ? inputState.draft : null
-        const cur = cur0 !== null ? cur0 : (store.getBase() || '')
+        const cur = inputState && typeof inputState.draft === 'string' ? inputState.draft : ''
         setText(cur.trim() ? cur + '\n' + text : text)
         try { if (actions && actions.submit) actions.submit() } catch (e) {}
-        store.setBase('')
         store.set(false)
       }
 
@@ -1665,7 +1658,7 @@ window.__ModuleLoader__.load({
       const MemeButton = makeMemeButton(store)
       slots.inject('conversation.input.left', () => slots.register(
         { name: 'conversation.input.left', id: 'meme-picker', order: 5, label: '表情包' },
-        (props) => React.createElement(MemeButton, { input: props.input }),
+        () => React.createElement(MemeButton),
       ))
       slots.inject('conversation.input.overlay', () => slots.register(
         { name: 'conversation.input.overlay', id: 'meme-picker', order: 5, label: '表情包' },
