@@ -224,7 +224,9 @@ export function apply(ctx, config) {
     const host = webServer.host === '0.0.0.0' ? '127.0.0.1' : webServer.host
     const base = 'http://' + host + ':' + webServer.port
     try {
-      webServer.register({
+      // 路由注册挂到 ctx.effect:插件被关开关/热重载时由宿主跑 disposer 摘掉路由,
+      // 否则同一进程里再次 apply 会撞 duplicate route(issue #20)。
+      ctx.effect(() => webServer.register({
         kind: 'prefix',
         path: ROUTE,
         handler(req, res) {
@@ -276,7 +278,7 @@ export function apply(ctx, config) {
             res.end('not found')
           }
         },
-      })
+      }), 'dsh-expression: /dsh-memes 图片路由')
     } catch (error) {
       console.log('[dsh-expression] 路由已存在,复用:', error && error.message)
     }
@@ -1106,7 +1108,7 @@ export function apply(ctx, config) {
       res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
       res.end(body)
     }
-    webServer.register({
+    ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/dsh-memes-api',
       async handler(req, res) {
@@ -1442,9 +1444,9 @@ export function apply(ctx, config) {
           json(res, { ok: false, error: error instanceof Error ? error.message : String(error) }, 400)
         }
       },
-    })
+    }), 'dsh-expression: /dsh-memes-api 管理 API')
     // 导出图库为 ZIP 包(分享用):遍历图库目录全部文件打包
-    webServer.register({
+    ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/dsh-memes-export',
       handler(req, res) {
@@ -1492,10 +1494,10 @@ export function apply(ctx, config) {
           res.end('导出失败: ' + (error instanceof Error ? error.message : String(error)))
         }
       },
-    })
+    }), 'dsh-expression: /dsh-memes-export 导出 ZIP')
 
     // 自包含管理面板页面(无构建链、重启不丢)。
-    webServer.register({
+    ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/memes-panel',
       handler(req, res) {
@@ -1508,7 +1510,7 @@ export function apply(ctx, config) {
           res.end('panel.html 缺失: ' + (error instanceof Error ? error.message : String(error)))
         }
       },
-    })
+    }), 'dsh-expression: /memes-panel 管理面板')
     // 对话里表情包小图展示:只限制 /dsh-memes 图片,避免大图贴脸,不影响其他 UI。
     // 选择器必须用 src*= 子串匹配:send_meme 返回的是绝对 URL
     // (http://host:port/dsh-memes/...),src^= 前缀匹配只对相对路径生效,
@@ -1516,10 +1518,10 @@ export function apply(ctx, config) {
     // 尺寸可用 config.memeSize 覆盖(px,默认 160)。
     const memeSize = Number(config?.memeSize) > 0 ? Number(config.memeSize) : 160
     try {
-      webServer.tapIndex((html) => html.replace(
+      ctx.effect(() => webServer.tapIndex((html) => html.replace(
         '</head>',
         '<style>img[src*="/dsh-memes/"]{max-width:' + memeSize + 'px!important;max-height:' + memeSize + 'px!important;width:auto!important;height:auto!important;object-fit:contain;border-radius:8px}</style></head>',
-      ))
+      )), 'dsh-expression: 小图 CSS')
     } catch (error) {
       console.error('[dsh-expression] tapIndex 失败:', error instanceof Error ? error.message : String(error))
     }

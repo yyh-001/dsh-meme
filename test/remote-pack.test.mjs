@@ -70,6 +70,9 @@ const webServer = {
 const onHandlers = {}
 const tools = []
 const ctx = {
+  // 宿主是 cordis:ctx.effect(body) 会接管 body 返回的 disposer,卸载时回放。
+  // 本文件只关心"路由注册发生了",跑一遍 body 就够(卸载语义见 host-routes.test.mjs)。
+  effect(body) { return body() },
   on(name, fn) { (onHandlers[name] ||= []).push(fn) },
   get(name) { return name === 'webServer' ? webServer : undefined },
   tools: { register(tool) { tools.push(tool) } },
