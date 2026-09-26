@@ -1635,11 +1635,56 @@ window.__ModuleLoader__.load({
           btn.dataset.memeNav = '1'
         }
       }
-      const observer = new MutationObserver(() => { decorateMemeText(); decorateNavIcon() })
-      observer.observe(document.body, { childList: true, subtree: true })
-      decorateMemeText()
-      decorateNavIcon()
-      ctx.effect(() => () => { observer.disconnect() }, 'dsh-expression-entry: meme text observer')
+      // 扫描是「全文档 TreeWalker + 每个文本节点跑一遍正则」,不便宜;流式输出期间
+      // mutation 密集,每来一条就整篇扫一遍会在长会话里雪崩(点进去明显卡顿)。
+      // 防抖 300ms,但必须有 maxWait 兜底:纯 trailing 防抖在 mutation 连续不断时会被
+      // 无限重排(每次 mutation 都清掉重排 300ms),页面从此不再扫描、[表情: x] 一路
+      // 裸露,刷新也不自愈——这是比卡顿更难查的一层。
+      const SCAN_DEBOUNCE = 300
+      const SCAN_MAX_WAIT = 1200
+      let scanTimer = 0
+      let scanDeadline = 0
+      let scanning = false
+      const runScan = () => {
+        if (scanning) return // 重入保护:装饰本身改 DOM,会再触发 observer
+        scanning = true
+        try {
+          decorateMemeText()
+          decorateNavIcon()
+        } catch (error) {
+          // 装饰失败不该打断宿主渲染:最多是这一轮表情不转图
+          console.warn('[dsh-expression] 表情装饰失败:', error && error.message ? error.message : error)
+        } finally {
+          scanning = false
+        }
+      }
+      const scheduleScan = () => {
+        const now = Date.now()
+        if (scanDeadline === 0) scanDeadline = now + SCAN_MAX_WAIT
+        clearTimeout(scanTimer)
+        scanTimer = setTimeout(() => {
+          scanTimer = 0
+          scanDeadline = 0
+          runScan()
+        }, Math.max(0, Math.min(SCAN_DEBOUNCE, scanDeadline - now)))
+      }
+      const observer = new MutationObserver((records) => {
+        // 只认真正影响文本的变动;纯属性变化(宿主的 hover/动画很吵)不值得重扫
+        for (const record of records) {
+          if (record.type === 'characterData' || record.addedNodes.length || record.removedNodes.length) {
+            scheduleScan()
+            return
+          }
+        }
+      })
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      runScan()
+      ctx.effect(() => () => {
+        observer.disconnect()
+        clearTimeout(scanTimer)
+        scanTimer = 0
+        scanDeadline = 0
+      }, 'dsh-expression-entry: meme text observer')
 
       const slots = ctx.get('slots')
       if (slots === undefined) return
