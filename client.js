@@ -1508,6 +1508,10 @@ window.__ModuleLoader__.load({
       // 兜底(模型偶尔不抄候选原文、自己编描述);仍无命中显示描述原文,
       // 不把 [表情: ...] 标记裸露在气泡里(历史教训:社区反馈「表情显示不出来」)。
       const MEME_TEXT_RE = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g
+      // acceptNode 用不带 g 的副本。带 g 的正则 test() 会推进 lastIndex,下一个文本节点从
+      // 上次的位置往后找——于是「这一条运气不好」的消息被静默跳过、永远不出图,还得等下一轮
+      // 扫描碰巧把游标绕回 0(历史 bug:表现就是「表情有时显示不出来」)。
+      const MEME_TEXT_TEST = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/
       let memeIndex = null
       let memeSearch = [] // 分词兜底用的 haystack:[{hay:[...], url}]
       let memeIndexLoading = false
@@ -1577,18 +1581,61 @@ window.__ModuleLoader__.load({
             memeIndexLoading = false
           })
       }
+      // 把 [表情: x] 换成 <img> 之后,气泡里的 textContent 就变了。有些插件(注入记忆条那类)
+      // 靠比对 textContent 判断「消息被改过」,于是重写 DOM → img 被打回文字 → 我们再装饰,
+      // 来回打回闪个不停(issue #22 第 2 条)。所以每处替换都在 img 后面挂一个 display:none
+      // 的 ghost span 装回原文标记:整段 textContent 与替换前逐字一致,谁来比都不觉得变过。
+      const ghostFor = (raw) => {
+        const ghost = document.createElement('span')
+        ghost.setAttribute('data-meme-hidden', '1')
+        ghost.style.cssText = 'display:none'
+        ghost.textContent = raw
+        return ghost
+      }
+      // 判断「这层是不是已经空了、要不要隐藏」必须无视 ghost:ghost 里装着原文标记,
+      // 拿 textContent 判空会永远非空,气泡里会留一块空白。
+      const textWithoutGhosts = (el) => {
+        let out = ''
+        for (const child of el.childNodes) {
+          if (child.nodeType === 3) { out += child.nodeValue || ''; continue }
+          if (child.nodeType !== 1) continue
+          if (child.dataset && child.dataset.memeHidden) continue
+          out += textWithoutGhosts(child)
+        }
+        return out
+      }
+      // 流式渲染会覆盖我们的注入,同一个 [表情: x] 可能被装饰两次 → 同一消息行挂两张相同的图
+      // (issue #22 第 3 条:刷新后稳态只剩一张,说明是竞态而不是双注入)。按「消息行 + 描述」
+      // 幂等去重:没有重复时零副作用,所以每轮扫描完无脑跑一次就行。
+      const dedupeMemeImages = () => {
+        const seenByRow = new Map()
+        for (const img of document.querySelectorAll('img[data-meme-img]')) {
+          const row = img.closest('[data-time-hover-root],[data-chat-flow-key]') || img.parentElement
+          if (!row) continue
+          let seen = seenByRow.get(row)
+          if (!seen) seenByRow.set(row, seen = new Set())
+          const caption = img.getAttribute('data-meme-img') || ''
+          if (seen.has(caption)) { img.remove(); continue } // 留先出现的那张(已被提到行首的)
+          seen.add(caption)
+        }
+      }
       const decorateMemeText = () => {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
           acceptNode(node) {
             const parent = node.parentElement
             if (!parent) return NodeFilter.FILTER_REJECT
             // 只渲染「对话」气泡。轨迹 / Think / 工具卡 / 输入框保持纯文本。
-            if (!parent.closest('[data-chat-flow]')) return NodeFilter.FILTER_REJECT
+            // 容器标记认两个:老版本是 data-chat-flow,DSH 0.1.2 起消息行是 data-chat-flow-key
+            // (issue #22 附录,使用者在新版上实测)。只认前者的话新版上 TreeWalker 一个节点都
+            // 扫不到、表情永不转图;多认一个纯增益。
+            if (!parent.closest('[data-chat-flow],[data-chat-flow-key]')) return NodeFilter.FILTER_REJECT
             if (parent.closest('input,textarea,[contenteditable="true"],[data-variant="think"],[data-variant="others"],pre,code')) {
               return NodeFilter.FILTER_REJECT
             }
+            // 自己的 ghost 里装着 [表情: x] 原文,不排掉就会被反复装饰
+            if (parent.closest('[data-meme-hidden]')) return NodeFilter.FILTER_REJECT
             if (parent.dataset && parent.dataset.memeDecorated) return NodeFilter.FILTER_REJECT
-            return MEME_TEXT_RE.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+            return MEME_TEXT_TEST.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
           },
         })
         const nodes = []
@@ -1620,27 +1667,35 @@ window.__ModuleLoader__.load({
               img.src = src
               img.alt = hit[0].slice(0, 60)
               img.title = hit[0].slice(0, 60)
+              img.dataset.memeImg = foldCaption(hit[1]) // 去重用的描述标记
               img.style.cssText = 'max-width:180px;max-height:180px;border-radius:10px;display:block;margin:8px 0'
               frag.appendChild(img)
+              frag.appendChild(ghostFor(hit[0]))
               imgs.push(img)
             } else {
-              // 无命中:降级显示描述原文,不把 [表情: ...] 标记裸露给用户
+              // 无命中:降级只显示描述原文,不把 [表情: ...] 标记裸露给用户。方括号单独用 ghost
+              // 藏起来——可见的只有描述本身,而 textContent 仍是替换前那个 [表情: x] 逐字不差,
+              // 否则比对 textContent 的插件照样会把这条打回(issue #22 第 2 条)。
+              const at = hit[0].indexOf(']') - hit[1].length
+              frag.appendChild(ghostFor(hit[0].slice(0, at)))
               frag.appendChild(document.createTextNode(hit[1]))
+              frag.appendChild(ghostFor(hit[0].slice(at + hit[1].length)))
             }
             last = hit.index + hit[0].length
           }
           if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)))
           parent.replaceChild(frag, node)
-          const row = parent.closest('[data-time-hover-root]')
+          const row = parent.closest('[data-time-hover-root],[data-chat-flow-key]')
           if (row && imgs.length > 0) {
             for (const img of imgs) row.insertBefore(img, row.firstChild)
             let el = parent
             while (el && el !== row) {
-              if (!el.textContent.trim()) el.style.display = 'none'
+              if (!textWithoutGhosts(el).trim()) el.style.display = 'none'
               el = el.parentElement
             }
           }
         }
+        dedupeMemeImages()
       }
       // 设置侧边栏「表情包」行的齿轮图标替换成笑脸(dsh navIcon 硬编码,不支持自定义)
       const decorateNavIcon = () => {
