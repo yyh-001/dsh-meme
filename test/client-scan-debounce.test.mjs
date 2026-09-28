@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 // (纯 trailing 防抖会被无限重排,页面从此不再扫描)③ 卸载后不再扫描、定时器已清。
 
 let walkerCalls = 0
+const scanAt = [] // 每次扫描的时刻:用来量「首扫离触发有多远」,而不是量测试自己的 sleep
 let observerCallback = null
 let observerOptions = null
 let disconnected = 0
@@ -19,7 +20,7 @@ globalThis.document = {
   head: { appendChild() {} },
   body: {},
   createElement: () => ({ textContent: '', style: {}, dataset: {}, setAttribute() {}, remove() {}, appendChild() {} }),
-  createTreeWalker: () => { walkerCalls++; return { nextNode: () => null } },
+  createTreeWalker: () => { walkerCalls++; scanAt.push(Date.now()); return { nextNode: () => null } },
   querySelector: () => null,
   querySelectorAll: () => [],
   createDocumentFragment: () => ({ appendChild() {} }),
@@ -76,9 +77,12 @@ test('mutation 持续不断时仍在 maxWait(1.2s)内扫一次,不会被无限�
   const before = walkerCalls
   const started = Date.now()
   for (let i = 0; i < 16; i++) { mutation(); await sleep(100) } // 每 100ms 一条,故意比防抖窗口还密
-  const elapsed = Date.now() - started
-  assert.ok(elapsed < 1200 + 600, '本轮应当没等太久')
-  assert.ok(walkerCalls > before, '持续 mutation 期间必须至少扫过一次,否则 [表情: x] 会一路裸露且刷新也不自愈')
+  // 循环自己的下限就是 16 × 100ms = 1.6s,而 Windows 的定时器粒度还会再叠上 0.2s 左右,
+  // 拿「循环耗时」当上限等于在断言测试自己。这里要钉的是「插件扫得够快」:
+  // 首扫必须落在 maxWait(1.2s) 内——纯 trailing 防抖会被无限重排,永远等不到首扫。
+  const firstScan = scanAt.slice(before).find((at) => at >= started)
+  assert.ok(firstScan !== undefined, '持续 mutation 期间必须至少扫过一次,否则 [表情: x] 会一路裸露且刷新也不自愈')
+  assert.ok(firstScan - started <= 1200 + 400, '首扫应在 maxWait(1.2s)内发生,实测 ' + (firstScan - started) + 'ms')
   await sleep(400)
   assert.ok(walkerCalls <= before + 3, '不该每条 mutation 都扫一遍(实测 ' + (walkerCalls - before) + ' 次/16 条)')
 })
