@@ -1,6 +1,6 @@
 {
   "name": "dsh-meme",
-  "version": "0.1.43",
+  "version": "0.1.44",
   "description": "DeepSeek Harness 表情包插件:图库市场一键安装、多图库开关、情绪与关键词搜图、AI 学图,Web 与 QQ 双通道发图。",
   "repository": {
     "type": "git",
