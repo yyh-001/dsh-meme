@@ -39,8 +39,8 @@ export function defaultPacksDir() {
 
 /**
  * 删除图库时该删哪个目录。只认两种路径,别的一律拒绝(防越界/防误删):
- * - 内置包:插件包内 `memes/<id>`(删掉后升级或重装会回来)
- * - 用户包:扫描目录 `<packsDir>/<id>`
+ * - 内置包:插件包内 `memes/<id>`
+ * - 用户包:扫描目录子树里一个真正的包目录(`<packsDir>/<id>`,或历史遗留的嵌套包)
  * @param {{id?: string, path?: string, source?: string}} pack listAllPacks() 的一项
  * @param {string} packsDir 当前扫描目录
  */
@@ -48,11 +48,18 @@ export function packDeleteDir(pack, packsDir) {
   const id = String((pack && pack.id) || '').trim()
   if (!pack || !pack.path || !id) throw new Error('图库信息不完整')
   const dir = resolve(pack.path)
-  const expected = pack.source === 'bundled'
-    ? resolve(join(bundledPacksDir(), id))
-    : resolve(join(String(packsDir || ''), id))
-  if (dir !== expected) throw new Error('图库目录与预期不符,已拒绝删除')
-  return dir
+  if (pack.source === 'bundled') {
+    if (dir !== resolve(join(bundledPacksDir(), id))) throw new Error('图库目录与预期不符,已拒绝删除')
+    return dir
+  }
+  // 用户包:以前只认 `<packsDir>/<id>` 这一层,于是历史遗留的嵌套包(见 scanPacks)
+  // 能列在设置页里却删不掉。放宽成「packsDir 子树 + 目录名正好是包 id」,多层嵌套可删,
+  // 但仍然碰不到扫描目录本身,也删不到扫描目录外面的任何东西。
+  const root = resolve(String(packsDir || ''))
+  if (!root) throw new Error('图库目录无效,已拒绝删除')
+  if (dir === root) throw new Error('这个图库就是当前的「图库目录」本身,请先把它改到上级目录再删')
+  if (basename(dir) === id && dir.startsWith(root + sep)) return dir
+  throw new Error('图库目录与预期不符,已拒绝删除')
 }
 
 /**
@@ -102,19 +109,38 @@ export function readPackMeta(dir, id = basename(dir), source = 'custom') {
 }
 
 /**
- * 扫描可切换图库:插件内置 memes/* + 用户扫描目录子文件夹。
- * 同 id 时用户目录覆盖内置(方便自己改官方包)。
+ * 扫描可切换图库:插件内置 memes/* + 用户扫描目录下的一层子文件夹。
+ * 同 id 时用户目录覆盖内置(方便自己改官方包),同层里顶层优先。
+ *
+ * 历史遗留(issue #23):扫描目录被设成某个包目录自己时(设置页「选择目录」很容易点到包
+ * 文件夹),之后导入的包会嵌在那个包里面 → `memes/<主库>/<子库>/index.db`。这不是设计内的
+ * 布局,但已经躺在用户磁盘上了,所以这里额外容忍两种形状,免得图库「在磁盘上却扫不到」:
+ *   1. 扫描目录本身就是包 → 也当包收进来,否则它自己会从列表里消失(比嵌套更迷惑)
+ *   2. 包目录下再嵌一层包 → 一起收(顶层优先,同 id 不覆盖)
+ * 新导入不会再生成这种布局:setPacksDir 拒绝把包目录当扫描目录。
  */
 export function scanPacks(packsDir = defaultPacksDir()) {
   const byId = new Map()
+  const addPack = (dir, id, source) => {
+    if (!id || byId.has(id)) return
+    byId.set(id, readPackMeta(dir, id, source))
+  }
   const addFrom = (parent, source) => {
     if (!parent || !existsSync(parent)) return
+    if (isPackDir(parent)) addPack(parent, basename(parent), source)
     let names
     try { names = readdirSync(parent) } catch { return }
     for (const name of names) {
       const dir = join(parent, name)
       if (!isPackDir(dir)) continue
-      byId.set(name, readPackMeta(dir, name, source))
+      addPack(dir, name, source)
+      let subs
+      try { subs = readdirSync(dir) } catch { continue }
+      for (const sub of subs) {
+        const subdir = join(dir, sub)
+        if (!isPackDir(subdir)) continue
+        addPack(subdir, sub, source)
+      }
     }
   }
   addFrom(bundledPacksDir(), 'bundled')

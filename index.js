@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  MemesStore, defaultPacksDir, scanPacks, readPackMeta,
+  MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
   searchRows,
 } from './memes.js'
@@ -232,19 +232,26 @@ export function apply(ctx, config) {
         handler(req, res) {
           const pathname = String(req.url || '').split('?')[0]
           const raw = pathname.startsWith(ROUTE + '/') ? pathname.slice(ROUTE.length + 1) : null
-          // 带包前缀格式:/dsh-memes/<packId>/<rel>(跨包发图/配图);无前缀按当前激活包(旧格式兼容)
+          // 带包前缀格式:/dsh-memes/<packId>/<rel>(跨包发图/配图);无前缀按当前激活包
+          // (旧格式兼容:那条的 rel 固定以 memes/ 开头,所以首段是 memes 时不当包 id)。
           let root = memes.root
           let stored = raw
           if (raw) {
             const slash = raw.indexOf('/')
             const first = slash > 0 ? raw.slice(0, slash) : ''
-            if (first) {
+            if (first && first !== 'memes') {
+              // 认出来是包前缀就必须找到那个包。以前找不到会静默按「当前图库 + 整条 raw」拼路径,
+              // 磁盘上碰巧存在同名嵌套目录时会发出另一个包的图/明明是 404 却看着像配错了图,
+              // 描述和图对不上还很难查(issue #23)。宁可显式 404。
               let hit = null
-              try { hit = listAllPacks().find((p) => p.id === first) } catch { /* 扫描失败走默认 */ }
-              if (hit) {
-                root = hit.path
-                stored = raw.slice(slash + 1)
+              try { hit = listAllPacks().find((p) => p.id === first) } catch { /* 扫描失败 → 当找不到 */ }
+              if (!hit) {
+                res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+                res.end('not found: 未知图库 ' + first)
+                return
               }
+              root = hit.path
+              stored = raw.slice(slash + 1)
             }
           }
           // 每次请求动态构建白名单:静态快照会漏掉新上传的图(历史教训:上传后 404 图片不显示)
@@ -1360,6 +1367,12 @@ export function apply(ctx, config) {
           } else if (op === 'setPacksDir') {
             const dir = String(body.packsDir || '').trim()
             if (!dir) throw new Error('目录不能为空')
+            // 扫描目录必须是「装图库的父目录」,不能是某个图库目录自己:那样之后导入/安装
+            // 的图库会嵌进这个包里面(memes/<主库>/<子库>/),而主库自己会从列表里消失
+            // ——历史上这么点一下就是 issue #23 那种「描述和图对不上」的现场。
+            if (isPackDir(dir)) {
+              throw new Error('这个目录本身就是一个图库(里面有 index.db),请选它的上级目录;否则新装的图库会嵌在它里面')
+            }
             mkdirSync(dir, { recursive: true })
             writeSettings({ packsDir: resolve(dir) })
             json(res, { ok: true, ...packPayload(), message: '已更新扫描目录' })
