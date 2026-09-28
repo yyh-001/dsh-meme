@@ -1511,6 +1511,17 @@ window.__ModuleLoader__.load({
       let memeIndex = null
       let memeSearch = [] // 分词兜底用的 haystack:[{hay:[...], url}]
       let memeIndexLoading = false
+      let memeIndexRetryAfter = 0 // 失败后的冷却截止时刻(ms):冷却期内不再发请求
+      let memeIndexAttempts = 0
+      let memeIndexWarned = false
+      // 索引拉取失败必须保持「可重试」状态。早先失败会往 memeIndex 写一个空 Map 兜底,
+      // 而入口守卫是 `if (memeIndex || memeIndexLoading) return`——空 Map 也是真值,
+      // 于是这个会话剩下的 [表情: x] 全部退化成描述文字,无报错、无提示,只能靠刷新恢复。
+      // 现在失败就保持 null:之后再扫描到未装饰的 [表情: x] 会自然重试(指数退避,
+      // 后端起来了自愈)。不另起定时器——扫描本身就是触发点,少一个要清理的生命周期。
+      const MEME_INDEX_TIMEOUT = 15000
+      const MEME_INDEX_RETRY_BASE = 2000
+      const MEME_INDEX_RETRY_MAX = 30000
       const absMemeUrl = (u, path) => {
         if (u && /^https?:\/\//.test(u)) return u
         const rel = u || (path ? '/dsh-memes/' + path : '')
@@ -1527,10 +1538,15 @@ window.__ModuleLoader__.load({
       const findMemeUrl = (desc) => matchDesc(desc, memeIndex, memeSearch)
       const loadMemeIndex = () => {
         if (memeIndex || memeIndexLoading) return
+        if (Date.now() < memeIndexRetryAfter) return // 冷却中:上一次失败还没到重试时刻
         memeIndexLoading = true
+        memeIndexAttempts++
+        // fetch 挂起(既不 resolve 也不 reject)时连 catch 都不走,超时自己 abort 兜底
+        const controller = typeof AbortController === 'function' ? new AbortController() : null
+        const timeoutTimer = controller ? setTimeout(() => controller.abort(), MEME_INDEX_TIMEOUT) : 0
         // 拉全部包(带包前缀 URL),任意组的 [表情: 描述] 都能配图
-        fetch('/dsh-memes-api?packId=all')
-          .then((r) => r.json())
+        fetch('/dsh-memes-api?packId=all', controller ? { signal: controller.signal } : undefined)
+          .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
           .then((res) => {
             const rows = (res && res.memes) || []
             memeIndex = new Map()
@@ -1543,10 +1559,23 @@ window.__ModuleLoader__.load({
               addCaptionKey(memeIndex, String(row.caption || '').slice(0, 100), url)
             }
             memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
+            memeIndexAttempts = 0
+            memeIndexRetryAfter = 0
             decorateMemeText()
           })
-          .catch(() => { memeIndex = new Map() })
-          .finally(() => { memeIndexLoading = false })
+          .catch((error) => {
+            // 失败保持 null(下次扫描还能重试),退避到下次重试时刻;提示只打一次,别刷屏
+            const backoff = Math.min(MEME_INDEX_RETRY_MAX, MEME_INDEX_RETRY_BASE * Math.pow(2, Math.max(0, memeIndexAttempts - 1)))
+            memeIndexRetryAfter = Date.now() + backoff
+            if (!memeIndexWarned) {
+              memeIndexWarned = true
+              console.warn('[dsh-expression] 表情索引加载失败,' + Math.round(backoff / 1000) + 's 后自动重试:', error && error.message ? error.message : error)
+            }
+          })
+          .finally(() => {
+            if (timeoutTimer) clearTimeout(timeoutTimer)
+            memeIndexLoading = false
+          })
       }
       const decorateMemeText = () => {
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
