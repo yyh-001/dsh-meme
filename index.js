@@ -230,7 +230,19 @@ export function apply(ctx, config) {
         kind: 'prefix',
         path: ROUTE,
         handler(req, res) {
-          const pathname = String(req.url || '').split('?')[0]
+          const rawUrl = String(req.url || '').split('?')[0]
+          // 浏览器对路径里的非 ASCII 一律百分号编码,而下面的白名单来自 index.db 里的
+          // 原始路径(中文目录/文件名是未编码的),不先解码的话含非 ASCII 路径的图库
+          // 所有图都 404(issue #28)。解码要兜住手打的畸形转义(%E5%A 这类),失败按
+          // 404 处理而不是抛 500;先行 split('?') 保证 %3F 不会被当成查询串切走。
+          let pathname
+          try {
+            pathname = decodeURIComponent(rawUrl)
+          } catch {
+            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+            res.end('not found')
+            return
+          }
           const raw = pathname.startsWith(ROUTE + '/') ? pathname.slice(ROUTE.length + 1) : null
           // 带包前缀格式:/dsh-memes/<packId>/<rel>(跨包发图/配图);无前缀按当前激活包
           // (旧格式兼容:那条的 rel 固定以 memes/ 开头,所以首段是 memes 时不当包 id)。
