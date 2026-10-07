@@ -1626,8 +1626,15 @@ window.__ModuleLoader__.load({
         // 回不来,刷新页面才恢复(issue #26)。每轮扫描先摘孤儿标记:注入 = img + ghost,
         // 两个都不在了才认孤儿;降级装饰(图库未命中、只有 ghost)不能动,否则每轮扫描都在
         // 白白重写这段 DOM。摘完标记本轮就会重新装饰;上一轮幸存的同描述图由 dedupeMemeImages 去重。
-        for (const el of document.querySelectorAll('[data-meme-decorated]')) {
+        // 同一轮顺带处理「隐藏残留」:hide walk 只藏不露,React 之后往同一个元素写回可见文本
+        // (流式追加/编辑消息)时元素还带着 display:none,内容会永久不可见——按「现在有没有
+        // 可见文本」翻回来,只动打过 data-meme-empty 标记的,宿主自己隐藏的元素不碰。
+        for (const el of document.querySelectorAll('[data-meme-decorated],[data-meme-empty]')) {
           if (!el.querySelector('img[data-meme-img],[data-meme-hidden]')) delete el.dataset.memeDecorated
+          if (el.dataset.memeEmpty && textWithoutGhosts(el).trim()) {
+            delete el.dataset.memeEmpty
+            el.style.display = ''
+          }
         }
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
           acceptNode(node) {
@@ -1637,13 +1644,22 @@ window.__ModuleLoader__.load({
             // 容器标记认两个:老版本是 data-chat-flow,DSH 0.1.2 起消息行是 data-chat-flow-key
             // (issue #22 附录,使用者在新版上实测)。只认前者的话新版上 TreeWalker 一个节点都
             // 扫不到、表情永不转图;多认一个纯增益。
-            if (!parent.closest('[data-chat-flow],[data-chat-flow-key]')) return NodeFilter.FILTER_REJECT
+            const flowEl = parent.closest('[data-chat-flow],[data-chat-flow-key]')
+            if (!flowEl) return NodeFilter.FILTER_REJECT
             if (parent.closest('input,textarea,[contenteditable="true"],[data-variant="think"],[data-variant="others"],pre,code')) {
               return NodeFilter.FILTER_REJECT
             }
             // 自己的 ghost 里装着 [表情: x] 原文,不排掉就会被反复装饰
             if (parent.closest('[data-meme-hidden]')) return NodeFilter.FILTER_REJECT
             if (parent.dataset && parent.dataset.memeDecorated) return NodeFilter.FILTER_REJECT
+            // 0.2 宿主(dsh-client-ui-chat 0.2.0-rc.2)源码核对:① 工具/步骤轨迹整行是
+            // data-chat-flow-kind="turn-process",宿主自己枚举行时也排除它,不排的话新版上
+            // 轨迹文本会被装饰;② 分组折叠容器 ChatGroupSeat 的根上同时挂着
+            // data-chat-group-key 和 data-chat-flow-key,分组头部文本最近命中的是分组本身,
+            // 放行会把图提到分组顶上。消息行(FlowItem)只有 flow-key,不受影响。两个标记
+            // 老版宿主都没有,加了纯增益。
+            if (parent.closest('[data-chat-flow-kind="turn-process"]')) return NodeFilter.FILTER_REJECT
+            if (flowEl.getAttribute('data-chat-group-key') !== null) return NodeFilter.FILTER_REJECT
             return MEME_TEXT_TEST.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
           },
         })
@@ -1697,9 +1713,13 @@ window.__ModuleLoader__.load({
           const row = parent.closest('[data-time-hover-root],[data-chat-flow-key]')
           if (row && imgs.length > 0) {
             for (const img of imgs) row.insertBefore(img, row.firstChild)
+            // 中间层被掏空才隐藏,并打 memeEmpty 标记(回显逻辑见函数开头的清理段)
             let el = parent
             while (el && el !== row) {
-              if (!textWithoutGhosts(el).trim()) el.style.display = 'none'
+              if (!textWithoutGhosts(el).trim()) {
+                el.style.display = 'none'
+                el.dataset.memeEmpty = '1'
+              }
               el = el.parentElement
             }
           }

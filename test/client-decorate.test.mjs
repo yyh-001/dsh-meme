@@ -360,3 +360,74 @@ test('⑥ 设置侧栏笑脸被宿主覆写后也能自愈', async () => {
   assert.equal(imgBtn.getAttribute('data-meme-nav'), 'skip', 'skip 档稳定,不被清理扰动')
   navEl = null
 })
+
+// ---------- 宿主 0.2.0-rc.2 源码核对出的守卫(issue #26 附加信息) ----------
+// dsh-client-ui-chat:工具/步骤轨迹整行是 data-chat-flow-kind="turn-process"(宿主自己
+// 枚举行时也排除);分组折叠容器 ChatGroupSeat 根上同时挂 data-chat-group-key 和
+// data-chat-flow-key。老版宿主两个标记都没有,这些守卫是纯增益。
+
+test('⑦ 轨迹行(turn-process)保持纯文本', async () => {
+  const flow = new Element('div')
+  flow.setAttribute('data-chat-flow', '1')
+  const row = new Element('div')
+  row.setAttribute('data-chat-flow-key', 'tp1')
+  row.setAttribute('data-chat-flow-kind', 'turn-process')
+  row.appendChild(new TextNode('轨迹 [表情: 开心]'))
+  flow.appendChild(row)
+  body.appendChild(flow)
+  await scan()
+  assert.equal(imgsIn(row).length, 0, '轨迹不该转图')
+  assert.equal(row.textContent, '轨迹 [表情: 开心]', '轨迹文本原样保留')
+  const { row: normal } = bubble('正常 [表情: 开心]')
+  await scan()
+  assert.equal(imgsIn(normal).length, 1, '同一会话里的正常消息照常装饰')
+})
+
+test('⑦ 分组容器头部的文本不装饰,组内消息行照常', async () => {
+  const group = new Element('div')
+  group.setAttribute('data-chat-group-key', 'g1')
+  group.setAttribute('data-chat-flow-key', 'g1')
+  const header = new Element('div')
+  header.appendChild(new TextNode('分组头 [表情: 开心]'))
+  group.appendChild(header)
+  body.appendChild(group)
+  await scan()
+  assert.equal(imgsIn(group).length, 0, '分组头部不该转图,更不该把图提到分组顶上')
+  assert.equal(header.textContent, '分组头 [表情: 开心]')
+  const member = new Element('div') // 组内真正的消息行:只有 flow-key,没有 group-key
+  member.setAttribute('data-chat-flow-key', 'm1')
+  const p = new Element('p')
+  p.appendChild(new TextNode('组内消息 [表情: 开心]'))
+  member.appendChild(p)
+  group.appendChild(member)
+  await scan()
+  assert.equal(imgsIn(member).length, 1, '组内消息行照常装饰并提到行首')
+})
+
+// ---------- 隐藏残留:掏空的气泡要能回显 ----------
+test('⑧ 整条被掏空的气泡要隐藏;React 写回普通文本要能回显', async () => {
+  const { row, p } = bubble('[表情: 开心]')
+  await scan()
+  assert.equal(p.style.display, 'none', '可见文本被掏空的中间层要隐藏')
+  assert.equal(p.getAttribute('data-meme-empty'), '1')
+  await scan()
+  assert.equal(p.style.display, 'none', 'ghost 还在(无可见文本),保持隐藏')
+  p.textContent = '现在有普通文字了' // React 覆写:注入没了,属性都还在
+  await scan()
+  assert.equal(p.style.display, '', '写回可见文本后要回显,不能永久不可见')
+  assert.equal(p.getAttribute('data-meme-empty'), null, '标记一并摘掉')
+  assert.equal(p.getAttribute('data-meme-decorated'), null, '孤儿装饰标记也摘掉')
+  assert.equal(imgsIn(row).length, 1, '行首幸存的图不受影响')
+})
+
+test('⑧ 掏空气泡被写回新的表情文本:回显 + 重装饰 + 文本不变式保持', async () => {
+  const { row, p } = bubble('[表情: 开心]')
+  await scan()
+  assert.equal(p.style.display, 'none')
+  p.textContent = '看这个 [表情: 开心]'
+  await scan()
+  assert.equal(imgsIn(row).length, 1, '重新装饰后与幸存图去重,仍是一张')
+  assert.ok(p.querySelectorAll('span[data-meme-hidden]')[0], 'ghost 回来了')
+  assert.equal(p.style.display, '', '可见文本「看这个」存在,必须回显')
+  assert.equal(p.textContent, '看这个 [表情: 开心]')
+})
