@@ -1620,6 +1620,15 @@ window.__ModuleLoader__.load({
         }
       }
       const decorateMemeText = () => {
+        // 宿主重渲染(切语言/切主题/HMR)会让 React 对纯文本 children 走 textContent 覆写:
+        // 注入的 img 和 ghost 一起被抹掉、原文裸露,而 data-meme-decorated 在元素属性上,
+        // 覆写不影响它 → 标记还在、注入已不在,下面的 acceptNode 见标记就永久跳过,图再也
+        // 回不来,刷新页面才恢复(issue #26)。每轮扫描先摘孤儿标记:注入 = img + ghost,
+        // 两个都不在了才认孤儿;降级装饰(图库未命中、只有 ghost)不能动,否则每轮扫描都在
+        // 白白重写这段 DOM。摘完标记本轮就会重新装饰;上一轮幸存的同描述图由 dedupeMemeImages 去重。
+        for (const el of document.querySelectorAll('[data-meme-decorated]')) {
+          if (!el.querySelector('img[data-meme-img],[data-meme-hidden]')) delete el.dataset.memeDecorated
+        }
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
           acceptNode(node) {
             const parent = node.parentElement
@@ -1701,13 +1710,20 @@ window.__ModuleLoader__.load({
       const decorateNavIcon = () => {
         const nav = document.querySelector('[role="dialog"] nav')
         if (!nav) return
+        // 同 decorateMemeText 的孤儿标记(issue #26):面板重渲染抹掉注入后,btn 上的标记
+        // 不该再拦着重新装饰。标记分两档:真注入过的才是 '1'(svg 上有 data-meme-nav-icon
+        // 为证),没图标/图标是 IMG 这种「没得换」的记 'skip',清理时不碰。
+        for (const btn of nav.querySelectorAll('button[data-meme-nav="1"]')) {
+          if (!btn.querySelector('svg[data-meme-nav-icon]')) delete btn.dataset.memeNav
+        }
         for (const btn of nav.querySelectorAll('button')) {
           if (btn.dataset.memeNav) continue
           if (!btn.textContent || !btn.textContent.includes('表情包')) continue
           const icon = btn.firstElementChild
-          if (!icon || icon.tagName === 'IMG') { btn.dataset.memeNav = '1'; continue }
+          if (!icon || icon.tagName === 'IMG') { btn.dataset.memeNav = 'skip'; continue }
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
           svg.setAttribute('viewBox', '0 0 24 24')
+          svg.setAttribute('data-meme-nav-icon', '1')
           svg.style.cssText = 'width:16px;height:16px;flex:none'
           const mk = (tag, attrs) => {
             const el = document.createElementNS('http://www.w3.org/2000/svg', tag)
