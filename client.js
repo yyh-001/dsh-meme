@@ -1712,6 +1712,16 @@ window.__ModuleLoader__.load({
           parent.replaceChild(frag, node)
           const row = parent.closest('[data-time-hover-root],[data-chat-flow-key]')
           if (row && imgs.length > 0) {
+            // 用户 / steering 消息是右对齐的,但那个右对齐挂在气泡外面那层 flex 列容器
+            // (宿主 MessageItem 的 userRow,align-items:flex-end)上;而这里为了掏空气泡把图
+            // 提到了行元素(FlowItem,只是个普通 block)的行首,block 图落在 block 容器里默认
+            // 贴左 → 自己发的表情包跑到屏幕左边(助手行本来就左对齐,一直看不出来)。按行角色
+            // 补一次左外边距 auto 把图推回右边。data-chat-flow-kind 是 0.2 宿主才有的标记,
+            // 老宿主取不到,行为保持原样。
+            const kind = row.getAttribute('data-chat-flow-kind')
+            if (kind === 'user' || kind === 'steering') {
+              for (const img of imgs) img.style.marginLeft = 'auto'
+            }
             for (const img of imgs) row.insertBefore(img, row.firstChild)
             // 中间层被掏空才隐藏,并打 memeEmpty 标记(回显逻辑见函数开头的清理段)
             let el = parent

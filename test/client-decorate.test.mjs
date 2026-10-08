@@ -431,3 +431,37 @@ test('⑧ 掏空气泡被写回新的表情文本:回显 + 重装饰 + 文本不
   assert.equal(p.style.display, '', '可见文本「看这个」存在,必须回显')
   assert.equal(p.textContent, '看这个 [表情: 开心]')
 })
+
+// ---------- 用户消息的表情包要跟气泡一样靠右 ----------
+// 宿主(0.2.0-rc.2 源码核对)的用户/steering 行:div.userRow{display:flex;flex-direction:column;
+// align-items:flex-end} 才是右对齐的来源,行元素 FlowItem 只是个普通 block。我们把图提到行首
+// 之后 block 图就贴左了,自己发的表情包跑到屏幕左边(助手行本来就左对齐,所以只有用户消息看得出)。
+// 按行角色补 margin-left:auto 推回右边;data-chat-flow-kind 老宿主没有,取不到就保持原样。
+
+test('⑨ 用户 / steering 行里提到的图靠右,助手行与老宿主不受影响', async () => {
+  const mk = (kind) => {
+    const flow = new Element('div')
+    const row = new Element('div')
+    row.setAttribute('data-chat-flow-key', 'k-' + String(kind))
+    if (kind !== null) row.setAttribute('data-chat-flow-kind', kind)
+    const p = new Element('p')
+    p.appendChild(new TextNode('贴纸 [表情: 开心]'))
+    row.appendChild(p)
+    flow.appendChild(row)
+    body.appendChild(flow)
+    return row
+  }
+  const rows = { user: mk('user'), steering: mk('steering'), assistant: mk('assistant-step'), legacy: mk(null) }
+  await scan()
+  for (const kind of ['user', 'steering']) {
+    const row = rows[kind]
+    const img = imgsIn(row)[0]
+    assert.ok(img, kind + ' 行应装饰出图')
+    assert.equal(img.parentElement, row, '图仍提到行首(掏空气泡的前提)')
+    assert.equal(img.style.marginLeft, 'auto', kind + ' 行是右对齐的,图要跟气泡同侧')
+  }
+  assert.equal(imgsIn(rows.assistant).length, 1, '助手行照常装饰')
+  assert.equal(imgsIn(rows.assistant)[0].style.marginLeft, undefined, '助手行本来就左对齐,不加外边距')
+  assert.equal(imgsIn(rows.legacy).length, 1, '老宿主(无 kind 标记)照常装饰')
+  assert.equal(imgsIn(rows.legacy)[0].style.marginLeft, undefined, '老宿主行为保持原样')
+})
