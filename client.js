@@ -133,6 +133,90 @@ window.__ModuleLoader__.load({
       return el
     }
 
+    /**
+     * 点击聊天里的图放大查看:滚轮缩放、双击复位、Esc 或点背景关闭。
+     *
+     * 只认聊天流容器(`[data-chat-flow]`,DSH 0.1.2 起是 `[data-chat-flow-key]`)里的图 ——
+     * 输入框预览、面板缩略图、遮罩里自己那张都不碰。监听挂在 document 的**捕获阶段**、
+     * 装一次就够:流式输出期间消息行反复重建,挂在容器上的监听会跟着丢。
+     *
+     * @param {Document} [doc] 测试注入用;缺省取全局 document
+     * @returns {() => void} 卸载:摘监听、摘遮罩
+     */
+    function installMemeZoom(doc) {
+      const d = doc || (typeof document === 'undefined' ? null : document)
+      // 回归测试里那些只搭了必要部分的假 document 可能不给 addEventListener:那种环境
+      // 直接不装 —— 真实宿主一定有。别为一个可选增强把整个 apply() 带崩。
+      if (!d || typeof d.addEventListener !== 'function' || d.__dshMemeZoom) return () => {}
+      d.__dshMemeZoom = true
+
+      let box = null
+      let pic = null
+      let scale = 1
+
+      const close = () => {
+        if (!box) return
+        box.style.display = 'none'
+        scale = 1
+        pic.style.transform = 'scale(1)'
+      }
+
+      const ensure = () => {
+        if (box) return box
+        box = d.createElement('div')
+        box.setAttribute('data-meme-zoom', '1')
+        box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);cursor:zoom-out;padding:24px;box-sizing:border-box'
+        pic = d.createElement('img')
+        pic.style.cssText = 'max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.6);display:block;transition:transform .12s ease-out;transform-origin:center center'
+        box.appendChild(pic)
+        const tip = d.createElement('div')
+        tip.textContent = '滚轮缩放 · 双击复位 · Esc 或点背景关闭'
+        tip.style.cssText = 'position:absolute;bottom:18px;left:0;right:0;text-align:center;color:rgba(255,255,255,.72);font-size:12px;pointer-events:none'
+        box.appendChild(tip)
+        box.addEventListener('click', () => { close() })
+        box.addEventListener('wheel', (e) => {
+          e.preventDefault()
+          scale = Math.min(6, Math.max(.4, scale * (e.deltaY < 0 ? 1.15 : .87)))
+          pic.style.transform = 'scale(' + scale + ')'
+        }, { passive: false })
+        box.addEventListener('dblclick', () => { scale = 1; pic.style.transform = 'scale(1)' })
+        ;(d.body || d.documentElement).appendChild(box)
+        return box
+      }
+
+      const open = (url, alt) => {
+        if (!url) return
+        ensure()
+        pic.src = url
+        pic.alt = alt || ''
+        scale = 1
+        pic.style.transform = 'scale(1)'
+        box.style.display = 'flex'
+      }
+
+      const onKeydown = (e) => { if (e.key === 'Escape') close() }
+      const onClick = (e) => {
+        const t = e.target
+        if (!t || t.tagName !== 'IMG' || t === pic) return
+        if (!t.closest || !t.closest('[data-chat-flow],[data-chat-flow-key]')) return
+        e.preventDefault()
+        e.stopPropagation()
+        open(t.currentSrc || t.src, t.alt)
+      }
+
+      d.addEventListener('keydown', onKeydown, true)
+      d.addEventListener('click', onClick, true)
+
+      return () => {
+        d.removeEventListener('keydown', onKeydown, true)
+        d.removeEventListener('click', onClick, true)
+        if (box && box.parentNode) box.parentNode.removeChild(box)
+        box = null
+        pic = null
+        delete d.__dshMemeZoom
+      }
+    }
+
     async function apiGet(params) {
       const qs = new URLSearchParams()
       if (params.tag) qs.set('tag', params.tag)
@@ -1953,6 +2037,12 @@ window.__ModuleLoader__.load({
       const pickerStyle = createOwnedStyle(memePickerCSS)
       ctx.effect(() => () => { pickerStyle.remove() }, 'dsh-expression-entry: meme-picker styles')
 
+      // 点图放大:光标提示样式同样走 createOwnedStyle(issue #32),遮罩与监听装一次、卸载时摘掉。
+      const zoomStyle = createOwnedStyle('[data-chat-flow] img,[data-chat-flow-key] img{cursor:zoom-in}')
+      ctx.effect(() => () => { zoomStyle.remove() }, 'dsh-expression-entry: zoom styles')
+      const disposeZoom = installMemeZoom()
+      ctx.effect(() => () => { disposeZoom() }, 'dsh-expression-entry: zoom overlay')
+
       // 表情文本渲染:[表情: 描述] 或旧格式 [表情: 描述](url) → 图片。
       // 无 url 时先按描述精确匹配图库;失败再按分词在 caption/关键词里做包含匹配
       // 兜底(模型偶尔不抄候选原文、自己编描述);仍无命中显示描述原文,
@@ -2301,7 +2391,7 @@ window.__ModuleLoader__.load({
     // 纯函数导出仅用于回归测试(node --test),宿主/打包不消费
     exports.__test = {
       foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc, compareVersions,
-      createOwnedStyle, STYLE_OWNER_ID,
+      createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
       packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, inKeepZone, uniqueKeys,
     }
     return module.exports

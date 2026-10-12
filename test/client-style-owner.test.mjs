@@ -53,12 +53,13 @@ globalThis.__dshMeme.apply({ get: () => undefined, effect: () => {} })
 const OWNER = 'dsh-meme'
 
 test('apply() 建的每个 <style> 都带 data-plugin=dsh-meme(issue #32)', () => {
-  assert.equal(appended.length, 2, '应建两个 style:设置面板 CSS + 选图器 CSS')
+  assert.equal(appended.length, 3, '应建三个 style:设置面板 CSS + 选图器 CSS + 点图放大光标')
   for (const el of appended) {
     assert.equal(el.getAttribute('data-plugin'), OWNER, '<style> 必须打上模块注册 id')
   }
   assert.ok(appended[0].textContent.includes('.meme-panel'), '第一个是设置面板 CSS')
   assert.ok(appended[1].textContent.includes('.meme-picker'), '第二个是选图器 CSS')
+  assert.ok(appended[2].textContent.includes('cursor:zoom-in'), '第三个是点图放大的光标提示')
 })
 
 test('没有无主 <style>:宿主的 claimStyles 认不到东西(issue #32 的根因)', () => {
