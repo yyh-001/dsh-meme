@@ -145,6 +145,17 @@ test('面板高度:自然高度与可用空间取小,兜一个最小高度', () 
   assert.equal(fitPanelHeight(1000, 400, 220), 400, '最小高度可覆盖')
 })
 
+test('面板高度:视口占比上限压住「窗口多高就长多高」(用户要的半屏高)', () => {
+  // 窗口 1000 高、底边 864 时可用 776,但 46% = 460 才是最终高度 —— 半屏左右既能多看图,
+  // 也不会把对话整个顶掉。三者取小,cap 最小就听 cap。
+  assert.equal(fitPanelHeight(3928, 776, 180, 460), 460)
+  assert.equal(fitPanelHeight(300, 776, 180, 460), 300, '自然高度更小时仍然听自然高度')
+  assert.equal(fitPanelHeight(3928, 240, 180, 460), 240, '可用空间更小时仍然听可用空间')
+  assert.equal(fitPanelHeight(3928, 776, 180, 0), 776, 'cap 非正数视为不设上限')
+  assert.equal(fitPanelHeight(3928, 776, 180, Infinity), 776, '默认不设上限')
+  assert.equal(fitPanelHeight(3928, 776, 180, 90), 180, 'cap 比最小高度还小时,最小高度优先(不能塌)')
+})
+
 test('自然高度不靠撤 max-height 去量,网格的滚动位置不会被夹到顶(issue #33)', () => {
   // 复刻 bug 现场:旧 fitPanel 把 max-height 撤成 none 再量高,网格的可用高度就等于整块内容高
   // (clientHeight 424 → 5156),滚动区间归零 → 浏览器把 scrollTop 夹到 0,还原也回不来。

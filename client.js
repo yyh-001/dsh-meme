@@ -1284,7 +1284,10 @@ window.__ModuleLoader__.load({
       // box-sizing 必须是 border-box:高度自适应是拿 getBoundingClientRect 量的(带 padding/border),
       // 而 max-height 默认按 content-box 算 —— 少了这句,面板实际比算出来的高一个 padding+border,
       // 上缘直接顶到视口外面去(实测 607px 的上限渲染成 633px、top=-10)。
-      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(392px,92vw);z-index:30;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:8px;padding:12px;max-height:min(46vh,calc(100vh - 32px));overflow:hidden;font-size:12px;color:var(--dsw-alias-label-primary)}',
+      // 宽度按「一行正好 5 格」定:格子外框 78(76 + 两条 1px 边框)+ 间距 8,5 格要 422 的网格
+      // 内宽;面板 480 时网格内宽约 441(已扣掉面板 padding/border、网格 padding 和滚动条),
+      // 留够余量不至于被滚动条挤成 4 格,也还不到 6 格的 508。窄窗口仍由 92vw 兜底。
+      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:30;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:8px;padding:12px;max-height:min(46vh,calc(100vh - 32px));overflow:hidden;font-size:12px;color:var(--dsw-alias-label-primary)}',
       '.meme-picker .mp-head{display:flex;gap:6px;align-items:center;flex:none}',
       '.meme-picker .mp-search{flex:1 1 auto;min-width:0;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;font-size:12px;outline:none;transition:border-color .12s ease}',
       '.meme-picker .mp-search:focus{border-color:var(--dsw-alias-brand-primary)}',
@@ -1389,6 +1392,11 @@ window.__ModuleLoader__.load({
      * 只在实际被顶栏挡住时才加 —— 面板本来就在下方(没被挡)时加它会白白压矮一截。
      */
     const PICKER_TOP_GAP = 12
+    /**
+     * 面板高度上限:视口高度的 46%(沿用 CSS 里那个 46vh)。自适应只往下收、不往上撑破这个
+     * 上限 —— 半屏高左右最能兼顾「看得到够多图」和「不把对话顶掉」,再高就喧宾夺主了。
+     */
+    const PICKER_MAX_VH = 0.46
 
     /**
      * 从图片 url 反推图库 id(issue #30 第 1 条):
@@ -1444,15 +1452,17 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 面板高度(issue #30 第 3 条):自然高度与「上缘不越窗口顶」的可用高度取小,再兜一个
-     * 最小高度。available 由调用方按实测底边算出 —— 面板底边本来就贴着输入框(absolute +
-     * bottom:calc(100% + 8px)),所以能长多高 = 底边到窗口顶。
+     * 面板高度(issue #30 第 3 条):自然高度 / 「上缘不越窗口顶」的可用高度 / 视口占比上限
+     * 三者取小,再兜一个最小高度。available 由调用方按实测底边算出 —— 面板底边本来就贴着
+     * 输入框(absolute + bottom:calc(100% + 8px)),所以能长多高 = 底边到窗口顶;cap 是
+     * 「长到多少就该收住」,不能光由窗口高度定(见 PICKER_MAX_VH)。
      */
-    function fitPanelHeight(natural, available, floor = 180) {
+    function fitPanelHeight(natural, available, floor = 180, cap = Infinity) {
       const min = Number(floor) > 0 ? Number(floor) : 180
       const nat = Math.ceil(Number(natural) || 0)
       const room = Math.floor(Number(available) || 0)
-      return Math.max(min, Math.min(nat || min, room || min))
+      const top = Number(cap) > 0 ? Math.floor(Number(cap)) : Infinity
+      return Math.max(min, Math.min(nat || min, room || min, top))
     }
 
     /**
@@ -1596,7 +1606,6 @@ window.__ModuleLoader__.load({
       const panelRef = React.useRef(null)
       const previewRef = React.useRef(null)
       const keepRef = React.useRef(null) // 预览停留区 [格子矩形, 预览框矩形],pointermove 判「还在不在」
-      const fitRef = React.useRef(0)
       const topLimitRef = React.useRef(null) // { limit, nat }:宿主顶栏下沿 + 量它时的自然高度(作失效键)
 
       // 打开时拉全量(packId=all,带包前缀 url):多选筛选和情绪计数都要全量数据。
@@ -1724,11 +1733,14 @@ window.__ModuleLoader__.load({
           const cached = topLimitRef.current
           const limit = cached && cached.nat === nat ? cached.limit : measureTopLimit(panel, bottom, nat)
           const avail = Math.floor(bottom - limit)
-          const finalH = fitPanelHeight(nat, avail)
-          if (finalH !== fitRef.current) {
-            fitRef.current = finalH
-            panel.style.maxHeight = finalH + 'px'
-          }
+          const cap = Math.floor(viewport('h') * PICKER_MAX_VH)
+          const finalH = fitPanelHeight(nat, avail, 180, cap)
+          // 判断依据必须是「这个节点当前的内联高度」,不能用跨挂载记的 ref(历史 bug:
+          // 关掉面板再打开,新节点没有内联 max-height、却因为 ref 记着同一个数值被判成
+          // 「不用改」,于是回退到 CSS 默认的 46vh —— 表现就是反复点笑脸高度会变,
+          // 而且窗口越高差得越多)。这样写是幂等的:值一样就不写,写过的节点也不会重复改。
+          const want = finalH + 'px'
+          if (panel.style.maxHeight !== want) panel.style.maxHeight = want
           // 排查用现场记录:控制台里一眼看出「新代码有没有加载 / 算出什么」
           panel.setAttribute('data-meme-picker-fit', 'nat=' + nat + ' avail=' + avail + ' h=' + finalH + ' top=' + limit)
         } catch (e) { /* 纯增强:算不出来就退回 CSS 的 46vh,不能影响面板本身 */ }
