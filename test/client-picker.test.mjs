@@ -320,6 +320,15 @@ test('打开面板拉的是全量(packId=all),默认不筛就是跨图库全部;
   assert.equal(chipWith(board, '筛选').props['aria-expanded'], 'false')
 })
 
+test('表情格不挂原生 title:否则 tooltip 会压在悬浮预览上,两个提示重着显示', async () => {
+  const { board } = await openBoard()
+  const cells = byClass(board, 'mp-cell')
+  assert.ok(cells.length > 0, '先得有格子')
+  for (const c of cells) {
+    assert.equal(c.props.title, undefined, '格子上不能有 title(预览里已经有描述/文件名:' + c.props.title + ')')
+  }
+})
+
 test('筛选区:点开关展开出两排 chip,再点收起;选中状态与开关上的计数都留着', async () => {
   const { board, repaint } = await openBoard()
   let tree = ensureFilters(board, repaint, false)

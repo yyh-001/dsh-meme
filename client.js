@@ -1809,7 +1809,8 @@ window.__ModuleLoader__.load({
       const gridCells = cells.map((m, i) => h('div', {
         key: gridCellKeys[i],
         className: 'mp-cell',
-        title: m.caption || m.file_name,
+        // 刻意不给 title:原生 tooltip 要等一会儿才冒出来,正好压在悬浮预览上面,两个提示重着显示
+        // (描述、文件名预览里都有,不用再来一份)
         onClick: () => send(m),
         onPointerEnter: (e) => {
           try { setHover({ meme: m, cellRect: e.currentTarget.getBoundingClientRect() }) } catch (err) { setHover(null) }
