@@ -1604,7 +1604,7 @@ export function apply(ctx, config) {
       // 留下孤儿规则。
       ctx.effect(() => webServer.tapIndex((html) => html.replace(
         '</head>',
-        '<style data-plugin="dsh-meme">img[src*="/dsh-memes/"]{max-width:' + memeSize + 'px!important;max-height:' + memeSize + 'px!important;width:auto!important;height:auto!important;object-fit:contain;border-radius:8px}</style></head>',
+        '<style data-plugin="dsh-meme">img[src*="/dsh-memes/"]:not([data-meme-zoom-img]){max-width:' + memeSize + 'px!important;max-height:' + memeSize + 'px!important;width:auto!important;height:auto!important;object-fit:contain;border-radius:8px}</style></head>',
       )), 'dsh-expression: 小图 CSS')
     } catch (error) {
       console.error('[dsh-expression] tapIndex 失败:', error instanceof Error ? error.message : String(error))

@@ -146,7 +146,9 @@ test('⑤ 点遮罩背景关闭', () => {
   e.target = imgInFlow()
   fireDoc('click', e)
   const b = box()
-  b.fire('click', evt())
+  const click = evt()
+  click.target = b
+  b.fire('click', click)
   assert.equal(b.style.display, 'none')
   dispose()
 })
@@ -167,7 +169,7 @@ test('⑥ 滚轮缩放,倍数钳在 0.4~6', () => {
   dispose()
 })
 
-test('⑦ 双击复位', () => {
+test('⑦ 图片双击的两次 click 不关遮罩,随后 dblclick 复位', () => {
   const dispose = installMemeZoom(docEl)
   const e = evt()
   e.target = imgInFlow()
@@ -176,8 +178,18 @@ test('⑦ 双击复位', () => {
   const w = evt()
   w.deltaY = -100
   b.fire('wheel', w)
-  b.fire('dblclick', evt())
+  const click = evt()
+  click.target = b.children[0]
+  // 浏览器先派发两次 click,再派发 dblclick;图片上的事件会冒泡到遮罩。
+  for (let i = 0; i < 2; i++) {
+    fireDoc('click', click)
+    b.fire('click', click)
+    assert.equal(b.style.display, 'flex', '点图片应保持遮罩打开')
+    assert.equal(b.children[0].style.transform, 'scale(1.15)', '单击不应复位缩放')
+  }
+  b.fire('dblclick', click)
   assert.equal(b.children[0].style.transform, 'scale(1)')
+  assert.equal(b.style.display, 'flex', '双击复位后遮罩仍打开')
   dispose()
 })
 

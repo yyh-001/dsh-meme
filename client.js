@@ -167,13 +167,14 @@ window.__ModuleLoader__.load({
         box.setAttribute('data-meme-zoom', '1')
         box.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.78);backdrop-filter:blur(6px);cursor:zoom-out;padding:24px;box-sizing:border-box'
         pic = d.createElement('img')
+        pic.setAttribute('data-meme-zoom-img', '1')
         pic.style.cssText = 'max-width:100%;max-height:100%;border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.6);display:block;transition:transform .12s ease-out;transform-origin:center center'
         box.appendChild(pic)
         const tip = d.createElement('div')
         tip.textContent = '滚轮缩放 · 双击复位 · Esc 或点背景关闭'
         tip.style.cssText = 'position:absolute;bottom:18px;left:0;right:0;text-align:center;color:rgba(255,255,255,.72);font-size:12px;pointer-events:none'
         box.appendChild(tip)
-        box.addEventListener('click', () => { close() })
+        box.addEventListener('click', (e) => { if (e.target === box) close() })
         box.addEventListener('wheel', (e) => {
           e.preventDefault()
           scale = Math.min(6, Math.max(.4, scale * (e.deltaY < 0 ? 1.15 : .87)))
