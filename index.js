@@ -41,6 +41,36 @@ function crc32(buf) {
   return (c ^ -1) >>> 0
 }
 
+// ---- 来源校验:HTTP 路由只接受本机回环地址来的请求 ----
+// 原来的判据是 `new URL(origin).host === req.headers.host`,自己跟自己比:
+// 攻击者的页面只要先用自己的域名解析、再把它切到 127.0.0.1(DNS rebinding),
+// 浏览器发出的 Origin 与 Host 就同是那个域名,判据成立、请求被放行;
+// 而且 GET 分支在那道校验之前就 return 了,读操作一次都没校验过。
+// 这里不看 Origin(由页面自己填、可以伪造成任何值),只看 Host:
+// 这个头由浏览器按**实际连接目标**写,rebinding 时它就是攻击者的域名,直接落选。
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+
+/**
+ * 请求是不是从本机回环地址来的。
+ * 没有 Host 头时返回 true:HTTP/1.0 与本机 socket 直连都可能不带这个头,那种请求
+ * 不是浏览器页面发的、构不成 rebinding;而浏览器**一定**会带上 Host。
+ */
+export function hostIsLoopback(req) {
+  const raw = String((req && req.headers && req.headers.host) || '')
+  if (!raw) return true
+  const name = raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.split(':')[0]
+  return LOOPBACK_HOSTS.has(name.toLowerCase())
+}
+
+/** 不是回环来源就自己回 403 并返回 true,调用方直接 return */
+export function denyNonLoopback(req, res) {
+  if (hostIsLoopback(req)) return false
+  const body = JSON.stringify({ ok: false, error: '拒绝: 只接受本机(回环地址)请求' })
+  res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+  res.end(body)
+  return true
+}
+
 /** 打包文件列表为 ZIP(store 无压缩):[{name, data}] → Buffer */
 /**
  * 从 GitHub releases 里按图库 id 汇总下载量。tag 形如 <id>-v1.2.0,
@@ -230,6 +260,7 @@ export function apply(ctx, config) {
         kind: 'prefix',
         path: ROUTE,
         handler(req, res) {
+          if (denyNonLoopback(req, res)) return
           const rawUrl = String(req.url || '').split('?')[0]
           // 浏览器对路径里的非 ASCII 一律百分号编码,而下面的白名单来自 index.db 里的
           // 原始路径(中文目录/文件名是未编码的),不先解码的话含非 ASCII 路径的图库
@@ -1150,6 +1181,7 @@ export function apply(ctx, config) {
       kind: 'exact',
       path: '/dsh-memes-api',
       async handler(req, res) {
+        if (denyNonLoopback(req, res)) return
         if (req.method === 'GET') {
           const u = new URL(req.url || '/', 'http://localhost')
           if (u.searchParams.has('remoteDir')) {
@@ -1494,6 +1526,7 @@ export function apply(ctx, config) {
       kind: 'exact',
       path: '/dsh-memes-export',
       handler(req, res) {
+        if (denyNonLoopback(req, res)) return
         if (req.method !== 'GET') {
           res.writeHead(405, { allow: 'GET' })
           res.end()
@@ -1545,6 +1578,7 @@ export function apply(ctx, config) {
       kind: 'exact',
       path: '/memes-panel',
       handler(req, res) {
+        if (denyNonLoopback(req, res)) return
         try {
           const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'panel.html'))
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
