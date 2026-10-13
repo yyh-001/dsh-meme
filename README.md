@@ -1,263 +1,91 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/hero.jpg?v=3" alt="dsh-meme — 找得到、发得出" width="100%" />
+  <img src="./docs/hero.jpg" alt="dsh-meme — 找得到、发得出、学得会" width="100%" />
 </p>
 
-<p align="center">
-  <strong>表情包插件 dsh-meme</strong> — 找得到、发得出、学得会
-</p>
+<p align="center"><strong>给 DeepSeek Harness 加上表情包：自己点图发，也能让 AI 接着斗图。</strong></p>
 
 <p align="center">
+  <a href="https://www.npmjs.com/package/dsh-meme"><img src="https://img.shields.io/npm/v/dsh-meme?style=flat-square" alt="npm version" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT" /></a>
-  <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/topic-dsh--plugin-amber?style=flat-square" alt="dsh-plugin" /></a>
-  <img src="https://img.shields.io/badge/Host-DeepSeek%20Harness-informational?style=flat-square" alt="DeepSeek Harness" />
-  <img src="https://img.shields.io/badge/Deps-node%3Asqlite%20only-blue?style=flat-square" alt="zero third-party deps" />
-  <a href="https://awesome-dsh-plugin.com"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin" /></a>
+  <img src="https://img.shields.io/badge/Node-%E2%89%A522.13-blue?style=flat-square" alt="Node ≥ 22.13" />
 </p>
 
 <p align="center">
-  <strong>中文</strong> · <a href="./README.en.md">English</a>
+  <strong>中文</strong> · <a href="./README.en.md">English</a><br />
+  <a href="https://yyh-001.github.io/dsh-meme/">预览表情包</a> ·
+  <a href="https://github.com/yyh-001/dsh-meme-packs">图库市场</a> ·
+  <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">反馈问题</a> ·
+  <a href="https://qm.qq.com/q/7AD2g70HqS">QQ 群 993579665</a>
 </p>
 
----
+## 能做什么
 
-宣传页：**[yyh-001.github.io/dsh-meme](https://yyh-001.github.io/dsh-meme/)**（表情包合集可预览；仓库加 topic [`dsh-meme-pack`](https://github.com/topics/dsh-meme-pack) + `previews/` 即收录）
-
-图库下载：**[yyh-001/dsh-meme-packs](https://github.com/yyh-001/dsh-meme-packs)**（下载 ZIP 后可在设置页直接导入）
-
-**dsh-meme**（原 `dsh-expression`）是 DeepSeek Harness 的表情包插件——找得到、发得出、学得会：
-
-- **纯文本也能斗图**：界面显示表情图片，模型收到的是 `[表情: 描述]`，无需图片输入能力
-- **AI 自动学图**：用户说「入库」时，`learn_meme` 收录最近一张用户附件（不必填附件 id），自动识别分类/描述
-- **情绪主动发图**：先选情绪桶，系统随机抽若干张 caption，模型挑一张贴进回复；想找特定的图（「猫」「比心」「摸鱼」）可以改用关键词搜
-- **像 QQ/微信 一样发图**：输入框 😊 悬浮面板点选表情直接发出
-- **零第三方依赖**：仅 node:sqlite，装完即用
-
-交流 / 反馈：**QQ 群 [993579665](https://qm.qq.com/q/7AD2g70HqS)**（[点击加入](https://qm.qq.com/q/7AD2g70HqS)）
-
-提 issue：设置页面板底部有「反馈建议 / 提 issue」，点开会直接打开仓库的[「反馈 / Bug」表单](https://github.com/yyh-001/dsh-meme/issues/new?template=feedback.yml)，并自动填好插件版本与运行环境。也可以自己到 [Issues](https://github.com/yyh-001/dsh-meme/issues/new/choose) 选模板。
-
----
+- **一键发图**：输入框旁点 😊，搜索、按图库或情绪筛选，点一张就发送。
+- **跟 AI 斗图**：按情绪或关键词找图；模型输出文字标记，对话里显示图片，发图无需模型支持图片输入。
+- **学会新图**：上传图片后说「把这张图入库」，AI 自动识别分类和描述。
+- **管理与分享**：多图库开关、上传与编辑、ZIP 导入导出、市场安装与更新。
+- **开箱即用**：内置大肥鱼图库（24 张），零第三方运行依赖，使用 Node 内置 SQLite。
 
 ## 安装
 
-已发布到 **npm**（`dsh-meme`），两种装法：
+在 DSH 中打开 **插件 → 添加插件**，输入 `dsh-meme` 并安装。
 
-**① 客户端里点着装（推荐）**
-
-打开 dsh → 左侧「插件」→ 右上「添加插件」→ 输入 **`dsh-meme`** → 安装。包名就是 npm 上的包名，一条命令都不用敲；「安装源」可以选官方的中国大陆镜像源。同一个入口也接受 GitHub 仓库地址或本地目录路径。装好后插件页里能随时开关，用不惯一键卸载。
-
-**② 命令行**
-
-一行装进任意 DSH profile（如 `~/.dsh/profiles/web/`）：
+也可以安装到指定 profile：
 
 ```bash
 dsh plugin --profile web add dsh-meme
-# 等价于:
-pnpm add dsh-meme
 ```
 
-旧包名 `dsh-expression` 已弃用，请改用 `dsh-meme`。插件内部 id 仍为 `dsh-expression`，已有安装不受影响。
+需要 **Node.js ≥ 22.13.0**。旧包名 `dsh-expression` 已弃用，内部插件 ID 保留兼容。
 
-或从 GitHub / 本地直接装（客户端「添加插件」里同样可以直接填这两种地址）：
+## 开始使用
 
-```bash
-pnpm add github:yyh-001/dsh-meme   # 或
-pnpm add file:/path/to/dsh-meme
-```
+| 想做什么 | 怎么操作 |
+| --- | --- |
+| 自己发表情 | 点输入框旁的 😊，选图发送；支持搜索、多选筛选和悬停预览 |
+| 让 AI 发图 | 说「发个开心的表情」或「找一张猫猫比心」 |
+| 收藏一张新图 | 上传图片，再说「把这张图入库」；自动识图需要支持图片输入的模型 |
+| 查看大图 | 点击聊天里的表情；滚轮缩放，双击复位，Esc 或点背景关闭 |
 
-> 注意：pnpm 有「新包安全期」（默认 24h），刚发布的版本会被静默回落到旧版；急用可在 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 里加上 `dsh-meme`。
+![输入框表情选择器：搜索、图库与情绪筛选](./docs/quick-picker.png)
 
-> 运行时要求：**Node ≥ 22.13.0**（依赖内置 `node:sqlite` 模块；22.5–22.12 需 `--experimental-sqlite` 标志，Node 20 不支持）。
+## 图库管理
 
-## 配置
+打开 **设置 → 表情包**：
 
-内置一套图库：`dafeiyu-001`（大肥鱼，24 张），开箱即用，**无需任何配置**。「官方表情包 1 号」（`official-001`）已不再随插件分发，需要的话到设置页「发现」里一键安装（市场里有带 SHA-256 校验的 Release ZIP）。
+- **图库**：点卡片管理图片；卡片开关决定 AI 能否使用该图库，可同时启用多个。支持新建、导入、导出、投稿和删除，有新版时显示「更新」。
+- **发现**：预览市场图库，一键安装；Release ZIP 安装时校验 SHA-256。
+- **设置**：修改扫描目录，开启或关闭 AI 主动发表情，编辑提示词。
 
-设置页「图库」页：点卡片上的「编辑」切入该图库（管理图片用），点卡片右上角的开关决定**模型能不能用这个图库发图**（可以同时开多个）。插件会扫描内置 `memes/*` 以及「扫描目录」（默认 `~/.dsh/meme-packs`）下带 `index.db` 的子文件夹。导入 ZIP 也会放进扫描目录并立刻切过去。设置存在 `~/.dsh/dsh-expression.json`，升级插件不丢。
+![图库管理：已安装图库与独立开关](./docs/panel-library.png)
 
-## 装完即用
+默认扫描 `~/.dsh/meme-packs`，设置保存在 `~/.dsh/dsh-expression.json`，升级插件会保留。更多图库可在「发现」安装，也可导入别人分享的 ZIP。
+
+## 分享自己的图库
+
+1. 在「图库」新建图包库，添加图片。
+2. 点 **导出** 得到 ZIP，朋友用 **导入图库** 即可安装。
+3. 想收录到市场，点 **投稿**：插件导出 ZIP 并打开预填的 GitHub 表单；登录后附上 ZIP、图片来源与许可，再提交审核。
+
+请使用插件导出的 ZIP。GitHub 的「Download ZIP」是仓库源码压缩包，不能替代图库分享包。导出完成后仍需在 GitHub 提交，审核通过才会收录。
+
+## 工具与扩展
+
+| 工具 | 用法 |
+| --- | --- |
+| `send_meme` | `tag` 按情绪随机抽图，`query` 按描述、关键词或文件名搜索；范围为所有启用的图库 |
+| `learn_meme` | 默认收录最近一张用户图片，也可指定 `attachmentId` 或 `imageUrl` |
 
 ```text
-用户: 发个无语的表情包
-模型: send_meme tag=sad → 随机几张 caption → 把 [表情: …] 贴进回复
-前端: 按描述配图，对话里看起来就是表情
+send_meme tag=happy
+send_meme query="猫 比心"
+learn_meme
 ```
 
-输入框左侧点 **😊**（微信同款笑脸）直接选图一键发出，无需让模型代劳。
+情绪桶：`happy` / `angry` / `sad` / `shy` / `confused` / `daily`。模型应把候选中的 `[表情: 描述]` 原样写进回复；前端只在聊天内容中配图。没有合适的候选时，换关键词或用文字回复。
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/chat-example.png" alt="斗图示例：用户发一张，模型接一张，前端把 [表情: 描述] 配成图" width="80%" />
-</p>
+自建图库目录或市场源见 [远程图库规范](./docs/remote-pack-spec.md)。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接入 QQ 发图。
 
-## 工具
+插件 HTTP 接口仅支持本机回环地址（`localhost` / `127.0.0.1` / `[::1]`），通过局域网地址或自定义域名访问会被拒绝。
 
-| 工具 | 作用 |
-|------|------|
-| `send_meme` | 取候选，两种搜法：`tag` 情绪随机抽、`query` 关键词精确搜（caption/关键词/图名，可多词）；范围都是**所有打开开关的图库**。Web 模式把 `[表情: 描述]` 写进回复，前端配图 |
-| `learn_meme` | **学图**：用户说「入库」即可（默认最近一张用户附件）；也可传 `attachmentId` / `imageUrl` |
-
-## 发图格式（默认）
-
-**界面显示表情图片，模型只读写文字 token**——不触发 dsh 的图片准入检查：
-
-- 模型和悬浮窗都发 `[表情: 描述]`（不要带网址）
-- 前端只在**对话气泡**里按 caption 配图（Think / 轨迹 / 工具卡保持纯文字）
-- 引号差异（`“”` / `""`）会折叠后再匹配
-- 描述没抄中候选时：先按分词在图库 caption/关键词里兜底匹配；仍无命中就显示描述原文，不裸露 `[表情: ...]` 标记
-- 直接上传的图片仍是附件，原样进会话；学图走 `learn_meme`
-
-## 界面
-
-设置页「表情包」面板三个一级标签页（没有二级标签）：
-
-- **图库**：卡片列出已安装图库（内置 / 导入 / 自定义 / 市场下载），封面取图库自己的一张图（本地路由，不依赖远程预览图），显示张数与分类标签；**点卡片即切到该图库并进入它的表情包页**（卡片整张可点，卡内按钮与开关各自吞掉点击），页内可搜索/筛选/上传/编辑/删除，左上角「← 图库列表」返回
-- **图库开关**：每张卡片右侧一个开关，**打开后模型才能用这个图库发图**，可以同时打开多个（不再用「使用中 / 已安装」徽标，状态只看开关和按钮）（`send_meme` 的候选从所有打开的图库里抽；一个都没开时模型会被告知去设置页打开）。安装/导入/新建图库会自动切过去并打开它的开关
-- **新建图包库 / 导入图库**：图库页顶部；导入是选一个插件导出的 ZIP，导入后自动切过去。新建的图库会自动打开开关
-- **导出**：每张图库卡片上都有，导出该图库的 ZIP（不必先切过去）
-- **更新**：只在市场里有更新版本时才显示（比对图库自己的版本与市场目录的版本）；发现页只负责安装，装过的条目不给按钮，要更新到图库页
-- **删除**：图库卡片上的「删除」——内置、市场下载、自建/导入都走这一个入口（二次确认在应用内弹窗里，不是浏览器原生框）。删市场下载的会连订阅记录一起清掉；内置包删了，插件升级或重装后会随包回来；删当前图库会自动先切走(管理连接挂在它上面)
-- **投稿**：当前图库的卡片上，导出图库 ZIP 并打开预填好的 GitHub 投稿表单
-- **发现**：展示 GitHub 图库目录，**点卡片可预览图库的图片**（已安装的读本地图库；清单热链的包直接读它的清单，能列出上百张；其余用市场目录里的预览图。点图可开原图）；卡片上还会显示该图库的下载量（服务端代拉 GitHub Release 的 `download_count`，同一图库的多版本相加，缓存 30 分钟；清单热链的包没有 Release 可数就不显示），默认按下载量从多到少排列（没有下载量的排在最后，同分保持目录原顺序）。点「安装」下载 Release ZIP、校验 SHA-256 并自动切换，**下载期间卡片上有进度条**（上游给了 `content-length` 显示百分比，没给则显示滚动条纹 + 已下载字节）；已安装的条目不显示按钮（更新在图库页）
-- **设置**：扫描目录（带「选择目录」应用内浏览器）、陪伴提示词开关（关掉后模型不再主动斗图）、编辑提示词
-- **上传弹窗**：选图预览 + 分类下拉（选择/新建/删除分类）+ 描述 + 关键词
-- **编辑弹窗**：同款分类下拉，改分类/描述/关键词
-- **分类中文显示**：下拉与卡片显示「生气 (angry)」式中文
-- 分类筛选即时生效
-
-<p align="center">
-  <b>图库</b>：已安装图库卡片列表，点卡片进它的表情包页<br />
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-library.png" alt="图库页：已安装图库卡片列表" width="80%" />
-</p>
-
-<p align="center">
-  <b>发现</b>：图库市场（点卡片预览图片、按下载量排序、安装带进度条）<br />
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-discover.png" alt="发现页：图库市场" width="80%" />
-</p>
-
-<p align="center">
-  <b>设置</b>：扫描目录与陪伴提示词开关<br />
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/panel-settings.png" alt="设置页：扫描目录与提示词开关" width="80%" />
-</p>
-
-输入框 😊 一键发表情包：点开面板 → 搜索框 + **筛选开关**（默认收起，展开是**图库**、**情绪**两排多选 chip，都不选 = 全部；有选中时开关上显示选了几个，右侧实时显示「共 N 张」；情绪只列当前图库范围内真实存在的，带张数）→ 缩略图**悬停出大图预览**（144px 大图 + 情绪 + 描述 + 文件名，贴边时自动翻到另一侧）→ 点一张直接发出。面板一行 5 格、高度固定在半屏左右（46vh，底边贴着输入框、上缘不越宿主顶栏），图多时网格内部滚动（一次最多画 240 格，用搜索/筛选缩小范围）。
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/yyh-001/dsh-meme/main/docs/quick-picker.png" alt="输入框一键发表情包" width="80%" />
-</p>
-
-## 分享自己的表情包
-
-两条路：发给朋友，或提交到公共的 [`dsh-meme-packs`](https://github.com/yyh-001/dsh-meme-packs) 图库市场。
-
-**新建并投稿到市场**
-
-设置页 → 图库 → 顶部 **新建图包库**，填写名称、ID 和简介，创建后自动切换到空图库（并打开它的开关）。添加图片后点当前图库卡片上的 **投稿** → 导出 ZIP 并打开投稿页。
-
-插件会下载当前图库 ZIP 并打开预填名称、简介和图片数量的 GitHub 投稿页。登录 GitHub 后，将 ZIP 拖入“图库 ZIP”一栏，补充图片来源与许可，再手动提交。审核通过后收录到市场。无需配置 Token，也不需要付费上传服务。若浏览器拦截新页面，可点击提示下方的“打开 GitHub 投稿页”。导出完成不代表已经投稿或收录。
-
-**发给朋友**
-
-1. 设置页 → 图库 → 该图库卡片上的 **导出**，得到 `dsh-meme-<图库id>.zip`
-2. 把这个 ZIP 发出去
-3. 对方设置页 → 图库 → 顶部 **导入图库**，选这个 ZIP，会自动切换到新图库
-
-请用插件导出的 ZIP。GitHub 仓库页上的「Download ZIP / 下载源码」是压缩过的，导入会失败。
-
-导入/安装时会顺带做一次**高频关键词清洗**：某个关键词出现在图库里 ≥50% 的条目时（外部站点常把「角色大标签」写进每一条，搜它命中全库），它对检索没有信息量，会从 keywords 里剔掉；条目数 <8 的小图库不动手（那里的重复词往往是真关键词）。只改 keywords，图片和分类都不动。
-
-**挂到宣传页**
-
-1. 先按上面导出 ZIP，解压成一个文件夹（里面应有 `index.db`、`manifest.json`、`memes/`）
-2. 新建 GitHub 仓库，把文件夹内容放进仓库根目录
-3. 加 `previews/`，放 6–12 张缩略图（jpg/png），宣传页靠它们做预览
-4. 仓库 Settings → Topics 加上 [`dsh-meme-pack`](https://github.com/topics/dsh-meme-pack)
-
-可选：把插件导出的那个 ZIP 挂到 GitHub Release，别人就能直接下载再导入。也可以 `git clone` 之后，把仓库放进扫描目录（设置页「扫描目录」里改路径，或用「选择目录」浏览）。
-
-## 图库市场
-
-设置页「发现」默认读取 [`dsh-meme-packs/catalog.json`](https://github.com/yyh-001/dsh-meme-packs/blob/main/catalog.json)：点卡片可以预览图库里的图，点「安装」直接下载 GitHub Release ZIP、校验 SHA-256、安装并切换，不需要先手动下载。
-
-- GitHub Release ZIP 与逐图清单两种格式都支持，规范见 **[docs/remote-pack-spec.md](./docs/remote-pack-spec.md)**
-- 目录源可换：默认 raw 优先、jsDelivr 兜底（raw 更及时，jsDelivr 在部分网络下更通）；要换成自己的目录，写 `settings.remoteDirUrl` 或插件 patch 里的 `config.remoteDirUrl`
-- 界面暂时只提供「从目录安装」这一条路；按逐图清单订阅（增量拉图）的后端仍在，等需要了再把入口放出来
-
-## 它做什么
-
-| 能力 | 说明 |
-|------|------|
-| **按情绪抽图** | 六个情绪桶：happy / angry / sad / shy / confused / daily；随机抽 N 张 caption 给模型挑 |
-| **按关键词搜图** | `query` 在 caption/关键词/图名里子串搜，可空格分隔多个词；全部命中的优先，同一档内随机（反复搜能换一批） |
-| **自动学图** | `learn_meme` 默认收录最近一张用户附件，也可传 URL；识图需当前模型支持图片输入 |
-| **文字 token 发图** | `[表情: 描述]` → 前端配图；只渲染对话气泡 |
-| **输入框一键发图** | 会话输入框左侧 😊 按钮 → 悬浮面板选图（图库/情绪多选筛选 + 搜索 + 悬停大图预览）→ 一点即发 |
-| **情绪主动发图** | 气氛对了就主动甩图；发完短接，让图自己说话 |
-| **管理 API** | 上传 / 编辑 / 删除 / 删除分类，全部在设置页完成，数据持久 |
-| **图库切换** | 设置页「图库」页点卡片上的「编辑」切换并进入；扫描目录默认 `~/.dsh/meme-packs` |
-| **导出 / 导入** | 图库一键打包 ZIP 分享，导入别人的包自动切换（零依赖实现） |
-| **图库市场** | 发现页读取 GitHub 目录，一键安装带 SHA-256 校验的 Release ZIP；图库页在有新版本时才显示「更新」 |
-
-## 日常命令（模型视角）
-
-```text
-send_meme tag=sad limit=8          # 难过桶随机 8 张，挑一行 [表情: …] 贴进回复
-send_meme tag=happy                # 开心/卖萌
-send_meme query="猫"                # 关键词搜：caption/关键词/图名里带「猫」的（比抽情绪准）
-send_meme query="生气 猫"           # 多个词：全都命中的排前面；tag+query = 在该情绪里筛
-learn_meme                         # 收录最近一张用户图（不必填 id）
-learn_meme imageUrl="https://…"    # 收录任意图片 URL
-```
-
-情绪字典：`happy` 开心（卖萌/可爱/喜欢）/ `angry` 生气 / `sad` 难过（无语/求饶）/ `shy` 害羞 / `confused` 困惑惊讶 / `daily` 日常（睡觉/上班/早上好）。只给 `tag` 就随机换一批；给 `query` 则按词搜，整词没命中会自动拆词重试，仍未命中再退回该情绪随机抽。
-
-## 给模型的三条铁律
-
-完整约定见 `send_meme` 工具描述。
-
-1. 把候选里的 `[表情: 描述]` 整段原样写进回复，不要加网址、不要改成 markdown 图片
-2. 没命中就换词、换情绪或回文字，别硬发
-3. 发完保持简短，让图自己说话——不复述、不描述图的内容
-
-## 图库来源
-
-随插件内置的只有一套；另两套按需获取：
-
-- **大肥鱼**（`id: dafeiyu-001`，24 张鲸鱼娘 chibi）内置：`happy` 3 张、`confused` 2 张、`sad` 2 张、`shy` 2 张，以及 `angry` / `baka` / `color` / `cpu` / `daily` / `fool` / `givemoney` / `like` / `meow` / `morning` / `see` / `sigh` / `sleep` / `surprised` / `work` 各 1 张。
-- **大肥鱼·学图**（`id: dafeiyu-learned`，25 张，维护者 [hZsFN](https://github.com/hZsFN)）**不内置**：来自 [PR #3](https://github.com/yyh-001/dsh-meme/pull/3) 的「自动学图」表情，原来是并进 dafeiyu-001 的，现已拆成独立图库。
-- **官方表情包1号**（`id: official-001`，已改为市场安装、不再内置）来自 **Astrbot mememanager 官方初始表情包**：
-
-- 上游仓库：[anka-afk/astrbot-meme-pack-official-01](https://github.com/anka-afk/astrbot-meme-pack-official-01)（`main` 分支），维护者 **anka-afk**
-- 构成：`index.db`（SQLite 索引，含每张 caption/关键词）+ `manifest.json`（分类说明 + 来源标注）+ `memes/<tag>/` 图片 + `previews/`
-- ⚠️ 上游**未提供 LICENSE**：这套图缺乏显式的再分发许可。随插件打包作为个人默认库使用没问题；如需公开对外分发，请保留 manifest.json 中的上游来源标注。
-
-## 接到你的 Agent
-
-| 组件 | 说明 |
-|------|------|
-| **dsh-meme** | 本插件：`MemesStore`（情绪抽图）+ `send_meme`（发送）+ `learn_meme`（学图）+ 管理 API |
-| **[dsh-companion](https://github.com/yyh-001/dsh-companion)** | 人设 + Hermes 记忆 + 消息通道；提供发图服务 |
-| **图库** | 内置 `dafeiyu-001`；`official-001` 和其它图库在市场「发现」页安装，也可导入分享包 |
-
-```text
-dsh-meme/
-  index.js          插件入口：memeRoot 配置 + 管理 API + learn_meme/识图
-  memes.js          MemesStore：SQLite 索引 + 情绪桶随机抽图 + 路径安全
-  client.js         前端：设置页面板(上传/编辑/删除) + 😊 悬浮窗 + [表情: 描述] 配图
-  cordis.patch.yml  bundle patch(纯 insert,热挂载免重启)
-  locale/           插件页展示元信息(en / zh)
-  memes/
-    dafeiyu-001/    内置大肥鱼（24 张鲸鱼娘）
-  package.json      name / inject / peer deps
-  README.md
-  README.en.md      英文
-  LICENSE
-```
-
-## 已知限制
-
-- `learn_meme` 自动识图依赖当前默认模型支持图片输入（不支持时可手动指定 tag/caption）；
-- 磁盘上仍是细 tag（angry/baka/…），模型只认六个情绪桶；caption 对不齐时前端会折叠引号后再配图。
-
-## License
-
-[MIT](./LICENSE)
+代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。

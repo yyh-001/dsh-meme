@@ -1,0 +1,38 @@
+{
+  "quick-picker": {
+    "x": 378.9473684210526,
+    "y": 80.0,
+    "w": 1162.1052631578948,
+    "h": 920,
+    "pageH": 1080,
+    "source": "docs/quick-picker.png",
+    "sourceResolution": [
+      600,
+      475
+    ]
+  },
+  "panel-library": {
+    "x": 576.0582010582011,
+    "y": 80.0,
+    "w": 767.8835978835979,
+    "h": 920,
+    "pageH": 1080,
+    "source": "docs/panel-library.png",
+    "sourceResolution": [
+      631,
+      756
+    ]
+  },
+  "panel-discover": {
+    "x": 576.0582010582011,
+    "y": 80.0,
+    "w": 767.8835978835979,
+    "h": 920,
+    "pageH": 1080,
+    "source": "docs/panel-discover.png",
+    "sourceResolution": [
+      631,
+      756
+    ]
+  }
+}
