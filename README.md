@@ -15,7 +15,7 @@
   <a href="https://yyh-001.github.io/dsh-meme/">预览表情包</a> ·
   <a href="https://github.com/yyh-001/dsh-meme-packs">图库市场</a> ·
   <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">反馈问题</a> ·
-  <a href="https://qm.qq.com/q/7AD2g70HqS">QQ 群 993579665</a>
+  <a href="https://qm.qq.com/q/7AD2g70HqS">交流反馈群</a>
 </p>
 
 ## 能做什么

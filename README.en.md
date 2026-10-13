@@ -15,7 +15,7 @@
   <a href="https://yyh-001.github.io/dsh-meme/">Pack showcase</a> ·
   <a href="https://github.com/yyh-001/dsh-meme-packs">Pack marketplace</a> ·
   <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">Report an issue</a> ·
-  <a href="https://qm.qq.com/q/7AD2g70HqS">QQ group 993579665</a>
+  <a href="https://qm.qq.com/q/7AD2g70HqS">Community &amp; feedback group</a>
 </p>
 
 ## Features
