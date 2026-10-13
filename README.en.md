@@ -47,6 +47,12 @@ Requires **Node.js ≥ 22.13.0**. The old package name `dsh-expression` is depre
 | Save a new image | Upload it and say “save this image to my meme pack”; automatic recognition requires an image-capable model |
 | View a larger image | Click a meme in chat; scroll to zoom, double-click to reset, and press Esc or click the background to close |
 
+In chat: send a meme, and the AI replies with one.
+
+<p align="center">
+  <img src="./docs/chat-example.png" alt="Meme exchange: the user teases Big Fat Fish, and the AI replies with a meme" width="80%" />
+</p>
+
 ![Composer picker with search, pack and mood filters](./docs/quick-picker.png)
 
 ## Manage packs

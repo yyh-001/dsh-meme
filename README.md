@@ -47,6 +47,12 @@ dsh plugin --profile web add dsh-meme
 | 收藏一张新图 | 上传图片，再说「把这张图入库」；自动识图需要支持图片输入的模型 |
 | 查看大图 | 点击聊天里的表情；滚轮缩放，双击复位，Esc 或点背景关闭 |
 
+对话效果：你发一张，AI 接着回一张。
+
+<p align="center">
+  <img src="./docs/chat-example.png" alt="斗图示例：吃白饭的大肥鱼，用户发一张，AI 接着回一张" width="80%" />
+</p>
+
 ![输入框表情选择器：搜索、图库与情绪筛选](./docs/quick-picker.png)
 
 ## 图库管理
