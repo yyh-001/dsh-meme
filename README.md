@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/hero.jpg" alt="dsh-meme — 找得到、发得出、学得会" width="100%" />
+  <img src="./docs/hero-banner.jpg" alt="dsh-meme — 找得到、发得出、学得会" width="100%" />
 </p>
 
 <p align="center"><strong>给 DeepSeek Harness 加上表情包：自己点图发，也能让 AI 接着斗图。</strong></p>

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/hero.jpg" alt="dsh-meme — find, send and learn memes" width="100%" />
+  <img src="./docs/hero-banner.jpg" alt="dsh-meme — find, send and learn memes" width="100%" />
 </p>
 
 <p align="center"><strong>Memes for DeepSeek Harness: pick an image yourself, or let your AI join in.</strong></p>
