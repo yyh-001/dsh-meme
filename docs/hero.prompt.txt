@@ -1,0 +1,11 @@
+Generator: built-in image_gen
+Reference: ../icon.jpg
+
+Use case: ads-marketing.
+Asset type: GitHub README header banner for dsh-meme, a DeepSeek Harness meme/sticker plugin.
+Primary request: redesign a very simple, beautiful, polished header. Generate ONE finished wide horizontal banner, aspect ratio 3:1, ideally 2400x800.
+Input image: the supplied icon.jpg is a CHARACTER IDENTITY REFERENCE only. Keep the recognizable cute blue-haired whale maid chibi mascot: blue eyes, white maid headband, small blue bows, navy maid outfit and tiny whale motif. Reillustrate cleanly with the same friendly winking thumbs-up pose. No need to reproduce the square icon background.
+Composition: generous whitespace, comfortable margins. On the left, large precise lowercase sans-serif typography "dsh-meme" in deep navy, carefully kerned, occupying roughly half the width. Immediately below, a single small Chinese line "给 AI 聊天，加点表情。" in softer slate blue. On the right, just ONE mascot, compact and airy, fully visible, about 65 percent of banner height. Let text and illustration breathe. Align and balance as a refined editorial product cover.
+Background: nearly white with a very subtle cool blue wash toward the character. Palette restrained: warm white, deep navy and soft blue. Crisp tasteful flat anime illustration, clear dark linework, gentle shading.
+Text (verbatim), exactly two lines total: "dsh-meme" and "给 AI 聊天，加点表情。"
+Constraints: extreme simplicity, no feature panels, no cards, no UI mockup, no duplicate mascot, no extra text, no badges, no borders, no decorative bubbles or sparkles, no busy underwater scenery, no logos from other brands, no watermark. The banner should remain legible and beautiful when displayed at 900px wide.
