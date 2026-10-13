@@ -7,20 +7,20 @@
   <meta name="description" content="DeepSeek Harness 表情包插件。点一张就发出去，模型只写文字，对话里直接出图。" />
   <meta property="og:title" content="dsh-meme" />
   <meta property="og:description" content="跟 AI 斗图。找得到、发得出、学得会。" />
-  <meta property="og:image" content="./hero-banner-v3.jpg" />
-  <link rel="icon" href="./stickers/s1.jpg" />
+  <meta property="og:image" content="./hero-banner-v4.jpg" />
+  <link rel="icon" href="./dafeiyu/ok.jpg" />
   <style>
     :root {
-      --night: #0b0a12;
-      --panel: #14131c;
-      --cream: #f7ecd6;
-      --ember: #ff6b22;
-      --tide: #3ce0c2;
-      --mute: #8e8898;
-      --line: #2a2836;
+      --paper: #f8fbff;
+      --panel: #ffffff;
+      --ink: #17345f;
+      --blue: #386ae8;
+      --accent: #4772b8;
+      --mute: #647895;
+      --line: #dce7f6;
     }
     * { box-sizing: border-box; }
-    html, body { margin: 0; background: var(--night); color: var(--cream); }
+    html, body { margin: 0; background: var(--paper); color: var(--ink); }
     body {
       font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
       min-height: 100%;
@@ -32,22 +32,17 @@
       inset: 0;
       pointer-events: none;
       background:
-        radial-gradient(900px 520px at 18% -10%, rgba(255, 107, 34, .22), transparent 60%),
-        radial-gradient(700px 480px at 92% 8%, rgba(60, 224, 194, .12), transparent 55%);
-    }
-    .grain {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      opacity: .16;
-      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+        radial-gradient(900px 620px at 90% 10%, rgba(99, 160, 255, .13), transparent 65%),
+        linear-gradient(180deg, #ffffff 0%, rgba(244, 249, 255, .5) 100%);
     }
     .page { position: relative; z-index: 1; }
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1rem 1.2rem;
+      padding: 1.35rem 1.5rem;
+      max-width: 72rem;
+      margin: 0 auto;
     }
     .stars, .lang {
       display: inline-flex;
@@ -57,31 +52,31 @@
       padding: 0 .75rem;
       border: 1px solid var(--line);
       border-radius: 999px;
-      color: var(--cream);
+      color: var(--ink);
       text-decoration: none;
       font-size: .78rem;
-      background: rgba(20,19,28,.8);
+      background: rgba(255,255,255,.9);
     }
     .lang { padding: 0 .22rem; }
     .lang button {
       appearance: none; border: 0; background: 0; color: var(--mute);
       font: inherit; padding: .18rem .55rem; border-radius: 999px; cursor: pointer;
     }
-    .lang button[aria-pressed="true"] { background: var(--cream); color: #111; }
+    .lang button[aria-pressed="true"] { background: #eaf1ff; color: #285bce; }
     .stage {
       display: grid;
-      gap: 1.5rem;
-      padding: 0 1.1rem 3.5rem;
+      gap: 2.5rem;
+      padding: 2.2rem 1.5rem 5rem;
       max-width: 68rem;
       margin: 0 auto;
       align-items: center;
     }
     @media (min-width: 900px) {
-      .stage { grid-template-columns: 1.05fr .95fr; min-height: calc(100svh - 4.5rem); padding-top: .4rem; }
+      .stage { grid-template-columns: 1.05fr .95fr; min-height: min(48rem, calc(100svh - 5rem)); }
     }
     .kicker {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      color: var(--tide);
+      color: var(--accent);
       letter-spacing: .18em;
       font-size: .72rem;
       text-transform: uppercase;
@@ -89,45 +84,26 @@
     }
     .poster {
       margin: 0;
-      font-weight: 900;
-      letter-spacing: -.07em;
-      line-height: .88;
-      font-size: clamp(3.4rem, 12vw, 6.4rem);
+      font-weight: 750;
+      letter-spacing: -.04em;
+      line-height: 1.12;
+      font-size: clamp(3.4rem, 8vw, 5.8rem);
     }
     .poster em {
       font-style: normal;
-      color: var(--ember);
+      color: var(--blue);
       display: block;
     }
     .sub {
       margin: 1rem 0 0;
       font-size: 1.15rem;
       font-weight: 700;
-      letter-spacing: .08em;
+      letter-spacing: .02em;
     }
-    .lead { margin: .55rem 0 0; color: var(--mute); max-width: 22rem; line-height: 1.55; }
-    .token {
-      display: inline-block;
-      margin-top: .9rem;
-      padding: .35rem .7rem;
-      border-radius: .5rem;
-      background: #1a1824;
-      color: var(--tide);
-      font: 500 .82rem/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      border: 1px solid #333047;
-    }
-    .cta { margin-top: 1.4rem; display: grid; gap: .65rem; max-width: 22rem; }
-    .btn {
-      display: flex; align-items: center; justify-content: center;
-      min-height: 3.15rem; border-radius: 999px; font: inherit; font-weight: 750;
-      cursor: pointer; text-decoration: none; border: 1px solid transparent;
-    }
-    .btn-go { background: var(--ember); color: #140800; }
-    .btn-go:hover { filter: brightness(1.08); }
-    .btn-ghost { background: transparent; color: var(--cream); border-color: #3c394c; }
-    .cmd { margin: .35rem 0 0; color: #6f6a7c; font: 500 .75rem ui-monospace, Menlo, Consolas, monospace; }
+    .lead { margin: .7rem 0 0; color: var(--mute); max-width: 25rem; line-height: 1.8; }
+    .cmd { margin: 1.4rem 0 0; color: var(--ink); font-size: .85rem; line-height: 1.7; }
     .meta { margin: .85rem 0 0; color: var(--mute); font-size: .82rem; }
-    .meta a { color: var(--cream); }
+    .meta a { color: var(--accent); }
     .fight {
       position: relative;
       min-height: 28rem;
@@ -139,7 +115,7 @@
       border: 1px solid var(--line);
       border-radius: 1.7rem;
       padding: .85rem .85rem 1rem;
-      box-shadow: 0 30px 80px rgba(0,0,0,.45);
+      box-shadow: 0 24px 65px rgba(53,94,157,.12);
       position: relative;
       z-index: 2;
     }
@@ -147,7 +123,7 @@
       display: flex; justify-content: space-between; align-items: center;
       color: var(--mute); font-size: .72rem; margin-bottom: .7rem;
     }
-    .dot { width: .45rem; height: .45rem; border-radius: 50%; background: var(--tide); box-shadow: 0 0 10px var(--tide); }
+    .dot { width: .45rem; height: .45rem; border-radius: 50%; background: var(--blue); }
     .thread { min-height: 16.5rem; display: flex; flex-direction: column; gap: .55rem; justify-content: flex-end; }
     .hint-tap { color: var(--mute); font-size: .82rem; text-align: center; padding: 3.4rem .6rem; }
     .bubble {
@@ -157,18 +133,17 @@
     }
     .bubble img {
       display: block; width: 9.5rem; height: 9.5rem; object-fit: cover;
-      border-radius: .85rem; background: #000;
+      border-radius: .85rem; background: #fff;
     }
-    .bubble code {
-      display: block; margin-top: .35rem; color: var(--tide);
-      font: 500 .7rem ui-monospace, Menlo, Consolas, monospace;
+    .bubble p {
+      margin: .35rem 0 0; color: var(--mute); font-size: .75rem; text-align: center;
     }
     .sticker {
       position: absolute;
-      width: 6.1rem; height: 6.1rem; padding: 0; border: 0;
+      width: 6.1rem; height: 6.1rem; padding: 0; border: 1px solid var(--line);
       border-radius: 1rem; overflow: hidden; cursor: pointer;
-      box-shadow: 0 14px 28px rgba(0,0,0,.5);
-      background: #000;
+      box-shadow: 0 12px 28px rgba(53,94,157,.14);
+      background: #fff;
       z-index: 3;
       transition: transform .2s ease;
     }
@@ -180,7 +155,8 @@
     .s4 { bottom: 18%; right: -1%; transform: rotate(-8deg); }
     .s5 { bottom: 2%; left: 18%; transform: rotate(5deg); }
     @media (max-width: 899px) {
-      .fight { min-height: 26rem; }
+      .stage { gap: 3.5rem; }
+      .fight { min-height: 26rem; max-width: 30rem; width: 100%; margin: 0 auto; }
       .sticker { width: 4.6rem; height: 4.6rem; }
       .s3, .s5 { display: none; }
     }
@@ -196,7 +172,7 @@
       from { transform: translateY(16px) scale(.86); opacity: 0; }
       to { transform: none; opacity: 1; }
     }
-    .rest { max-width: 42rem; margin: 0 auto; padding: 0 1.1rem 4rem; }
+    .rest { max-width: 48rem; margin: 0 auto; padding: 0 1.5rem 4rem; }
     .shot {
       border-radius: 1.1rem; overflow: hidden; border: 1px solid var(--line);
       margin: 0 0 2.4rem;
@@ -204,17 +180,17 @@
     .shot img { display: block; width: 100%; }
     .packs h2 { margin: 0 0 .4rem; font-size: 1.2rem; }
     .hint { margin: 0 0 1rem; color: var(--mute); font-size: .86rem; line-height: 1.5; }
-    .hint code { color: var(--ember); font-family: ui-monospace, Menlo, Consolas, monospace; }
+    .hint code { color: var(--blue); font-family: ui-monospace, Menlo, Consolas, monospace; }
     .grid { display: grid; gap: .85rem; }
     .pack {
       display: grid; gap: .7rem; width: 100%; padding: .7rem;
       border-radius: 1rem; border: 1px solid var(--line); background: var(--panel);
       color: inherit; text-align: left; cursor: pointer; font: inherit;
     }
-    .pack:hover { border-color: #4a465c; }
+    .pack:hover { border-color: #8bb0f6; box-shadow: 0 8px 24px rgba(53,94,157,.08); }
     .mosaic {
       display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px;
-      border-radius: .7rem; overflow: hidden; background: #09090c;
+      border-radius: .7rem; overflow: hidden; background: #f3f7fd;
       min-height: 4.6rem;
     }
     .mosaic img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
@@ -225,25 +201,25 @@
     }
     .pack strong { display: block; font-size: .98rem; }
     .pack p { margin: .25rem 0 0; color: var(--mute); font-size: .82rem; }
-    .pack .row { margin-top: .4rem; font-size: .75rem; color: #c9c2b4; }
+    .pack .row { margin-top: .4rem; font-size: .75rem; color: var(--accent); }
     .empty { color: var(--mute); font-size: .88rem; }
-    .ghost-mosaic { height: 4.6rem; background: repeating-linear-gradient(90deg,#1a1822 0 16%,#121018 0 20%); }
+    .ghost-mosaic { height: 4.6rem; background: repeating-linear-gradient(90deg,#eaf1fb 0 16%,#f5f8fd 0 20%); }
     .modal {
       position: fixed; inset: 0; z-index: 20;
-      background: rgba(6,5,10,.78); display: grid; place-items: center;
+      background: rgba(23,52,95,.32); backdrop-filter: blur(6px); display: grid; place-items: center;
       padding: 1rem;
     }
     .modal[hidden] { display: none; }
     .sheet {
       width: min(100%, 42rem); max-height: 88vh; overflow: auto;
-      background: #12111a; border: 1px solid var(--line); border-radius: 1.15rem;
+      background: #fff; border: 1px solid var(--line); border-radius: 1.15rem;
       padding: 1rem 1rem 1.15rem;
     }
     .sheet-top { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; }
     .sheet-top h3 { margin: 0; font-size: 1.05rem; }
     .sheet-top p { margin: .3rem 0 0; color: var(--mute); font-size: .82rem; }
     .x {
-      appearance: none; border: 0; background: #1d1b26; color: var(--cream);
+      appearance: none; border: 0; background: #eef4ff; color: var(--ink);
       width: 2rem; height: 2rem; border-radius: 999px; cursor: pointer; font-size: 1.1rem;
     }
     .gallery {
@@ -251,26 +227,25 @@
     }
     @media (max-width: 560px) { .gallery { grid-template-columns: repeat(3, 1fr); } }
     .gallery button {
-      padding: 0; border: 0; background: #000; border-radius: .55rem; overflow: hidden; cursor: zoom-in;
+      padding: 0; border: 1px solid var(--line); background: #fff; border-radius: .55rem; overflow: hidden; cursor: zoom-in;
     }
     .gallery img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
-    .sheet-link { display: inline-flex; color: var(--tide); font-size: .85rem; }
+    .sheet-link { display: inline-flex; color: var(--blue); font-size: .85rem; }
     .zoomer {
-      position: fixed; inset: 0; z-index: 30; background: rgba(0,0,0,.88);
+      position: fixed; inset: 0; z-index: 30; background: rgba(23,52,95,.65);
       display: grid; place-items: center; padding: 1.2rem; cursor: zoom-out;
     }
     .zoomer[hidden] { display: none; }
     .zoomer img { max-width: min(92vw, 28rem); max-height: 86vh; border-radius: .8rem; }
     footer { text-align: center; color: var(--mute); font-size: .75rem; padding-top: 1.6rem; }
-    footer a { color: var(--cream); }
-    :focus-visible { outline: 2px solid var(--ember); outline-offset: 3px; }
+    footer a { color: var(--accent); }
+    :focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
     @media (prefers-reduced-motion: reduce) {
       * { animation: none !important; transition: none !important; }
     }
   </style>
 </head>
 <body>
-  <div class="grain"></div>
   <div class="page">
     <header>
       <a class="stars" href="https://github.com/yyh-001/dsh-meme" target="_blank" rel="noreferrer">
@@ -288,22 +263,17 @@
         <p class="kicker">dsh-meme</p>
         <h1 class="poster" data-i="poster">跟 AI<br><em>斗图</em></h1>
         <p class="sub" data-i="tagline">找得到、发得出、学得会</p>
-        <p class="lead" data-i="lead">点一张贴纸丢进对话。模型只写文字，界面自己出图。</p>
-        <span class="token" id="live-token">[表情: 我宣布下班]</span>
-        <div class="cta">
-          <button class="btn btn-go" id="copy" type="button" data-i="copy">复制安装命令，开斗</button>
-          <a class="btn btn-ghost" href="https://github.com/yyh-001/dsh-meme" target="_blank" rel="noreferrer" data-i="github">GitHub</a>
-        </div>
-        <p class="cmd">dsh plugin --profile web add dsh-meme</p>
+        <p class="lead" data-i="lead">从大肥鱼开始，给聊天加点表情。自己点图发，也能让 AI 接着斗图。</p>
+        <p class="cmd" data-i="installSteps">DSH 插件 → 添加插件 → 输入 dsh-meme</p>
         <p class="meta"><a href="https://qm.qq.com/q/7AD2g70HqS">QQ 993579665</a></p>
       </div>
 
       <div class="fight" id="fight">
-        <button class="sticker s1" data-cap="好耶" type="button"><img src="./stickers/s1.jpg" alt=""></button>
-        <button class="sticker s2" data-cap="我宣布下班" type="button"><img src="./stickers/s2.jpg" alt=""></button>
-        <button class="sticker s3" data-cap="无语" type="button"><img src="./stickers/s3.jpg" alt=""></button>
-        <button class="sticker s4" data-cap="别看我" type="button"><img src="./stickers/s4.jpg" alt=""></button>
-        <button class="sticker s5" data-cap="？？？" type="button"><img src="./stickers/s5.jpg" alt=""></button>
+        <button class="sticker s1" data-cap="得意" type="button" aria-label="发送大肥鱼得意表情"><img src="./dafeiyu/deyi.jpg" alt="大肥鱼得意"></button>
+        <button class="sticker s2" data-cap="下班只想躺平" type="button" aria-label="发送大肥鱼躺平表情"><img src="./dafeiyu/tangping.jpg" alt="大肥鱼躺平"></button>
+        <button class="sticker s3" data-cap="比心" type="button" aria-label="发送大肥鱼比心表情"><img src="./dafeiyu/bixin.jpg" alt="大肥鱼比心"></button>
+        <button class="sticker s4" data-cap="干饭" type="button" aria-label="发送大肥鱼干饭表情"><img src="./dafeiyu/ganfan.jpg" alt="大肥鱼干饭"></button>
+        <button class="sticker s5" data-cap="疑问" type="button" aria-label="发送大肥鱼疑问表情"><img src="./dafeiyu/wenhao.jpg" alt="大肥鱼疑问"></button>
         <div class="phone">
           <div class="phone-bar"><span data-i="chat">对话</span><span class="dot"></span></div>
           <div class="thread" id="thread">
@@ -342,22 +312,20 @@
   <div class="zoomer" id="zoomer" hidden><img alt=""></div>
 
   <script>
-    const INSTALL = "dsh plugin --profile web add dsh-meme"
     const TEXT = {
       zh: {
         posterHTML: "跟 AI<br><em>斗图</em>",
         tagline: "找得到、发得出、学得会",
-        lead: "点一张贴纸丢进对话。模型只写文字，界面自己出图。",
-        copy: "复制安装命令，开斗",
-        copied: "已复制，去装",
-        github: "GitHub",
+        lead: "从大肥鱼开始，给聊天加点表情。自己点图发，也能让 AI 接着斗图。",
+        installSteps: "DSH 插件 → 添加插件 → 输入 dsh-meme",
         chat: "对话",
         tap: "点一张贴纸，丢进来",
         packs: "表情包合集",
         how: "点开就能预览。自己的仓库加上 topic dsh-meme-pack，并放 previews/ 图片，这里会自动出现。",
         empty: "还没有其他合集。你的仓库可以是下一个。",
         fail: "暂时读不到合集。",
-        builtin: "官方表情包1号（92 张）。不再随插件内置，在设置页「发现」里一键安装。",
+        builtinName: "大肥鱼",
+        builtin: "内置大肥鱼图库，24 张。得意、干饭、比心、躺平……装好就能用。",
         preview: "预览",
         openRepo: "打开仓库",
         stars: (n) => n + " stars",
@@ -365,17 +333,16 @@
       en: {
         posterHTML: "meme fight<br><em>with AI</em>",
         tagline: "find · send · learn",
-        lead: "Tap a sticker into the chat. The model writes text; the UI shows the pic.",
-        copy: "Copy install command",
-        copied: "Copied",
-        github: "GitHub",
+        lead: "Start with Big Fat Fish. Pick a meme yourself, or let your AI join the fun.",
+        installSteps: "DSH Plugins → Add plugin → enter dsh-meme",
         chat: "chat",
         tap: "Tap a sticker. Throw it in.",
         packs: "Sticker packs",
         how: "Tap a pack to preview. Add topic dsh-meme-pack and a previews/ folder to show up here.",
         empty: "No other packs yet. Yours can be next.",
         fail: "Could not load packs.",
-        builtin: "Official pack #1 (92 stickers). No longer bundled — install it from the Discover tab.",
+        builtinName: "Big Fat Fish",
+        builtin: "24 bundled Big Fat Fish memes. Celebrate, eat, send a heart or flop down — ready to use.",
         preview: "Preview",
         openRepo: "Open repo",
         stars: (n) => n + " stars",
@@ -405,24 +372,13 @@
       renderPacks(window.__packs, window.__packErr)
     })
 
-    const copyBtn = document.getElementById("copy")
-    copyBtn.addEventListener("click", async () => {
-      try { await navigator.clipboard.writeText(INSTALL) } catch {
-        const ta = document.createElement("textarea"); ta.value = INSTALL; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove()
-      }
-      copyBtn.textContent = TEXT[lang].copied
-      setTimeout(() => { copyBtn.textContent = TEXT[lang].copy }, 1400)
-    })
-
     const thread = document.getElementById("thread")
-    const liveToken = document.getElementById("live-token")
     document.getElementById("fight").addEventListener("click", (e) => {
       const btn = e.target.closest(".sticker")
       if (!btn) return
       const cap = btn.dataset.cap
       const src = btn.querySelector("img").src
-      liveToken.textContent = "[表情: " + cap + "]"
-      thread.innerHTML = '<div class="bubble"><img src="' + src + '" alt=""><code>[表情: ' + cap + "]</code></div>"
+      thread.innerHTML = '<div class="bubble"><img src="' + esc(src) + '" alt="' + esc(cap) + '"><p>' + esc(cap) + "</p></div>"
     })
 
     fetch("https://api.github.com/repos/yyh-001/dsh-meme")
@@ -434,11 +390,15 @@
         el.textContent = TEXT[lang].stars(Number(repo.stargazers_count).toLocaleString())
       }).catch(() => {})
 
-    const BUILTIN_IMGS = Array.from({ length: 12 }, (_, i) => "./stickers/s" + (i + 1) + ".jpg")
+    const BUILTIN_IMGS = [
+      "deyi", "ganfan", "bixin", "tangping", "ok", "wenhao", "shengqi", "wuyu",
+      "haixiu", "shuijiao", "zaoshanghao", "maozhua", "piaole", "buyao", "toukan",
+      "jiazai", "jiaban", "huachi", "yaoqian", "qiurao", "yun", "zhenjing", "xia", "xianqi",
+    ].map((name) => "./dafeiyu/" + name + ".jpg")
     const IMG_RE = /\.(png|jpe?g|gif|webp)$/i
     const builtinPack = {
-      id: "official-001",
-      full_name: "official-001",
+      id: "dafeiyu-001",
+      full_name: "dafeiyu-001",
       html_url: "https://github.com/yyh-001/dsh-meme",
       builtin: true,
       previews: BUILTIN_IMGS,
@@ -451,6 +411,7 @@
 
     async function loadPreviews(repo) {
       if (repo.builtin) return BUILTIN_IMGS.slice()
+      if (repo.previews && repo.previews.length) return repo.previews.slice()
       const [owner, name] = repo.full_name.split("/")
       const branch = repo.default_branch || "main"
       for (const dir of ["previews", "preview", "stickers"]) {
@@ -482,22 +443,21 @@
     function renderPacks(items, err) {
       const root = document.getElementById("pack-list")
       const t = TEXT[lang]
-      if (err && !(items && items.length)) { root.innerHTML = '<p class="empty">' + t.fail + "</p>"; return }
       const packs = [builtinPack].concat(items || [])
       root.innerHTML = packs.map((p, i) => {
-        const title = p.builtin ? "official-001" : p.full_name
+        const title = p.builtin ? t.builtinName : p.full_name
         const desc = p.builtin ? t.builtin : (p.description || "")
         const count = (p.previews && p.previews.length) ? t.preview + " " + p.previews.length : t.preview
         const star = p.builtin || p.stargazers_count == null ? "" : " · ★ " + fmtStars(p.stargazers_count)
         return '<button class="pack" type="button" data-i="' + i + '">' + mosaicHtml(p.previews) +
           "<strong>" + esc(title) + "</strong><p>" + esc(desc) + '</p><div class="row">' + count + star + "</div></button>"
-      }).join("") + ((items && items.length) ? "" : '<p class="empty">' + t.empty + "</p>")
+      }).join("") + ((items && items.length) ? "" : '<p class="empty">' + (err ? t.fail : t.empty) + "</p>")
       window.__packList = packs
     }
 
     function openPack(p) {
       const t = TEXT[lang]
-      document.getElementById("modal-title").textContent = p.builtin ? "official-001" : p.full_name
+      document.getElementById("modal-title").textContent = p.builtin ? t.builtinName : p.full_name
       document.getElementById("modal-desc").textContent = p.builtin ? t.builtin : (p.description || "")
       const link = document.getElementById("modal-link")
       link.href = p.html_url
@@ -539,19 +499,23 @@
       window.__packs = extra
       renderPacks(extra)
       extra.forEach(async (p) => {
+        if (p.previews.length) return
         p.previews = await loadPreviews(p)
         renderPacks(window.__packs)
       })
     }
 
     Promise.all([
-      fetch("https://api.github.com/search/repositories?q=topic:dsh-meme-pack&sort=stars").then((r) => r.ok ? r.json() : Promise.reject()),
-      fetch("./packs.json").then((r) => r.ok ? r.json() : []),
+      fetch("https://api.github.com/search/repositories?q=topic:dsh-meme-pack&sort=stars").then((r) => r.ok ? r.json() : null).catch(() => null),
+      fetch("./packs.json?v=20261013-bluewhite", { cache: "no-store" }).then((r) => r.ok ? r.json() : []).catch((err) => { console.warn("Pack cache unavailable:", err.message); return [] })
+        .then((cached) => { hydrate(cached); return cached }),
     ]).then(([live, cached]) => {
-      hydrate((live && live.items) || cached || [])
-    }).catch(() => {
-      fetch("./packs.json").then((r) => r.ok ? r.json() : []).then((c) => hydrate(c || []))
-        .catch(() => { window.__packErr = true; renderPacks([], true) })
+      const merged = new Map((cached || []).map((p) => [p.full_name, p]))
+      for (const repo of (live && live.items) || []) {
+        const saved = merged.get(repo.full_name)
+        merged.set(repo.full_name, { ...saved, ...repo, previews: saved && saved.previews || [] })
+      }
+      hydrate([...merged.values()])
     })
 
     applyLang()

@@ -1,0 +1,7 @@
+Generator: built-in image_gen
+Character reference: ../icon.jpg
+
+Use case: compositing / identity-preserve.
+Image 1 is the EDIT TARGET: current dsh-meme minimal white banner. Image 2 is the original canonical 大肥鱼 character, the STRICT IDENTITY REFERENCE and exact illustration to use.
+The right-hand character in image 1 is WRONG. Replace ONLY that right-hand character with the original character illustration from image 2. Preserve her identity exactly: dark navy-blue hair with blue ends, round chibi face and body, small white-edged navy whale fins on each side of head (not giant patterned fins), white maid headband, small blue bows on each side, canonical white-and-navy outfit with gold accents and a dark whale emblem on apron. Use the exact happy wink and thumbs-up pose from image 2. Aim to copy the original illustration faithfully as if placing that original sticker into the banner, rather than reinterpreting her. The original image has a white background that can merge naturally into the white banner. Keep the character compact on the right, fully visible with margin. Do NOT invent a different character, pale blue hair, a tall body, new clothing, an extra prop, a smiling sticker card, new facial features or larger ears.
+Keep the LEFT text, its proportions, positioning, typography and color unchanged: exact "dsh-meme" and "给 AI 聊天，加点表情。". Keep the minimal light white and blue background unchanged. Maintain 5:2 aspect ratio and natural proportions. Only correct the character on the right. No extra text or decoration.
