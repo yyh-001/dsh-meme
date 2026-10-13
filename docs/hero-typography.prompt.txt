@@ -1,0 +1,6 @@
+Generator: built-in image_gen
+Edit of original banner; source prompt: hero.prompt.txt
+
+Use case: precise-object-edit.
+Edit the supplied banner. The title still uses extremely heavy, wide black typography. Make an unmistakable typography correction: redraw ONLY the English text "dsh-meme" in a clean normal-width Inter Medium or IBM Plex Sans Medium font, with substantially thinner strokes and taller natural glyphs. NOT Arial Black, NOT an extended typeface, NOT a chunky display font. Imagine real typesetting with a Medium 500 font, normal horizontal scale 100%, normal vertical scale 100%. The title should occupy approximately x=135 to x=990 on this 2172px-wide canvas, rather than reaching x=1250; its top around y=240 and bottom y=415. This leaves generous clear space before the character. All lowercase letters, precise exact spelling "dsh-meme", one line, deep navy. The e counters are clearly open, m is compact, d and h ascenders tall. Balanced professional typography.
+Preserve the Chinese subtitle exactly "给 AI 聊天，加点表情。" and keep its position. Keep everything else unchanged: original very light background gradient, mascot illustration, position, colors and proportions, friendly winking thumbs-up pose, layout, 3:1 aspect ratio. Do not stretch any part of the image. No new objects or decorations.
