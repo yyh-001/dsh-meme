@@ -182,6 +182,31 @@ export const inject = ['tools', 'webServer', 'agentDefaultModel', 'attachments']
 const MIME = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
 }
+/** 元数据/响应头里 image/<key> 的 key → MIME */
+const IMAGE_KEY_MIME = { jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }
+/** MIME → 落盘扩展名(jpeg 统一 .jpg,与 MIME 表反向对应) */
+const EXT_BY_MIME = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif', 'image/webp': '.webp' }
+
+/**
+ * 按魔数嗅探图片真实格式,识别不了返回 ''(调用方回退到元数据)。
+ * 附件元数据(mediaType/文件名)可能与实际字节不符,而图片路由按落盘扩展名查 MIME 表,
+ * 扩展名错了就会以错误的 Content-Type 返回 —— 所以落盘格式要以字节为准(issue #36)。
+ */
+export function sniffImageMime(buf) {
+  if (!buf || buf.length < 3) return ''
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47 &&
+      buf[4] === 0x0d && buf[5] === 0x0a && buf[6] === 0x1a && buf[7] === 0x0a) return 'image/png'
+  if (buf.length >= 6 && buf.toString('latin1', 0, 6).startsWith('GIF8')) return 'image/gif'
+  if (buf.length >= 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'image/webp'
+  return ''
+}
+
+/** 由 MIME 反推扩展名;不在支持列表(或嗅探失败)时返回 ''。 */
+function extByMime(mime) {
+  return EXT_BY_MIME[String(mime || '').toLowerCase()] || ''
+}
+
 const ROUTE = '/dsh-memes'
 
 /**
@@ -594,21 +619,29 @@ export function apply(ctx, config) {
             }
             const stored = await ctx.get('attachments').readImage(ref)
             buf = stored.data
-            mime = stored.ref.mediaType
-            fileName = stored.ref.name || 'meme' + (mime === 'image/png' ? '.png' : mime === 'image/gif' ? '.gif' : mime === 'image/webp' ? '.webp' : '.jpg')
-            ext = fileName.includes('.') ? '.' + fileName.split('.').pop().toLowerCase() : '.jpg'
+            // MIME/扩展名以字节嗅探为准,附件元数据只作兜底:元数据与真实字节不符时
+            // (如 JPEG 标成 image/gif)照元数据落盘会让图片路由返回错误的 Content-Type(issue #36)。
+            mime = sniffImageMime(buf) || String(stored.ref.mediaType || '')
+            ext = extByMime(mime)
+            if (!ext) {
+              const named = stored.ref.name && stored.ref.name.includes('.') ? '.' + stored.ref.name.split('.').pop().toLowerCase() : ''
+              ext = IMAGE_EXTS.includes(named) ? named : '.jpg'
+            }
+            fileName = stored.ref.name || 'meme' + ext
           } else {
             if (!/^https?:\/\//i.test(imageUrl)) return { ok: false, message: 'imageUrl 必须是 http(s) 链接' }
             const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000), redirect: 'follow' })
             if (!res.ok) return { ok: false, message: '下载失败: HTTP ' + res.status }
             const ctype = String(res.headers.get('content-type') || '')
             const m = /image\/(jpeg|png|gif|webp)/.exec(ctype)
-            mime = m ? { jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' }[m[1]] : ''
-            if (!mime) return { ok: false, message: '该 URL 不是图片(jpg/png/gif/webp)' }
+            const declared = m ? IMAGE_KEY_MIME[m[1]] : ''
+            if (!declared) return { ok: false, message: '该 URL 不是图片(jpg/png/gif/webp)' }
             buf = Buffer.from(await res.arrayBuffer())
             if (buf.byteLength === 0 || buf.byteLength > 8 * 1024 * 1024) return { ok: false, message: '图片大小超限(≤8MB)' }
-            ext = m ? { jpeg: '.jpg', png: '.png', gif: '.gif', webp: '.webp' }[m[1]] : ''
-            fileName = imageUrl.split('/').pop() || 'meme.jpg'
+            // 响应头 Content-Type 同样只是声明:字节能嗅出来就以字节为准(issue #36,与附件分支同一处理)
+            mime = sniffImageMime(buf) || declared
+            ext = extByMime(mime) || '.jpg'
+            fileName = imageUrl.split('/').pop() || 'meme' + ext
           }
           if (buf.byteLength === 0 || buf.byteLength > 8 * 1024 * 1024) return { ok: false, message: '图片大小超限(≤8MB)' }
           // 未指定分类时自动识图(学图即识图)
