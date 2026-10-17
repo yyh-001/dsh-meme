@@ -22,7 +22,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
-  searchRows, prunePackKeywords,
+  searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -249,6 +249,45 @@ export function apply(ctx, config) {
     '- 发图先 search 拿候选,[表情: 描述] 里的描述必须抄候选原文,自己编的描述前端配不上图;\n' +
     '- 情绪到点、接梗、吐槽、卖萌时都主动甩图,别冷场;对方说正事/干活时克制;\n' +
     '- 发完保持简短,让图自己说话,不啰嗦不复述。'
+  /**
+   * dsh-im 的 IM 渠道里没有 dsh-meme 的前端配图器:[表情: 描述] 只会被当成一行
+   * 方括号文字发出。所以 IM 会话要换一条投递路径——send_meme 在 IM 模式会返回
+   * 候选的绝对路径,模型把它交给 dsh-im 的 dsh_im_return_file,由渠道作为原生
+   * 图片消息发出。
+   *
+   * 这里必须显式写「主动发」:dsh-im 自己注入的说明是「用户要求收文件/图片时才
+   * 调用 dsh_im_return_file」,只靠原来的主动斗图提示词,模型会以为 IM 里发不了
+   * 图、或者要先等用户开口授权——这正是「先说明可以在 QQ/微信发表情才会主动发」
+   * 的根因。
+   *
+   * 另外必须显式禁止「正文里再放一份图」:模型很爱在回复里补 markdown 图片
+   * `![描述](C:\...\x.jpg)` 或 `[描述]` 来「确保能看到」,而 IM 客户端只会显示
+   * 方括号里的描述文字、把本地路径原样暴露出来,图片本身还是靠原生消息送达。
+   */
+  const imNoInlineImageRule = (label) => '- 回复正文只写普通聊天的文字:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要写 markdown 图片(![]()),更不要把本地文件路径贴进回复——' + label + ' 里这些只会显示成难看的文字,图片会由 dsh_im_return_file 作为原生消息发出;\n'
+  const imCompanionPrompt = (channel) => {
+    const label = IM_CHANNEL_LABELS[channel] || 'IM'
+    return '斗图规则:主动斗图,不要等用户开口:\n' +
+      '- 聊天气氛合适就主动用 send_meme 拿候选,再把挑中的候选 path(绝对路径)交给 dsh_im_return_file,让它作为 ' + label + ' 原生图片消息发出,发图优先于纯文字;\n' +
+      imNoInlineImageRule(label) +
+      '- 也不用在正文里解释图片投递过程(不必说「图已排队/等发出」),发完保持简短,让图自己说话,不啰嗦不复述;\n' +
+      '- 不用等用户先授权、先说明「可以发表情」,直接发;情绪到点、接梗、吐槽、卖萌时都主动甩图,别冷场,对方说正事/干活时克制。'
+  }
+  /** 用户自定义过提示词时不动原文,只在末尾补 IM 的投递方式 */
+  const imCompanionRules = (channel) => {
+    const label = IM_CHANNEL_LABELS[channel] || 'IM'
+    return '当前对话来自 ' + label + '(IM 聊天):\n' +
+      '- 发图方式是先调用 send_meme 拿候选,再把挑中的候选 path(工具结果里的绝对路径)传给 dsh_im_return_file,让它作为 ' + label + ' 原生图片消息发出;\n' +
+      imNoInlineImageRule(label) +
+      '- 不用等用户先授权:气氛合适就直接 send_meme → dsh_im_return_file 主动发;对方说正事/干活时克制。'
+  }
+  /** dsh-im 是否在进程内(它提供 dsh_im_return_file,是 IM 发图的唯一通道) */
+  const hasImDelivery = () => {
+    try {
+      const service = ctx.get && ctx.get('dshIm')
+      return service !== undefined && service !== null
+    } catch { return false }
+  }
   const memeRoot = resolveActiveRoot(readSettings(), config?.memeRoot)
   let memes = null
   try {
@@ -260,13 +299,19 @@ export function apply(ctx, config) {
 
   // ---- 陪伴模式:系统提示注入,模型根据对话情绪主动斗图 ----
   // 设置页可整段关掉这项注入(settings.promptEnabled === false),关掉后模型不再主动斗图。
-  ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
+  // IM 会话(dsh-im)追加投递规则:候选路径交给 dsh_im_return_file,不要写标记。
+  ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     if (readSettings().promptEnabled === false) return assembled
-    assembled.sections.push({
-      name: 'dsh-expression:companion',
-      text: readSettings().companionPrompt || DEFAULT_COMPANION_PROMPT,
-    })
+    const channel = hasImDelivery() ? imChannelOfSession(context?.agent?.session) : null
+    const custom = readSettings().companionPrompt
+    let text = custom || DEFAULT_COMPANION_PROMPT
+    if (channel) {
+      // IM 会话:默认提示词整段换成 IM 版([表情:] 那条在 IM 里是错的);
+      // 用户自定义提示词则保留原文,只在末尾补投递规则。
+      text = custom ? custom + '\n\n' + imCompanionRules(channel) : imCompanionPrompt(channel)
+    }
+    assembled.sections.push({ name: 'dsh-expression:companion', text })
     return assembled
   })
 
@@ -460,15 +505,21 @@ export function apply(ctx, config) {
     try { return memes.sampleMood(tag, query, 1).mood } catch { return null }
   }
 
-  // ---- 发送通道:QQ 优先,Web 兜底 ----
+  // ---- 发送通道:QQ 优先,Web 兜底;Web 里再按会话来源分流到 IM 原生图片 ----
+  // dsh-im 只在进程内时提供 dsh_im_return_file;这里传的是「运行时判断」而不是
+  // apply 时的快照——插件装载顺序不定,dsh-im 可能比 dsh-meme 晚就绪。
+  const imToolOptions = () => ({
+    imChannelOf: (session) => (hasImDelivery() ? imChannelOfSession(session) : null),
+    imReady: hasImDelivery(),
+  })
   const qq = ctx.get('companionQq')
   const sendImage = qq !== undefined && typeof qq.sendImage === 'function'
     ? (path, caption) => qq.sendImage(path, caption)
     : null
   if (sendImage || urlPrefix) {
     try {
-      registerSendMemeTool(ctx, sampler, sendImage, urlPrefix)
-      console.log(`[dsh-expression] send_meme 已注册(${sendImage ? 'QQ' : 'Web'}通道,${urlPrefix || '无路由'})`)
+      registerSendMemeTool(ctx, sampler, sendImage, urlPrefix, imToolOptions())
+      console.log(`[dsh-expression] send_meme 已注册(${sendImage ? 'QQ' : 'Web'}通道${!sendImage && hasImDelivery() ? '+IM' : ''},${urlPrefix || '无路由'})`)
     } catch (error) {
       console.error('[dsh-expression] send_meme 注册失败(不影响 API/面板):', error instanceof Error ? error.message : String(error))
     }
@@ -481,7 +532,7 @@ export function apply(ctx, config) {
     if (sendImage || urlPrefix) return
     const qqNow = ctx.get('companionQq')
     if (qqNow !== undefined && typeof qqNow.sendImage === 'function') {
-      registerSendMemeTool(ctx, sampler, (path, caption) => qqNow.sendImage(path, caption), urlPrefix)
+      registerSendMemeTool(ctx, sampler, (path, caption) => qqNow.sendImage(path, caption), urlPrefix, imToolOptions())
     }
   }
   ctx.on('companionQq/available', register)

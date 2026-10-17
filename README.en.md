@@ -21,7 +21,7 @@
 ## Features
 
 - **Click to send**: open 😊 beside the composer, search or filter by pack and mood, then pick an image.
-- **Chat with memes**: the AI searches by mood or keyword and writes a text marker that becomes an image in chat. Sending needs no image-input support.
+- **Chat with memes**: the AI searches by mood or keyword. Web chats render a text marker as an image (no image-input support needed); QQ / WeChat and other IM chats switch to native image delivery through dsh-im.
 - **Learn new images**: upload an image and ask to save it; the AI identifies its category and caption.
 - **Manage and share**: enable multiple packs, upload and edit images, import/export ZIPs, and install or update marketplace packs.
 - **Ready to use**: includes Big Fat Fish (24 images), with no third-party runtime dependencies; uses Node's built-in SQLite.
@@ -89,6 +89,8 @@ learn_meme
 ```
 
 Mood buckets: `happy` / `angry` / `sad` / `shy` / `confused` / `daily`. The model should copy a candidate's `[表情: caption]` marker verbatim; the frontend renders it only in chat content. If no candidate fits, try other keywords or reply with text.
+
+When the conversation comes from QQ / WeChat / Feishu / WeCom or another IM channel through [dsh-im](https://github.com/xmanrui/dsh-im), the sticker is sent as a native image message: the plugin detects the IM source, `send_meme` returns each candidate's **absolute path**, and the model passes it to dsh-im's `dsh_im_return_file`. IM chats never render `[表情: caption]`, so no marker is written. This delivery rule is injected together with the proactive-meme prompt — **no prior user instruction such as “you may send memes on QQ/WeChat” is needed**. Web chats keep the `[表情: caption]` rendering, and both kinds of conversation can coexist in one profile.
 
 For custom catalogs and pack formats, see the [remote pack specification](./docs/remote-pack-spec.md). [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ image delivery.
 

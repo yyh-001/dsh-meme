@@ -445,12 +445,100 @@ export class MemesStore {
 }
 
 /**
+ * 已知 IM 渠道的 id(rpcId 前缀)。与 @xmanrui/dsh-im 的 channel 列表保持一致:
+ * 它给每条进来的消息写 `source.rpcId = <channel>-<uuid>`(steer 消息是
+ * `<channel>-steer-<uuid>`),旧版还会把 `<channel>-` 直接拼进会话 id。
+ * dsh-im 将来加渠道时在这里补一项即可,没列到的渠道会退回 Web 的标记模式。
+ */
+export const IM_CHANNEL_PREFIXES = Object.freeze([
+  'weixin', 'feishu', 'dingtalk', 'wecom', 'wecomapp', 'qq', 'slack', 'telegram',
+  'discord', 'whatsapp', 'imessage', 'matrix', 'email', 'office',
+])
+
+/** IM 渠道 id → 展示名(写进提示词/工具结果,让模型知道当前是哪个聊天软件)。 */
+export const IM_CHANNEL_LABELS = Object.freeze({
+  weixin: '微信',
+  feishu: '飞书',
+  dingtalk: '钉钉',
+  wecom: '企业微信',
+  wecomapp: '企业微信应用',
+  qq: 'QQ',
+  slack: 'Slack',
+  telegram: 'Telegram',
+  discord: 'Discord',
+  whatsapp: 'WhatsApp',
+  imessage: 'iMessage',
+  matrix: 'Matrix',
+  email: '邮件',
+  office: 'AI Office',
+})
+
+const IM_UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+const IM_RPC_ID_RE = new RegExp('^(' + IM_CHANNEL_PREFIXES.join('|') + ')-(?:steer-)?' + IM_UUID_PATTERN + '$', 'u')
+const IM_LEGACY_SESSION_ID_RE = new RegExp('^(' + IM_CHANNEL_PREFIXES.join('|') + ')-.+', 'u')
+
+function sessionEventsOf(session) {
+  const events = typeof session?.snapshotEvents === 'function'
+    ? session.snapshotEvents()
+    : session?.events
+  return Array.isArray(events) ? events : []
+}
+
+/**
+ * 这个会话当前这一轮是不是从 IM(dsh-im 的 QQ/微信/飞书…)进来的,是则返回渠道 id。
+ *
+ * 判据取「最后一条真实用户消息」的 rpcId 前缀,而不是扫全会话:同一个会话
+ * 可以在 Web 里创建、后来被 dsh-im 用 `/session` 绑到某个 IM 聊天(会话同步),
+ * 那样早先的 Web 消息和后来的 IM 消息会混在同一段日志里——机器人在哪个渠道
+ * 回复,取决于这一轮是从哪进来的。Web UI 的 rpcId 是没有渠道前缀的裸 uuid,
+ * 于是自然不命中。
+ *
+ * fork 出来的会话不能继承父会话的渠道(父子消息会混在事件流里),宿主两版
+ * Session 都暴露 inheritedEventCount,拿不到就不猜。
+ */
+export function imChannelOfSession(session) {
+  if (!session || typeof session !== 'object') return null
+  try {
+    const header = session.header && typeof session.header === 'object' ? session.header : null
+    const inherited = session.inheritedEventCount
+    if (header?.parentSession && !Number.isSafeInteger(inherited)) return null
+    const events = sessionEventsOf(session)
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i]
+      if (!event || event.type !== 'user/message') continue
+      if (Number.isSafeInteger(inherited) && Number.isSafeInteger(event.seq) && event.seq < inherited) continue
+      const source = event.data && event.data.source
+      if (!source || source.kind !== 'user') continue
+      const rpcId = String(source.rpcId || '')
+      if (!rpcId) continue
+      const hit = IM_RPC_ID_RE.exec(rpcId)
+      if (hit) return hit[1]
+      // 最近一条用户消息有 rpcId、但没命中 IM 前缀:这一轮来自 Web/其他来源
+      return null
+    }
+    if (header?.parentSession) return null
+    // 旧版 dsh-im 把渠道写进会话 id;新版 id 是纯 uuid,只能靠上面的 rpcId
+    const id = typeof session.id === 'string'
+      ? session.id
+      : typeof session.sessionId === 'string' ? session.sessionId : ''
+    const legacy = IM_LEGACY_SESSION_ID_RE.exec(id)
+    return legacy ? legacy[1] : null
+  } catch {
+    // 宿主会话对象处于半初始化/已释放状态时不能连累系统提示装配
+    return null
+  }
+}
+
+/**
  * 注册 send_meme 工具。
  *
- * 两种模式:
+ * 三种模式:
  * - Web 模式(无 QQ 通道,有 urlPrefix):只保留 search——随机抽候选,
  *   模型挑一张把 [表情: 描述] 写进回复,前端按描述配图,
  *   不需要冗余的 send 动作;
+ * - IM 模式(Web 模式 + 本轮来自 dsh-im 的 QQ/微信等渠道):候选额外带绝对路径,
+ *   IM 聊天不渲染 [表情: 描述] 标记,模型要把挑中的 path 交给 dsh-im 的
+ *   `dsh_im_return_file` 作为原生图片发出;
  * - QQ 模式(companionQq 可用):两步式,action=send 才是真正的投递动作。
  *
  * @param {object} ctx 插件上下文
@@ -458,6 +546,10 @@ export class MemesStore {
  * @param {(path: string, caption?: string) => void | null} sendImage QQ 通道发送
  *   (dsh-companion 的 companionQq.sendImage);传 null 时走 web 模式。
  * @param {string | null} urlPrefix webServer 图片路由前缀(如 '/dsh-memes'),无则 null
+ * @param {object} [options]
+ * @param {(session: object) => string | null} [options.imChannelOf]
+ *   判断某个会话本轮来自哪个 IM 渠道(dsh-im 可用时由 index.js 传入;返回 null = 非 IM 或能力缺失)
+ * @param {boolean} [options.imReady] 注册时 dsh-im 是否已在进程内(只影响工具描述措辞)
  */
 function clampLimit(n) {
   const x = typeof n === 'number' ? n : Number(n)
@@ -465,8 +557,11 @@ function clampLimit(n) {
   return Math.max(1, Math.min(20, Math.floor(x)))
 }
 
-export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
+export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, options = {}) {
   const webMode = !sendImage && !!urlPrefix
+  const imChannelOf = typeof options.imChannelOf === 'function' ? options.imChannelOf : null
+  /** 注册时 dsh-im 是否已在进程内——只决定工具描述要不要提 IM 的发送方式 */
+  const imReady = options.imReady === true
 
   const parameters = {
     tag: {
@@ -497,7 +592,9 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
       '流程:给 tag/query → 系统返回若干张候选(带 caption,数量用 limit 自己定) → 看描述觉得贴就发;不满意再 search 换一批,还不行就换词/换情绪或回文字。' +
       '情绪字典: ' + MOOD_DICT + '。' +
       (webMode
-        ? '挑中后把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址)——自己编的描述前端配不上图。'
+        ? (imReady
+            ? '发送方式看工具结果末尾的说明:Web 聊天把 [表情: 描述] 原样写进回复(描述抄候选原文,不要带网址);IM(QQ/微信等)聊天调用 dsh_im_return_file 传候选的 path 发原生图片,不要写 [表情: ...] 标记。'
+            : '挑中后把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址)——自己编的描述前端配不上图。')
         : '两步:search 看候选,再用 send + path 发出。') +
       '气氛对了就主动发;发完短接,让图自己说话。',
     parameters,
@@ -505,7 +602,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
       schema: { type: 'json' },
       render: (_args, value) => [{ type: 'text', text: value.message }],
     },
-    execute(args) {
+    execute(args, exec) {
       const action = webMode ? 'search' : (args.action === 'send' ? 'send' : 'search')
       const query = typeof args.query === 'string' ? args.query.trim() : ''
       const tag = typeof args.tag === 'string' ? args.tag.trim().toLowerCase() : ''
@@ -533,18 +630,44 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null) {
         return { ok: false, message: '没有可用发送通道: ' + absolute }
       }
 
+      // 这一轮来自 dsh-im 的 IM 渠道时,图片只能作为原生图片发出:
+      // [表情: 描述] 标记只有 Web 前端会配图,IM 聊天里它只是一行方括号文字。
+      // 所以候选要带上绝对路径,交给 dsh-im 的 dsh_im_return_file 投递。
+      const imChannel = !sendImage && imChannelOf ? imChannelOf(exec?.agent?.session) : null
+      const imMode = !sendImage && !!imChannel
+      const imLabel = imMode ? (IM_CHANNEL_LABELS[imChannel] || 'IM') : ''
+
+      const captionOf = (m) => String(m.caption || m.file_name || '').slice(0, 80)
+      /** 候选的绝对路径:IM 投递工具要的是磁盘路径,不能是图库内的相对路径/包前缀路径 */
+      const absolutePathOf = (m) => {
+        try {
+          return memes.resolveStored(m.path)
+        } catch {
+          return String(m.path || '')
+        }
+      }
+
       const lines = (rows) => rows.map((m, i) => {
-        const caption = (m.caption || m.file_name).slice(0, 80)
+        const caption = captionOf(m)
+        // IM 模式不要用 "[tag] caption" 的方括号样式:模型会照着把方括号抄进回复,
+        // 而 IM 客户端只把方括号里的文字显示出来(用户看到的是 [无语死鱼脸] 之类)。
+        if (imMode) return (i + 1) + '. path=' + absolutePathOf(m) + ' | 分类=' + m.tag + ' | 描述=' + caption
         return webMode
           ? (i + 1) + '. [表情: ' + caption + ']'
           : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
       })
-      const hits = (rows) => (webMode
-        ? rows.map((m) => ({ caption: (m.caption || m.file_name).slice(0, 80) }))
-        : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption })))
-      const howToSend = webMode
-        ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
-        : '用 send + path 发出。'
+      const hits = (rows) => {
+        if (imMode) return rows.map((m) => ({ path: absolutePathOf(m), tag: m.tag, caption: captionOf(m) }))
+        return webMode
+          ? rows.map((m) => ({ caption: captionOf(m) }))
+          : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption }))
+      }
+      const howToSend = imMode
+        ? '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)——它会作为 ' + imLabel +
+          ' 原生图片消息发出;不用等用户要求,现在就能主动发。回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
+        : webMode
+          ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
+          : '用 send + path 发出。'
 
       // 关键词优先:有关键词就先精确搜(caption/关键词/图名),命中了直接给候选。
       // 全都没命中才退回老路——拿 query 推断情绪随机抽,并在消息里说清是退回来的。
