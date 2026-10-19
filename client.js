@@ -225,12 +225,36 @@ window.__ModuleLoader__.load({
       if (params.remoteDir) qs.set('remoteDir', '1')
       return (await fetch('/dsh-memes-api?' + qs.toString())).json()
     }
+    // 管理页和气泡装饰共享变更通知,避免发图面板已看到新库而气泡仍查旧索引(#39)。
+    let memeLibraryRevision = 0
+    const memeIndexListeners = new Set()
+    const completedRemoteJobs = new Set()
+    const memeMutationOps = new Set([
+      'importMemePack', 'createMemePack', 'deleteMemePack', 'setPack', 'setMemeRoot',
+      'setPacksDir', 'setPackEnabled', 'upload', 'update', 'delete', 'deleteTag',
+    ])
+    const invalidateMemeLibrary = () => {
+      memeLibraryRevision++
+      pickerCache = null
+      for (const listener of memeIndexListeners) listener()
+    }
     async function apiPost(payload) {
-      return (await fetch('/dsh-memes-api', {
+      const res = await (await fetch('/dsh-memes-api', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })).json()
+      if (res && res.ok) {
+        const finished = res.state === 'done' || res.state === 'done-with-errors'
+        const jobId = res.id || payload.jobId
+        if (payload.op === 'remoteJobStatus' && finished && !completedRemoteJobs.has(jobId)) {
+          completedRemoteJobs.add(jobId)
+          invalidateMemeLibrary()
+        } else if (memeMutationOps.has(payload.op) || (payload.op === 'updateRemotePack' && !res.state)) {
+          invalidateMemeLibrary()
+        }
+      }
+      return res
     }
 
     function MemePanel(props) {
@@ -1699,15 +1723,18 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         if (!open) return
         let alive = true
+        const revision = memeLibraryRevision
         fetch('/dsh-memes-api?packId=all')
           .then((r) => r.json())
           .then((res) => {
-            if (!alive || !res || !res.ok) return
+            if (!alive || revision !== memeLibraryRevision || !res || !res.ok) return
             const next = {
               packs: Array.isArray(res.packs) ? res.packs : [],
               memes: Array.isArray(res.memes) ? res.memes : [],
             }
             pickerCache = next
+            // 打开面板也同步索引:其它页面或 AI 学图带来的变化无需刷新整个页面。
+            for (const listener of memeIndexListeners) listener(next.memes)
             setData(next)
             setLoaded(true)
           })
@@ -2020,15 +2047,28 @@ window.__ModuleLoader__.load({
         const exact = index.get(raw) || index.get(foldCaption(raw)) || index.get(looseCaption(raw))
         if (exact) return exact
       }
-      for (const token of splitDescTokens(desc)) {
-        const needle = looseCaption(token)
-        if (!needle) continue
-        for (const row of search || []) {
-          if (row.hay.some((hay) => hay.includes(needle))) return row.url
-          if ((row.tokens || []).some((t) => { const lt = looseCaption(t); return lt && (needle.includes(lt) || lt.includes(needle)) })) return row.url
+      const needles = [...new Set(splitDescTokens(desc).map(looseCaption).filter(Boolean))]
+      let best = null
+      let bestLength = 0
+      let bestCount = 0
+      for (const row of search || []) {
+        let longest = 0
+        let count = 0
+        for (const needle of needles) {
+          let length = row.hay.some((hay) => hay.includes(needle)) ? needle.length : 0
+          for (const token of row.tokens || []) {
+            const t = looseCaption(token)
+            if (t && (needle.includes(t) || t.includes(needle))) length = Math.max(length, Math.min(needle.length, t.length))
+          }
+          if (length) { longest = Math.max(longest, length); count++ }
+        }
+        if (longest > bestLength || (longest === bestLength && count > bestCount)) {
+          best = row.url
+          bestLength = longest
+          bestCount = count
         }
       }
-      return null
+      return best
     }
 
     function apply(ctx) {
@@ -2059,6 +2099,9 @@ window.__ModuleLoader__.load({
       let memeIndexRetryAfter = 0 // 失败后的冷却截止时刻(ms):冷却期内不再发请求
       let memeIndexAttempts = 0
       let memeIndexWarned = false
+      let memeIndexGeneration = 0
+      let memeIndexController = null
+      let disposed = false
       // 索引拉取失败必须保持「可重试」状态。早先失败会往 memeIndex 写一个空 Map 兜底,
       // 而入口守卫是 `if (memeIndex || memeIndexLoading) return`——空 Map 也是真值,
       // 于是这个会话剩下的 [表情: x] 全部退化成描述文字,无报错、无提示,只能靠刷新恢复。
@@ -2081,34 +2124,42 @@ window.__ModuleLoader__.load({
         if (loose) map.set(loose, url)
       }
       const findMemeUrl = (desc) => matchDesc(desc, memeIndex, memeSearch)
+      const setMemeIndex = (rows) => {
+        const next = new Map()
+        for (const row of rows) {
+          const url = absMemeUrl(row.url, row.path)
+          addCaptionKey(next, row.caption, url)
+          addCaptionKey(next, row.file_name, url)
+          addCaptionKey(next, row.keywords, url)
+          addCaptionKey(next, String(row.caption || '').slice(0, 80), url)
+          addCaptionKey(next, String(row.caption || '').slice(0, 100), url)
+        }
+        memeIndex = next
+        memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
+        memeIndexAttempts = 0
+        memeIndexRetryAfter = 0
+        decorateMemeText()
+      }
       const loadMemeIndex = () => {
-        if (memeIndex || memeIndexLoading) return
+        if (disposed || memeIndex || memeIndexLoading) return
         if (Date.now() < memeIndexRetryAfter) return // 冷却中:上一次失败还没到重试时刻
         memeIndexLoading = true
         memeIndexAttempts++
         // fetch 挂起(既不 resolve 也不 reject)时连 catch 都不走,超时自己 abort 兜底
         const controller = typeof AbortController === 'function' ? new AbortController() : null
+        memeIndexController = controller
+        const generation = memeIndexGeneration
         const timeoutTimer = controller ? setTimeout(() => controller.abort(), MEME_INDEX_TIMEOUT) : 0
         // 拉全部包(带包前缀 URL),任意组的 [表情: 描述] 都能配图
         fetch('/dsh-memes-api?packId=all', controller ? { signal: controller.signal } : undefined)
           .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
           .then((res) => {
-            const rows = (res && res.memes) || []
-            memeIndex = new Map()
-            for (const row of rows) {
-              const url = absMemeUrl(row.url, row.path)
-              addCaptionKey(memeIndex, row.caption, url)
-              addCaptionKey(memeIndex, row.file_name, url)
-              addCaptionKey(memeIndex, row.keywords, url)
-              addCaptionKey(memeIndex, String(row.caption || '').slice(0, 80), url)
-              addCaptionKey(memeIndex, String(row.caption || '').slice(0, 100), url)
-            }
-            memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
-            memeIndexAttempts = 0
-            memeIndexRetryAfter = 0
-            decorateMemeText()
+            if (disposed || generation !== memeIndexGeneration) return
+            if (!res || !res.ok || !Array.isArray(res.memes)) throw new Error('无效的表情索引响应')
+            setMemeIndex(res.memes)
           })
           .catch((error) => {
+            if (disposed || generation !== memeIndexGeneration) return
             // 失败保持 null(下次扫描还能重试),退避到下次重试时刻;提示只打一次,别刷屏
             const backoff = Math.min(MEME_INDEX_RETRY_MAX, MEME_INDEX_RETRY_BASE * Math.pow(2, Math.max(0, memeIndexAttempts - 1)))
             memeIndexRetryAfter = Date.now() + backoff
@@ -2119,9 +2170,32 @@ window.__ModuleLoader__.load({
           })
           .finally(() => {
             if (timeoutTimer) clearTimeout(timeoutTimer)
-            memeIndexLoading = false
+            if (generation === memeIndexGeneration) {
+              memeIndexLoading = false
+              memeIndexController = null
+            }
           })
       }
+      const refreshMemeIndex = (rows) => {
+        if (disposed) return
+        memeIndexGeneration++
+        if (memeIndexController) memeIndexController.abort()
+        memeIndexController = null
+        memeIndexLoading = false
+        memeIndex = null
+        memeSearch = []
+        memeIndexAttempts = 0
+        memeIndexRetryAfter = 0
+        if (Array.isArray(rows)) setMemeIndex(rows)
+        else loadMemeIndex()
+      }
+      memeIndexListeners.add(refreshMemeIndex)
+      ctx.effect(() => () => {
+        disposed = true
+        memeIndexGeneration++
+        memeIndexListeners.delete(refreshMemeIndex)
+        if (memeIndexController) memeIndexController.abort()
+      }, 'dsh-expression-entry: meme index')
       // 把 [表情: x] 换成 <img> 之后,气泡里的 textContent 就变了。有些插件(注入记忆条那类)
       // 靠比对 textContent 判断「消息被改过」,于是重写 DOM → img 被打回文字 → 我们再装饰,
       // 来回打回闪个不停(issue #22 第 2 条)。所以每处替换都在 img 后面挂一个 display:none
@@ -2389,8 +2463,9 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply
     exports.inject = inject
-    // 纯函数导出仅用于回归测试(node --test),宿主/打包不消费
+    // 辅助入口仅用于回归测试(node --test),宿主不消费
     exports.__test = {
+      apiPost,
       foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc, compareVersions,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
       packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, inKeepZone, uniqueKeys,

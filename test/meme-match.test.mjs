@@ -71,6 +71,26 @@ test('matchDesc 无命中返回 null(issue #8:模型自编描述且库中无相�
   assert.equal(T.matchDesc('恍然大悟,原来是这个意思!', null, search), null)
 })
 
+test('matchDesc 模糊匹配按实际命中长度排序,不被排在前面的短词截走(#39)', () => {
+  const candidates = T.buildMemeSearch([
+    { caption: '害羞', url: 'old' },
+    { caption: '脸红得不敢看人', url: 'new' },
+  ], (r) => r.url)
+  for (const list of [candidates, [...candidates].reverse()]) {
+    assert.equal(T.matchDesc('害羞，脸红得不敢看人', null, list), 'new')
+    assert.equal(T.matchDesc('害羞脸红得不敢看人', null, list), 'new', '双向包含按实际重叠长度打分')
+  }
+  assert.equal(T.matchDesc('害羞，脸红得不敢看人', new Map([['害羞，脸红得不敢看人', 'exact']]), candidates), 'exact')
+})
+
+test('matchDesc 最长命中相同时比较命中词数,重复描述词不加分(#39)', () => {
+  const candidates = T.buildMemeSearch([
+    { caption: '害羞', url: 'one' },
+    { caption: '害羞', keywords: '脸红', url: 'two' },
+  ], (r) => r.url)
+  assert.equal(T.matchDesc('害羞，害羞，脸红', null, candidates), 'two')
+})
+
 test('matchDesc index 未加载时仍可走分词兜底', () => {
   assert.equal(T.matchDesc('无语', null, search), 'u-speechless')
   assert.equal(T.matchDesc('无语', null, null), null)
