@@ -67,6 +67,28 @@ dsh plugin --profile web add dsh-meme
 
 默认扫描 `~/.dsh/meme-packs`，设置保存在 `~/.dsh/dsh-expression.json`，升级插件会保留。更多图库可在「发现」安装，也可导入别人分享的 ZIP。
 
+## 国内网络 / 图库市场拉不到？
+
+图库目录和预览图托管在 GitHub 上，国内直连 `raw.githubusercontent.com` / `cdn.jsdelivr.net` 经常超时，发现页于是显示「图库目录暂不可用(检查网络或稍后重试)」。插件默认走多镜像，通常无需配置：
+
+- **自动竞速**：目录、清单 JSON、安装 ZIP 和逐图下载都会尝试原始地址和 `ghfast.top`、`gh-proxy.com`、`ghproxy.net`、`cdn.jsdmirror.com`、`fastly.jsdelivr.net` 等镜像，取最先成功的；封面和预览图逐个候选回退，并记住能用的镜像。
+- **磁盘缓存**：成功拉到的目录存到 `~/.dsh/dsh-meme-catalog-cache.json`，网络暂时不通时先用它显示，并提示「当前使用本地缓存」。
+- **安装仍校验 SHA-256**：镜像只换下载通道，镜像返回的 ZIP 哈希对不上会自动换下一个，不会装进坏包。
+
+拉不到时按顺序排查：
+
+1. 点发现页的 **重试**；
+2. 打开 **设置 → 表情包 →「设置」**，看「图库目录源」的 **当前源**，确认自定义地址没写错（地址错也会这样）；
+3. 换个自己能访问的目录源：在同一处填 `catalog.json` 地址并保存，或点 **恢复自动**；也可以改 `~/.dsh/dsh-expression.json` 的 `"remoteDirUrl"`，即时生效。留空 = 自动。
+
+自查镜像连通性（任一返回 `200` 即可）：
+
+```bash
+curl -I https://ghfast.top/https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json
+curl -o /dev/null -w '%{http_code}\n' https://cdn.jsdmirror.com/gh/yyh-001/dsh-meme-packs@main/catalog.json
+curl -o /dev/null -w '%{http_code}\n' https://gh-proxy.com/https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json
+```
+
 ## 分享自己的图库
 
 1. 在「图库」新建图包库，添加图片。

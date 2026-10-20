@@ -289,6 +289,15 @@ window.__ModuleLoader__.load({
       const [promptDraft, setPromptDraft] = React.useState('') // 弹窗内草稿
       const [remoteSubs, setRemoteSubs] = React.useState([])
       const [remoteDir, setRemoteDir] = React.useState(null) // 服务端代拉的图库目录(null=暂不可用)
+      // 目录元信息:source=这次成功的源 URL,cached=来自磁盘缓存,error=全失败时的最后一条错误
+      const [remoteDirSource, setRemoteDirSource] = React.useState('')
+      const [remoteDirCached, setRemoteDirCached] = React.useState(false)
+      const [remoteDirError, setRemoteDirError] = React.useState('')
+      const [remoteDirUrlSetting, setRemoteDirUrlSetting] = React.useState('') // 用户设置的目录源原始串(空=自动)
+      const [dirDraft, setDirDraft] = React.useState('') // 设置页输入框草稿
+      const dirDraftTouched = React.useRef(false) // 草稿被用户动过就别让 applyRoot 抢内容
+      // 挂载即拉目录:初值 true,别让空态/错误态先闪一下再变 loading
+      const [remoteDirLoading, setRemoteDirLoading] = React.useState(true)
       const [remoteJobs, setRemoteJobs] = React.useState({})
       const [remoteBusy, setRemoteBusy] = React.useState(false)
       const [panelTab, setPanelTab] = React.useState('library')
@@ -308,6 +317,72 @@ window.__ModuleLoader__.load({
         setCompanionPrompt(res.companionPrompt || '')
         setDefaultPrompt(res.defaultCompanionPrompt || '')
         setRemoteSubs(Array.isArray(res.remoteSubs) ? res.remoteSubs : [])
+        // 目录源设置(原始字符串,空 = 自动)。别覆盖正在编辑的草稿:用户输入到一半时
+        // 别的 op 回来一次 applyRoot 就把输入框内容抢走,很难解释。
+        setRemoteDirUrlSetting(String(res.remoteDirUrlSetting || ''))
+        if (!dirDraftTouched.current) setDirDraft(String(res.remoteDirUrlSetting || ''))
+      }
+      // 图库目录:挂载时拉一次;发现页「重试」、设置里保存目录源之后复用同一个函数。
+      // 目录由 host 代拉(多镜像竞速 + 磁盘缓存),浏览器只负责展示。null = 彻底拉不到,
+      // 要和「空数组 = 目录真的没内容」分开,否则用户只看得到一句含糊的「不可用」。
+      const loadRemoteDir = async () => {
+        setRemoteDirLoading(true)
+        try {
+          const res = await apiGet({ remoteDir: 1 })
+          if (!res || !res.ok) {
+            setRemoteDir(null)
+            setRemoteDirSource('')
+            setRemoteDirCached(false)
+            setRemoteDirError(String((res && res.error) || ''))
+            return
+          }
+          setRemoteDir(Array.isArray(res.remoteDir) ? res.remoteDir : null)
+          setRemoteDirSource(res.remoteDirSource || '')
+          setRemoteDirCached(res.remoteDirCached === true)
+          setRemoteDirError(typeof res.remoteDirError === 'string' ? res.remoteDirError : '')
+          // 旧 host 没有这个字段,undefined 时保持 applyRoot 同步过的值
+          if (typeof res.remoteDirUrlSetting === 'string' && !dirDraftTouched.current) {
+            setRemoteDirUrlSetting(res.remoteDirUrlSetting)
+            setDirDraft(res.remoteDirUrlSetting)
+          }
+        } catch (e) {
+          setRemoteDir(null)
+          setRemoteDirError(e && e.message ? e.message : String(e))
+        } finally {
+          setRemoteDirLoading(false)
+        }
+      }
+      // 保存图库目录源(空串 = 恢复自动):写 settings 后 host 会清目录缓存,这里立刻
+      // 重拉一次,让设置页「当前源」和发现页马上反映新配置,而不是等下次挂载。
+      const saveRemoteDirUrl = async (value) => {
+        const next = String(value == null ? '' : value).trim()
+        try {
+          const res = await apiPost({ op: 'setRemoteDirUrl', remoteDirUrl: next })
+          if (!res || !res.ok) {
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+            return
+          }
+          // 新 host 会带完整 pack 字段;极简响应(只有 ok)别拿空值把现有状态覆盖掉
+          if (Array.isArray(res.packs)) applyRoot(res)
+          dirDraftTouched.current = false
+          setDirDraft(next)
+          setRemoteDirUrlSetting(next)
+          setRootNotice(res.message || '已保存图库目录源')
+          loadRemoteDir()
+        } catch (e) {
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // 设置页「当前源」:显示真正拉通的源 host(用户只关心哪个域名能用);
+      // 解析不出 host 就原样显示,别为一个畸形 URL 把整页渲染搞崩
+      const dirSourceStatus = () => {
+        if (remoteDirSource) {
+          let host = remoteDirSource
+          try { host = new URL(remoteDirSource).host } catch (e) { /* 保留原文 */ }
+          return '当前源:' + host
+        }
+        if (remoteDirCached) return '当前使用本地缓存'
+        return '当前:自动'
       }
       const localPackCards = packs.map((p) => {
         const entry = (remoteDir || []).find((e) => e.id === p.id) || null
@@ -357,14 +432,8 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
       }, [])
-      // 远程图库目录:服务端代拉(逐源回退 + 60s 缓存),浏览器侧没有跨域问题
-      React.useEffect(() => {
-        let alive = true
-        apiGet({ remoteDir: 1 }).then((res) => {
-          if (alive && res && res.ok) setRemoteDir(Array.isArray(res.remoteDir) ? res.remoteDir : null)
-        }).catch(() => {})
-        return () => { alive = false }
-      }, [])
+      // 图库目录:挂载时拉一次。失败可在发现页点「重试」,设置里保存目录源后也会重拉。
+      React.useEffect(() => { loadRemoteDir() }, [])
       const pollRemoteJob = async (jobId) => {
         try {
           const res = await apiPost({ op: 'remoteJobStatus', jobId })
@@ -977,11 +1046,13 @@ window.__ModuleLoader__.load({
             ? h('div', { className: 'mk-cover' },
               (row.name || '?').slice(0, 1),
               // 图片单独一层盖在首字母上面:加载成功(不透明)就看不见字,404/断网时露出来,
-              // 不会只留一块空白让人以为坏了 —— catalog 里漏扩展名那次就是这个症状
-              h('div', {
+              // 不会只留一块空白让人以为坏了 —— catalog 里漏扩展名那次就是这个症状。
+              // 远端预览图走 MemeRemoteImage(镜像逐个探测回退);本地图只有一个候选,行为不变。
+              h(MemeRemoteImage, {
                 className: 'mk-cover-img',
+                src: row.cover,
                 style: {
-                  backgroundImage: 'url("' + coverUrl(row.cover) + '")',
+                  backgroundImage: 'url("' + imageUrl(row.cover) + '")',
                   backgroundSize: 'cover', backgroundPosition: 'center 28%', backgroundRepeat: 'no-repeat',
                 },
               }))
@@ -1167,13 +1238,24 @@ window.__ModuleLoader__.load({
             placeholder: '搜索图库…', style: { flex: 1, minWidth: 160 },
           }),
         ),
+        // 磁盘缓存兜底:目录能看但资源可能下载失败,提前说清楚,免得用户点安装又撞墙
+        remoteDirCached ? h('div', { className: 'notice', title: remoteDirError || undefined },
+          '网络暂不可用,目录来自本地缓存,安装可能失败') : null,
         discoverCards.length === 0
           ? h('div', { className: 'mk-empty' },
-              mkQuery
-                ? '没有匹配的图库'
+              remoteDirLoading
+                ? '正在拉取图库目录…'
                 : (remoteDir === null
-                    ? '图库目录暂不可用(检查网络或稍后重试)'
-                    : '目录暂无内容'))
+                    ? h(React.Fragment, null,
+                        h('div', null, '图库目录暂不可用' + (remoteDirError ? ':' + String(remoteDirError).slice(0, 120) : '(检查网络或稍后重试)')),
+                        h('button', { onClick: () => loadRemoteDir(), style: { marginTop: 8 } }, '重试'),
+                        h('div', { style: { marginTop: 8, fontSize: 11, lineHeight: 1.6 } },
+                          '国内网络可尝试 设置 → 图库目录源 手动指定镜像目录;目录地址错误也会这样'))
+                    : (mkQuery
+                        ? '没有匹配的图库'
+                        : h(React.Fragment, null,
+                            h('div', null, '目录暂无内容'),
+                            h('button', { onClick: () => loadRemoteDir(), style: { marginTop: 8 } }, '重试')))))
           : h('div', { className: 'mk-grid' }, discoverCards.map((row) => packCard(row, [
             // 发现页只负责装:装过的这里不给按钮,更新去图库页(有新版本才显示)
             row.downloaded ? null : h('button', {
@@ -1206,6 +1288,20 @@ window.__ModuleLoader__.load({
             ),
           ),
         ) : null,
+        // 图库目录源:host 内置多镜像自动竞速,这里让用户手动指定/恢复(专治国内网络)
+        h('div', { className: 'section-title' }, '图库目录源'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', {
+            type: 'text', value: dirDraft, maxLength: 500,
+            placeholder: '留空 = 自动(内置国内多镜像)',
+            onChange: (e) => { dirDraftTouched.current = true; setDirDraft(e.target.value) },
+            onKeyDown: (e) => { if (e.key === 'Enter') saveRemoteDirUrl(dirDraft) },
+            style: { flex: 1, minWidth: 160 },
+          }),
+          h('button', { className: 'btn-primary', onClick: () => saveRemoteDirUrl(dirDraft) }, '保存'),
+          h('button', { onClick: () => saveRemoteDirUrl('') }, '恢复自动'),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } }, dirSourceStatus()),
         // 底部:扫描目录 / 提示词(导入导出在图库页)
         h('div', { className: 'section-title' }, '扫描目录'),
         h('div', { className: 'row', style: { width: '100%' } },
@@ -1320,9 +1416,12 @@ window.__ModuleLoader__.load({
             previewPack.loading ? h('div', { className: 'notice' }, '正在读取图库图片…') : null,
             previewPack.images.length
               ? h('div', { className: 'mk-preview' }, previewPack.images.map((u, i) => h('a', {
-                key: u + '#' + i, href: coverUrl(u), target: '_blank', rel: 'noopener noreferrer', title: '点开原图',
-                style: { backgroundImage: 'url("' + coverUrl(u) + '")' },
-              })))
+                key: u + '#' + i, href: imageUrl(u), target: '_blank', rel: 'noopener noreferrer', title: '点开原图',
+              }, h(MemeRemoteImage, {
+                // <a> 里放 div 是合法的;尺寸/边框仍由 .mk-preview a 管,背景交给组件做镜像回退
+                className: 'mk-preview-cell', src: u,
+                style: { width: '100%', height: '100%', backgroundSize: 'contain', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' },
+              }))))
               : (previewPack.loading ? null : h('div', { className: 'empty' }, '这个图库没有提供预览图')),
             previewPack.images.length && previewPack.total > previewPack.images.length
               ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
@@ -1457,14 +1556,128 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * 封面用背景图而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对 img 的
-     * 全局样式影响(实测在宿主里 <img> 没铺满卡片,露出一块空底色很难看)
+     * 远端预览图的镜像候选(顺序与 host 的 remoteMirrors 一致,国内可达性优先):
+     * jsdmirror → ghfast → gh-proxy → ghproxy → 原始 raw → jsDelivr → fastly。
+     *
+     * 为什么要多候选:背景图不会告诉我们「加载失败」,浏览器只会默默留白;而
+     * raw.githubusercontent.com 在国内基本不可达 → 发现页整片空白。非 GitHub raw 的地址
+     * (本地 /dsh-memes/...、用户自填 URL)原样返回 —— 那种没有镜像可换。
      */
-    function coverUrl(u) {
+    function imageCandidates(u) {
       const raw = String(u || '')
       const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(raw)
-      // 远端预览图优先走 jsDelivr 镜像(raw.githubusercontent 在部分网络下不稳)
-      return m ? 'https://cdn.jsdelivr.net/gh/' + m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4] : raw
+      if (!m) return raw ? [raw] : []
+      const gh = m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4]
+      return [...new Set([
+        'https://cdn.jsdmirror.com/gh/' + gh,
+        'https://ghfast.top/' + raw,
+        'https://gh-proxy.com/' + raw,
+        'https://ghproxy.net/' + raw,
+        raw,
+        'https://cdn.jsdelivr.net/gh/' + gh,
+        'https://fastly.jsdelivr.net/gh/' + gh,
+      ])]
+    }
+
+    /** 首候选:不需要预加载的地方(如 <a href>)直接用;空串返回 '' */
+    function imageUrl(u) {
+      return imageCandidates(u)[0] || ''
+    }
+
+    /**
+     * 兼容旧名:对外仍叫 coverUrl,内部已是 imageUrl(首候选镜像)。首候选从 jsDelivr
+     * 换成 cdn.jsdmirror.com —— 同属 jsDelivr 家族,对国内更友好。
+     */
+    function coverUrl(u) {
+      return imageUrl(u)
+    }
+
+    /** 镜像族标识:失败一次就能整族跳过。空串 = 不是镜像(本地路由/用户地址),不参与跳过。 */
+    function imageProvider(u) {
+      const s = String(u || '')
+      if (s.indexOf('https://cdn.jsdmirror.com/') === 0) return 'jsdmirror'
+      if (s.indexOf('https://ghfast.top/') === 0) return 'ghfast'
+      if (s.indexOf('https://gh-proxy.com/') === 0) return 'gh-proxy'
+      if (s.indexOf('https://ghproxy.net/') === 0) return 'ghproxy'
+      if (s.indexOf('https://fastly.jsdelivr.net/') === 0 || s.indexOf('https://cdn.jsdelivr.net/') === 0) return 'jsdelivr'
+      if (s.indexOf('https://raw.githubusercontent.com/') === 0) return 'raw'
+      return ''
+    }
+
+    // 模块级图片探测缓存(跨卡片/弹窗共享,离屏打开再回来也不用重新探测):
+    // - OK:源 URL → 已验证可用的候选 URL
+    // - BAD:跑不通的镜像族。记族而不是记 URL —— 同一族对所有图都不可达,按 URL 记
+    //   等于每张图都重等一次超时,面板会一张比一张慢。
+    const remoteImageOk = new Map()
+    const remoteImageBad = new Set()
+    const REMOTE_IMAGE_TIMEOUT = 6000
+
+    /**
+     * 远端图片背景层(封面 / 预览格):先显示首候选,再用 new Image() 逐个探测候选,
+     * 哪个加载成功切哪个;全失败就留空底(封面的首字母兜底由父层保留)。
+     *
+     * 为什么用 new Image() 而背景图自己不换:background-image 不报告加载结果,没法回退,
+     * 一张 raw.githubusercontent 的图在国内就是永久空白。
+     * 为什么是 div + background 而不是 <img>:尺寸完全由我们这层样式决定,不受宿主对
+     * img 的全局样式影响(实测 <img> 没铺满卡片,露出一块空底色很难看)。
+     */
+    function MemeRemoteImage(props) {
+      const src = (props && props.src) || ''
+      const candidates = imageCandidates(src)
+      const initial = remoteImageOk.get(src) || candidates[0] || ''
+      const [current, setCurrent] = React.useState(initial)
+      React.useEffect(() => {
+        // 同一位置换了图(src 变)时先回到这张图的首候选,别停在上一个 URL 上
+        setCurrent(remoteImageOk.get(src) || candidates[0] || '')
+        // 只有一个候选 = 没有可换的镜像(本地路由/用户地址),预加载只是白跑一趟;
+        // 测试/SSR 没有 Image,也直接显示首候选
+        if (candidates.length < 2 || typeof Image === 'undefined') return undefined
+        let alive = true
+        let timer = 0
+        let probe = null
+        const stop = () => {
+          alive = false
+          if (timer) { clearTimeout(timer); timer = 0 }
+          if (probe) { probe.onload = null; probe.onerror = null; probe = null }
+        }
+        // 跳过已知失效的镜像族;全族都黑名单了就直接保留首候选,不再挨个等超时
+        const queue = candidates.filter((u) => !remoteImageBad.has(imageProvider(u)))
+        if (queue.length === 0) return stop
+        let i = 0
+        const tryNext = () => {
+          if (timer) { clearTimeout(timer); timer = 0 }
+          if (!alive || i >= queue.length) return
+          const url = queue[i++]
+          probe = new Image()
+          probe.onload = () => {
+            if (!alive) return
+            remoteImageOk.set(src, url)
+            setCurrent(url)
+            stop()
+          }
+          probe.onerror = () => {
+            if (!alive) return
+            const prov = imageProvider(url)
+            if (prov) remoteImageBad.add(prov)
+            tryNext()
+          }
+          // 超时按失败处理:慢镜像不能把后面的可用镜像堵死,首屏更不该等它半分钟
+          timer = setTimeout(() => {
+            timer = 0
+            if (!alive) return
+            const prov = imageProvider(url)
+            if (prov) remoteImageBad.add(prov)
+            tryNext()
+          }, REMOTE_IMAGE_TIMEOUT)
+          probe.src = url
+        }
+        tryNext()
+        return stop
+      }, [src])
+      return React.createElement('div', {
+        className: (props && props.className) || '',
+        style: Object.assign({}, (props && props.style) || null, current ? { backgroundImage: 'url("' + current + '")' } : null),
+      })
     }
 
     /**
@@ -2469,6 +2682,8 @@ window.__ModuleLoader__.load({
       foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc, compareVersions,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
       packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, inKeepZone, uniqueKeys,
+      // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
+      imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }
     return module.exports
   },

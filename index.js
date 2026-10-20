@@ -223,6 +223,106 @@ export const DEFAULT_REMOTE_DIR_URLS = [
   'https://cdn.jsdelivr.net/gh/yyh-001/dsh-meme@main/docs/remote-packs.json',
 ]
 
+/**
+ * GitHub 加速镜像前缀:原样转发 raw / release 资源,内容实时(国内直连 GitHub 常被墙)。
+ * 顺序是实测可用性排序;加新镜像时同步更新 remoteMirrors() 与 docs/remote-pack-spec.md。
+ */
+export const GITHUB_MIRROR_PREFIXES = [
+  'https://ghfast.top/',
+  'https://gh-proxy.com/',
+  'https://ghproxy.net/',
+]
+
+/** jsDelivr 家族 CDN 主机(国内可用的 jsDelivr 节点),对 @main 有 12h 仓库级缓存。 */
+const JSDELIVR_CDN_HOSTS = ['cdn.jsdelivr.net', 'fastly.jsdelivr.net', 'testingcf.jsdelivr.net', 'gcore.jsdelivr.net']
+const RAW_GH_RE = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/
+const RELEASE_GH_RE = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/releases\/download\/(.+)$/
+
+/** jsDelivr 家族 URL → 去掉主机后的路径(如 `gh/o/r@main/p`);不是 jsDelivr 时返回 ''。 */
+function jsdelivrPath(url) {
+  try {
+    const u = new URL(String(url || ''))
+    if (!JSDELIVR_CDN_HOSTS.includes(u.host) && u.host !== 'cdn.jsdmirror.com') return ''
+    const path = u.pathname.replace(/^\/+/, '')
+    return path ? path + u.search : ''
+  } catch { return '' }
+}
+
+/**
+ * 给远端资源 URL 生成镜像候选(国内可达性优先,去重):
+ * GitHub raw → jsdmirror / gh 加速前缀 / 原始直链 / jsDelivr 家族;
+ * GitHub release → gh 加速前缀 / 原始直链;
+ * 其它 URL 原样返回。ZIP 仍以 sha256 校验,镜像给旧文件会被拒绝,不会装错。
+ * @returns {string[]} 依次尝试的地址;空/非 http(s) 返回 []
+ */
+export function remoteMirrors(url) {
+  const raw = String(url || '').trim()
+  if (!/^https?:\/\//i.test(raw)) return []
+  const out = []
+  const push = (u) => { if (u && !out.includes(u)) out.push(u) }
+  const rawGh = RAW_GH_RE.exec(raw)
+  const relGh = RELEASE_GH_RE.exec(raw)
+  const jsd = jsdelivrPath(raw)
+  if (rawGh) {
+    const [, owner, repo, ref, path] = rawGh
+    // jsdmirror 是国内 Docker/CDN 常用的 jsDelivr 节点:最快,但可能滞留 12h 内的旧文件;
+    // 预览图/清单这种「同一 URL 内容基本不变」的资源用它最划算。
+    push('https://cdn.jsdmirror.com/gh/' + owner + '/' + repo + '@' + ref + '/' + path)
+    for (const prefix of GITHUB_MIRROR_PREFIXES) push(prefix + raw)
+    push(raw)
+    for (const host of JSDELIVR_CDN_HOSTS) push('https://' + host + '/gh/' + owner + '/' + repo + '@' + ref + '/' + path)
+  } else if (relGh) {
+    for (const prefix of GITHUB_MIRROR_PREFIXES) push(prefix + raw)
+    push(raw)
+  } else if (jsd) {
+    push('https://cdn.jsdmirror.com/' + jsd)
+    push(raw)
+  } else {
+    push(raw)
+  }
+  return out
+}
+
+/** 从实际请求成功的 URL 反推镜像提供方前缀(资产下载优先走同一条已验证可用的链路)。 */
+function mirrorProviderPrefix(url) {
+  const u = String(url || '')
+  for (const prefix of GITHUB_MIRROR_PREFIXES) if (u.startsWith(prefix)) return prefix
+  if (u.startsWith('https://cdn.jsdmirror.com/')) return 'https://cdn.jsdmirror.com/'
+  for (const host of JSDELIVR_CDN_HOSTS) if (u.startsWith('https://' + host + '/')) return 'https://' + host + '/'
+  if (u.startsWith('https://raw.githubusercontent.com/')) return 'https://raw.githubusercontent.com/'
+  return ''
+}
+
+/**
+ * 目录源的两层候选:tier0 = 原始直链 + gh 加速前缀(内容实时);tier1 = jsDelivr 家族
+ * (可能滞留旧 catalog,只在 tier0 全挂时兜底)。
+ */
+function directoryTiers(url) {
+  const raw = String(url || '').trim()
+  const tier0 = []
+  const tier1 = []
+  const push = (arr, u) => { if (u && !tier0.includes(u) && !tier1.includes(u)) arr.push(u) }
+  const rawGh = RAW_GH_RE.exec(raw)
+  const relGh = RELEASE_GH_RE.exec(raw)
+  const jsd = jsdelivrPath(raw)
+  if (rawGh) {
+    const [, owner, repo, ref, path] = rawGh
+    push(tier0, raw)
+    for (const prefix of GITHUB_MIRROR_PREFIXES) push(tier0, prefix + raw)
+    for (const host of JSDELIVR_CDN_HOSTS) push(tier1, 'https://' + host + '/gh/' + owner + '/' + repo + '@' + ref + '/' + path)
+    push(tier1, 'https://cdn.jsdmirror.com/gh/' + owner + '/' + repo + '@' + ref + '/' + path)
+  } else if (relGh) {
+    push(tier0, raw)
+    for (const prefix of GITHUB_MIRROR_PREFIXES) push(tier0, prefix + raw)
+  } else if (jsd) {
+    push(tier0, 'https://cdn.jsdmirror.com/' + jsd)
+    push(tier0, raw)
+  } else {
+    push(tier0, raw)
+  }
+  return { tier0, tier1 }
+}
+
 export function apply(ctx, config) {
   // 图库目录设置存 ~/.dsh(稳定,不受包升级/图库变化影响):
   // 优先级 用户设置(settings) > patch 配置(config.memeRoot) > 包内默认
@@ -575,7 +675,9 @@ export function apply(ctx, config) {
         promptEnabled: readSettings().promptEnabled !== false,
         pluginVersion,
         remoteSubs: remoteSubs(),
-        remoteDirUrl: remoteDirUrls(),
+        remoteDirUrl: remoteDirUrlList(),
+        // 用户设置里的原始自定义源(空 = 自动/内置多镜像);设置页输入框用它回显
+        remoteDirUrlSetting: typeof s.remoteDirUrl === 'string' ? s.remoteDirUrl : '',
         configured: !!(s.memeRoot || s.packId),
       }
     }
@@ -780,12 +882,85 @@ export function apply(ctx, config) {
     // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认。
     // 每次请求现读 settings:改配置文件即刻生效,不用重启。
     const remoteDirUrls = () => readSettings().remoteDirUrl || config?.remoteDirUrl || DEFAULT_REMOTE_DIR_URLS
+    // 给前端统一返回数组:内置默认是数组,自定义单源是字符串,别让两种形状漏到 API
+    const remoteDirUrlList = () => [].concat(remoteDirUrls() || [])
+      .map((u) => String(u || '').trim())
+      .filter((u) => /^https?:\/\//i.test(u))
     const remoteSubs = () => {
       const subs = readSettings().remoteSubs
       return Array.isArray(subs) ? subs : []
     }
     let remoteDirCache = null // {at, data},60s 内复用,面板每次挂载拉一次也不怕
     let downloadCache = { at: 0, data: {}, key: '' }
+    // 图库目录拉取结果元信息(给 UI:当前源 / 是否本地缓存 / 最后错误),跨请求保留
+    let remoteDirMeta = { source: '', cached: false, error: '' }
+    // 目录最近一次从哪条镜像链路拉到 → 后续清单/图片/ZIP 下载优先走它(别逐次重试被墙直链)
+    let preferredMirrorPrefix = ''
+    const REMOTE_DIR_ATTEMPT_TIMEOUT = 6000
+    // 上次成功拉到的目录落盘:所有镜像都挂时至少还能看到目录、安装旧版本图库(UI 会带「本地缓存」提示)
+    const catalogCacheFile = join(dshHome(), '.dsh', 'dsh-meme-catalog-cache.json')
+    const withCacheBust = (u) => u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()
+    const shortFetchError = (error) => {
+      const cause = error && error.cause
+      const text = cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))
+      return String(text || '未知错误').slice(0, 120)
+    }
+    const readCatalogCache = () => {
+      try {
+        const raw = readFileSync(catalogCacheFile, 'utf8')
+        if (raw.length > 4 * 1024 * 1024) return null
+        const parsed = JSON.parse(raw)
+        if (!parsed || !Array.isArray(parsed.entries) || parsed.entries.length === 0 || !parsed.url) return null
+        return parsed
+      } catch { return null }
+    }
+    const writeCatalogCache = (source, entries, sourceUrl) => {
+      try {
+        mkdirSync(dirname(catalogCacheFile), { recursive: true })
+        // source = 实际拉通的镜像 URL(展示用);sourceUrl = 用户配置里的那条源(下次判断缓存还属不属于当前源)
+        writeFileSync(catalogCacheFile, JSON.stringify({ at: Date.now(), url: source, sourceUrl, entries }))
+      } catch { /* 缓存写不进去不影响功能 */ }
+    }
+    /** 解析目录 JSON:支持裸数组与 { packs: [] },过滤掉没有下载地址的脏条目。 */
+    const readDirectoryPayload = async (res) => {
+      const raw = await res.json()
+      const list = Array.isArray(raw) ? raw : (Array.isArray(raw && raw.packs) ? raw.packs : null)
+      if (!list) throw new Error('目录不是数组或 { packs: [] }')
+      return list.filter((e) => e && (e.manifestUrl || e.archiveUrl))
+    }
+    /** 同一层候选并发竞速:谁先返回合法目录用谁,其余请求中止(被墙直链不会拖住整个面板)。 */
+    const raceDirectoryUrls = async (cands, perAttemptTimeout = REMOTE_DIR_ATTEMPT_TIMEOUT) => {
+      const errors = []
+      if (!Array.isArray(cands) || cands.length === 0) return { ok: false, errors }
+      const ctrl = new AbortController()
+      const result = await Promise.any(cands.map(async (u) => {
+        try {
+          const res = await fetch(withCacheBust(u), {
+            // 单次 6s 上限(可被总预算压低):国内直连 raw 往往一直挂着,不能等 8s 才换下一个
+            signal: AbortSignal.any([ctrl.signal, AbortSignal.timeout(Math.max(1000, perAttemptTimeout))]),
+            redirect: 'follow',
+          })
+          if (!res.ok) throw new Error('HTTP ' + res.status)
+          return { ok: true, entries: await readDirectoryPayload(res), source: u }
+        } catch (error) {
+          errors.push(u + ' → ' + shortFetchError(error))
+          throw error
+        }
+      })).catch(() => null)
+      ctrl.abort()
+      return result || { ok: false, errors }
+    }
+    /**
+     * 资产下载(清单/图片/ZIP)的候选顺序:目录拉取成功的镜像链路排第一,其余按 remoteMirrors 顺序。
+     * 国内网络下目录多半是某条加速前缀拉到的,把那条链路复用到图片下载,省掉每张图先等直链超时。
+     */
+    const assetMirrors = (url) => {
+      const list = remoteMirrors(url)
+      if (!preferredMirrorPrefix || list.length < 2) return list
+      const hit = list.find((u) => u.startsWith(preferredMirrorPrefix))
+      if (!hit) return list
+      return [hit, ...list.filter((u) => u !== hit)]
+    }
     /**
      * 下载量是活数据,不进 catalog.json:服务端代拉 GitHub releases(一个请求拿全),
      * 缓存 30 分钟。只认 archiveUrl 指向 github.com 的条目,清单热链的包没有 release
@@ -817,28 +992,42 @@ export function apply(ctx, config) {
     }
 
     const fetchRemoteDirectory = async () => {
-      if (remoteDirCache && Date.now() - remoteDirCache.at < 60000) return remoteDirCache.data
-      for (const u of [].concat(remoteDirUrls() || [])) {
-        try {
-          let res
-          try {
-            // 带时间戳:挡一层中间层的透明代理缓存。
-            // (jsDelivr 那种「按仓库缓存 @main」的节点时间戳也绕不过——所以源顺序里 raw 在前)
-            const busted = u + (u.includes('?') ? '&' : '?') + 't=' + Date.now()
-            res = await fetch(busted, { signal: AbortSignal.timeout(8000) })
-          } catch (error) {
-            const cause = error && error.cause
-            throw new Error(cause ? (cause.code || cause.message) : String(error && error.message || error))
-          }
-          if (!res.ok) throw new Error('HTTP ' + res.status)
-          const raw = await res.json()
-          const list = Array.isArray(raw) ? raw : (Array.isArray(raw && raw.packs) ? raw.packs : null)
-          if (!list) throw new Error('目录不是数组或 { packs: [] }')
-          const data = list.filter((e) => e && (e.manifestUrl || e.archiveUrl))
-          remoteDirCache = { at: Date.now(), data }
-          return data
-        } catch { /* 试下一个源 */ }
+      if (remoteDirCache && Date.now() - remoteDirCache.at < 60000) {
+        remoteDirMeta = { source: remoteDirCache.source, cached: false, error: '' }
+        return remoteDirCache.data
       }
+      const urls = remoteDirUrlList()
+      const errors = []
+      // 总预算:源多(默认 4 条)且都被墙时,不能一条条等满 6s×2 层,12s 后直接走磁盘缓存/报错
+      const startedAt = Date.now()
+      const DIR_TOTAL_BUDGET = 12000
+      for (const u of urls) {
+        if (Date.now() - startedAt > DIR_TOTAL_BUDGET) break
+        const { tier0, tier1 } = directoryTiers(u)
+        // 先竞速「内容实时」的一层(直链 + gh 加速);全挂再试 jsDelivr(可能滞留 12h 的旧目录)
+        for (const tier of [tier0, tier1]) {
+          const remaining = DIR_TOTAL_BUDGET - (Date.now() - startedAt)
+          if (remaining <= 0) break
+          const r = await raceDirectoryUrls(tier, Math.min(REMOTE_DIR_ATTEMPT_TIMEOUT, remaining))
+          if (r.ok) {
+            const data = { entries: r.entries, source: r.source, cached: false }
+            remoteDirCache = { at: Date.now(), data, source: r.source }
+            preferredMirrorPrefix = mirrorProviderPrefix(r.source) || preferredMirrorPrefix
+            writeCatalogCache(r.source, r.entries, u)
+            remoteDirMeta = { source: r.source, cached: false, error: '' }
+            return data
+          }
+          errors.push(...r.errors)
+        }
+      }
+      // 全部镜像失败:回退上次成功拉到的磁盘缓存(至少让用户看到目录,能装旧版本)
+      const cached = readCatalogCache()
+      // 老缓存没有 sourceUrl,只能拿实际拉通的镜像 URL 比对;新缓存按配置源比对
+      if (cached && urls.includes(cached.sourceUrl || cached.url)) {
+        remoteDirMeta = { source: cached.url, cached: true, error: errors[0] || '' }
+        return { entries: cached.entries, source: cached.url, cached: true }
+      }
+      remoteDirMeta = { source: '', cached: false, error: errors[0] || '目录源全部不可用' }
       return null
     }
     const jobSnapshot = (job) => ({
@@ -850,19 +1039,36 @@ export function apply(ctx, config) {
     })
     const fetchRemoteJson = async (url) => {
       if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('清单地址必须是 http(s) 链接')
-      let res
-      try {
-        res = await fetch(url, { signal: AbortSignal.timeout(15000), redirect: 'follow' })
-      } catch (error) {
-        const cause = error && error.cause
-        throw new Error('清单下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
+      let lastError = ''
+      // 清单也走镜像:国内直连 raw 拉清单同样会失败(清单下载是订阅/预览的第一步)
+      for (const u of assetMirrors(url)) {
+        let res
+        try {
+          res = await fetch(u, { signal: AbortSignal.timeout(15000), redirect: 'follow' })
+        } catch (error) {
+          lastError = shortFetchError(error)
+          continue
+        }
+        if (!res.ok) {
+          lastError = 'HTTP ' + res.status
+          continue
+        }
+        let text
+        try {
+          text = await res.text()
+        } catch (error) {
+          lastError = shortFetchError(error)
+          continue
+        }
+        // 内容层面的错误不换镜像:JSON 坏了换哪个镜像都一样
+        if (text.length > REMOTE_MANIFEST_MAX) throw new Error('清单超过 2MB,拒绝处理')
+        try {
+          return JSON.parse(text)
+        } catch {
+          throw new Error('清单不是合法 JSON')
+        }
       }
-      if (!res.ok) throw new Error('清单下载失败: HTTP ' + res.status)
-      const text = await res.text()
-      if (text.length > REMOTE_MANIFEST_MAX) throw new Error('清单超过 2MB,拒绝处理')
-      let parsed
-      try { parsed = JSON.parse(text) } catch { throw new Error('清单不是合法 JSON') }
-      return parsed
+      throw new Error('清单下载失败: ' + (lastError || '未知错误'))
     }
     const fmtBytes = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + 'MB' : Math.max(1, Math.round(n / 1024)) + 'KB')
     /**
@@ -873,36 +1079,80 @@ export function apply(ctx, config) {
       if (!/^https?:\/\//i.test(String(url || ''))) throw new Error('ZIP 地址必须是 http(s) 链接')
       const expected = String(expectedSha256 || '').trim().toLowerCase()
       if (expected && !/^[0-9a-f]{64}$/.test(expected)) throw new Error('SHA-256 格式无效')
-      let res
-      try {
-        // 大包给足 3 分钟(上限 100MB,慢链路也够)
-        res = await fetch(url, { signal: AbortSignal.timeout(180000), redirect: 'follow' })
-      } catch (error) {
-        const cause = error && error.cause
-        throw new Error('ZIP 下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
-      }
-      if (!res.ok) throw new Error('ZIP 下载失败: HTTP ' + res.status)
-      const declared = Number(res.headers.get('content-length') || 0)
-      if (declared > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 超过 100MB,拒绝处理')
-      const chunks = []
-      let size = 0
-      if (res.body && typeof res.body[Symbol.asyncIterator] === 'function') {
-        for await (const chunk of res.body) {
-          size += chunk.length
-          if (size > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
-          chunks.push(Buffer.from(chunk))
-          if (onProgress) onProgress(size, declared)
+      let lastError = ''
+      let lastWasShaMismatch = false
+      // 镜像可能给旧文件/坏文件:sha256 不匹配就换下一个候选,全都不匹配才报损坏
+      for (const u of assetMirrors(url)) {
+        let res
+        try {
+          // 大包给足 3 分钟(上限 100MB,慢链路也够)
+          res = await fetch(u, { signal: AbortSignal.timeout(180000), redirect: 'follow' })
+        } catch (error) {
+          lastError = shortFetchError(error)
+          lastWasShaMismatch = false
+          continue
         }
-      } else {
-        const one = Buffer.from(await res.arrayBuffer())
-        size = one.byteLength
-        chunks.push(one)
+        if (!res.ok) {
+          lastError = 'HTTP ' + res.status
+          lastWasShaMismatch = false
+          continue
+        }
+        const declared = Number(res.headers.get('content-length') || 0)
+        if (declared > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 超过 100MB,拒绝处理')
+        const chunks = []
+        let size = 0
+        try {
+          if (res.body && typeof res.body[Symbol.asyncIterator] === 'function') {
+            for await (const chunk of res.body) {
+              size += chunk.length
+              if (size > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
+              chunks.push(Buffer.from(chunk))
+              if (onProgress) onProgress(size, declared)
+            }
+          } else {
+            const one = Buffer.from(await res.arrayBuffer())
+            size = one.byteLength
+            chunks.push(one)
+          }
+        } catch (error) {
+          // 大小超限是硬错误,换镜像也一样;网络中断才可以换
+          if (error instanceof Error && /大小超限/.test(error.message)) throw error
+          lastError = shortFetchError(error)
+          lastWasShaMismatch = false
+          continue
+        }
+        const buf = Buffer.concat(chunks)
+        if (buf.byteLength === 0 || buf.byteLength > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
+        const actual = createHash('sha256').update(buf).digest('hex')
+        if (expected && actual !== expected) {
+          lastError = 'SHA-256 不一致'
+          lastWasShaMismatch = true
+          continue
+        }
+        return { buf, sha256: actual }
       }
-      const buf = Buffer.concat(chunks)
-      if (buf.byteLength === 0 || buf.byteLength > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
-      const actual = createHash('sha256').update(buf).digest('hex')
-      if (expected && actual !== expected) throw new Error('ZIP SHA-256 校验失败,文件可能损坏或已被替换')
-      return { buf, sha256: actual }
+      if (lastWasShaMismatch) throw new Error('ZIP SHA-256 校验失败,文件可能损坏或已被替换')
+      throw new Error('ZIP 下载失败: ' + (lastError || '未知错误'))
+    }
+    /** 单张远端图片下载:按镜像候选重试。图库动辄几十上百张图,直链被墙时不能每张都等超时。 */
+    const fetchRemoteImage = async (url) => {
+      let lastError = ''
+      for (const u of assetMirrors(url)) {
+        try {
+          const res = await fetch(u, { signal: AbortSignal.timeout(20000), redirect: 'follow' })
+          if (!res.ok) {
+            lastError = 'HTTP ' + res.status
+            continue
+          }
+          const buf = Buffer.from(await res.arrayBuffer())
+          if (buf.byteLength === 0 || buf.byteLength > REMOTE_IMAGE_MAX) throw new Error('图片大小超限(≤8MB)')
+          return buf
+        } catch (error) {
+          if (error instanceof Error && /大小超限/.test(error.message)) throw error
+          lastError = shortFetchError(error)
+        }
+      }
+      throw new Error('下载失败: ' + (lastError || '未知错误'))
     }
 
     /** 下载完之后的校验+解包+安装(任务与旧同步路径共用)。 */
@@ -1153,16 +1403,8 @@ export function apply(ctx, config) {
                         .run(item.tag, item.caption, item.keywords, Date.now(), item.rel)
                       job.updated++
                     } else {
-                      let res
-                      try {
-                        res = await fetch(item.url, { signal: AbortSignal.timeout(20000), redirect: 'follow' })
-                      } catch (error) {
-                        const cause = error && error.cause
-                        throw new Error('下载失败: ' + (cause ? (cause.code || cause.message) : (error instanceof Error ? error.message : String(error))))
-                      }
-                      if (!res.ok) throw new Error('HTTP ' + res.status)
-                      const buf = Buffer.from(await res.arrayBuffer())
-                      if (buf.byteLength === 0 || buf.byteLength > REMOTE_IMAGE_MAX) throw new Error('图片大小超限(≤8MB)')
+                      // 逐图下载走镜像候选(国内直连 raw 会失败,图库安装/更新主要卡在这里)
+                      const buf = await fetchRemoteImage(item.url)
                       mkdirSync(join(workDir, 'memes', item.tag), { recursive: true })
                       writeFileSync(join(workDir, item.rel), buf)
                       if (known && known.path !== item.rel) {
@@ -1271,10 +1513,17 @@ export function apply(ctx, config) {
           if (u.searchParams.has('remoteDir')) {
             const dir = await fetchRemoteDirectory()
             let counts = {}
-            try { counts = await fetchDownloadCounts(dir || []) } catch { /* 只是少个数字 */ }
+            try { counts = await fetchDownloadCounts(dir ? dir.entries : []) } catch { /* 只是少个数字 */ }
+            const settingsNow = readSettings()
             json(res, {
               ok: true,
-              remoteDir: (dir || []).map((e) => ({ ...e, downloads: counts[e.id] || 0 })),
+              // null = 彻底拉不到(前端显示错误 + 重试);走磁盘缓存时仍是数组
+              remoteDir: dir ? dir.entries.map((e) => ({ ...e, downloads: counts[e.id] || 0 })) : null,
+              remoteDirSource: remoteDirMeta.source,
+              remoteDirCached: !!remoteDirMeta.cached,
+              remoteDirError: remoteDirMeta.error || '',
+              remoteDirUrl: remoteDirUrlList(),
+              remoteDirUrlSetting: typeof settingsNow.remoteDirUrl === 'string' ? settingsNow.remoteDirUrl : '',
             })
             return
           }
@@ -1295,7 +1544,7 @@ export function apply(ctx, config) {
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrls() })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList() })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -1322,7 +1571,7 @@ export function apply(ctx, config) {
             packs: packList(),
             memes: rows.map((m) => urlFor(m, pid)),
             remoteSubs: remoteSubs(),
-            remoteDirUrl: remoteDirUrls(),
+            remoteDirUrl: remoteDirUrlList(),
           })
           return
         }
@@ -1528,6 +1777,20 @@ export function apply(ctx, config) {
             if (!dir) throw new Error('目录不能为空')
             reloadMemeStore(dir)
             json(res, { ok: true, ...packPayload(), message: '已切换图库,立即生效' })
+          } else if (op === 'setRemoteDirUrl') {
+            // 图库目录源:留空/auto = 内置多镜像自动(推荐);填 URL = 只用它(自定义/自建镜像后门)
+            const rawValue = typeof body.remoteDirUrl === 'string' ? body.remoteDirUrl.trim() : ''
+            const value = rawValue && rawValue !== 'auto' ? rawValue : ''
+            if (value) {
+              if (value.length > 500) throw new Error('目录地址过长(不超过 500 字符)')
+              if (!/^https?:\/\//i.test(value)) throw new Error('目录地址必须是 http(s) 链接')
+            }
+            writeSettings({ remoteDirUrl: value })
+            // 立刻清缓存:前端保存后会马上重拉目录,不能等 60s 内存缓存过期
+            remoteDirCache = null
+            remoteDirMeta = { source: '', cached: false, error: '' }
+            preferredMirrorPrefix = ''   // 换源后旧的优先镜像链路也不再适用
+            json(res, { ok: true, ...packPayload(), message: value ? '已保存图库目录源,立即生效' : '已恢复自动(内置多镜像)' })
           } else if (op === 'setCompanionPrompt') {
             const text = String(body.text || '').trim()
             writeSettings({ companionPrompt: text })

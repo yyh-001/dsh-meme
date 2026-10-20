@@ -198,8 +198,8 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   const order = []
   walk(discover, (n) => { if (n.props && n.props.className === 'mk-name') order.push(n.kids[0]) })
   assert.deepEqual(order, ['热门包', '远程包', '清单包'], '发现页默认按下载量排序,没有下载量的排最后')
-  // 排序后第一张是「热门包」,顺带验证远程封面走了 jsDelivr 镜像
-  assert.equal(findCover(discover), 'url("https://cdn.jsdelivr.net/gh/o/r@main/previews/p3.jpg")', '远程封面应换 jsDelivr 镜像')
+  // 排序后第一张是「热门包」,顺带验证远程封面走了 jsdmirror 镜像(契约 §1.1 首候选;回退见 client-remote-dir.test.mjs)
+  assert.equal(findCover(discover), 'url("https://cdn.jsdmirror.com/gh/o/r@main/previews/p3.jpg")', '远程封面应换 jsdmirror 镜像')
   assert.ok(text.includes('安装'), '未安装的条目应给安装按钮')
 
   // 发现页点卡片 → 预览弹窗(没装的走目录里的预览图)

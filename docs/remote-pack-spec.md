@@ -131,7 +131,7 @@
 
 ## 目录源覆盖
 
-插件按顺序试这几个源，第一个能用的为准：
+插件按顺序试这几个源，每个源再展开成镜像候选分层竞速，第一个成功的为准（细节见下节《国内网络与镜像》）：
 
 1. `raw.githubusercontent.com/.../dsh-meme-packs/main/catalog.json`
 2. `cdn.jsdelivr.net/gh/.../dsh-meme-packs@main/catalog.json`（raw 被墙时的兜底）
@@ -144,3 +144,30 @@ curl https://purge.jsdelivr.net/gh/yyh-001/dsh-meme-packs@main/catalog.json
 ```
 
 拉目录时会带 `?t=<时间戳>` 挡中间层（透明代理）的缓存，进程内还有 60 秒缓存，不会打爆上游。内网或调试场景可在 `~/.dsh/dsh-expression.json` 里写 `"remoteDirUrl": "https://你的地址/catalog.json"`（或 patch config 的 `remoteDirUrl`），改动即时生效，不用重启。
+
+## 国内网络与镜像
+
+默认目录源在 `raw.githubusercontent.com` / `cdn.jsdelivr.net` 上，国内经常不可达，所以目录和资产下载都支持多镜像。镜像**只改写 GitHub 资源**，其它 http(s) URL 原样使用。
+
+### 目录：分层竞速
+
+每个配置源展开成两层候选，同一层内用 `Promise.any` 竞速（单请求超时 6 秒，带 `?t=<时间戳>`），tier0 全部失败才试 tier1：
+
+- **tier0（内容新）**：原始 URL、`https://ghfast.top/<原始 URL>`、`https://gh-proxy.com/<原始 URL>`、`https://ghproxy.net/<原始 URL>`；
+- **tier1（可能滞留旧目录，仅兜底）**：jsDelivr 家族。配置源本身是 jsDelivr 时，追加同路径的 `cdn.jsdmirror.com` 与 `fastly.jsdelivr.net`。
+
+tier0 排在 tier1 之前，是因为 jsDelivr 对 `@main` 有 12h 仓库级缓存，push 之后它仍会吐旧 catalog。成功后记下实际源 URL（设置页「当前源」显示其 host），并写 60 秒内存缓存和磁盘缓存。
+
+### 资产：镜像映射
+
+raw 文件按国内可达性排序：`cdn.jsdmirror.com` → `ghfast.top` → `gh-proxy.com` → `ghproxy.net` → 原始 `raw.githubusercontent.com` → `cdn.jsdelivr.net` → `fastly.jsdelivr.net`。Release 资产（`github.com/<owner>/<repo>/releases/download/<tag>/<file>`）依次用三个 gh 代理套整条原始 URL，最后回落原始地址。清单 JSON、安装 ZIP、逐图下载都按这个顺序逐个尝试；目录拉取成功后，会把当时可用的镜像族排到最前。
+
+### 安全：sha256 仍然强制
+
+镜像只影响下载通道，不改校验：市场条目里的 `sha256` 仍逐候选校验，镜像给了旧文件会校验失败并自动换下一个，全部失败才报错。
+
+### 自定义目录源与缓存
+
+`remoteDirUrl` 优先级：**用户设置（设置页「图库目录源」写入 `~/.dsh/dsh-expression.json`）> patch config 的 `remoteDirUrl` > 内置默认**。设置页只接受单个 http(s) 地址（≤500 字符，留空或 `auto` 恢复自动）；patch config 可写数组。保存后清空目录缓存并立即生效，不用重启。
+
+磁盘缓存文件：`~/.dsh/dsh-meme-catalog-cache.json`，内容 `{ at, url, sourceUrl, entries }`（`url` 为实际拉通的镜像 URL，`sourceUrl` 为当时的配置源），仅在拉取成功且条目数 > 0 时写入（写失败静默）。单次尝试 6 秒超时，整轮拉取总预算 12 秒。全部源失败时，若缓存里的 `sourceUrl`（老缓存兼容用 `url`）仍属于当前源列表，目录用缓存返回并标记 `remoteDirCached: true`（界面提示「当前使用本地缓存」），否则按彻底失败处理，返回 `null` 和最后一条错误摘要。

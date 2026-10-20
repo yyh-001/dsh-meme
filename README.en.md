@@ -67,6 +67,21 @@ Open **设置 (Settings) → 表情包 (Memes)**:
 
 The default scan directory is `~/.dsh/meme-packs`. Settings are saved in `~/.dsh/dsh-expression.json` and survive upgrades. Install more packs from Discover or import a shared ZIP.
 
+## Behind a restrictive network?
+
+The catalog and preview images live on GitHub, so `raw.githubusercontent.com` / `cdn.jsdelivr.net` often time out in mainland China and Discover reports that the catalog is unavailable. Mirrors are tried automatically:
+
+- **Racing mirrors**: catalog, manifest JSON, release ZIPs and images try the original URL plus `ghfast.top`, `gh-proxy.com`, `ghproxy.net`, `cdn.jsdmirror.com` and `fastly.jsdelivr.net`; the first response wins, and images fall back one candidate at a time.
+- **Disk cache**: the last good catalog is stored in `~/.dsh/dsh-meme-catalog-cache.json` and used, with a local-cache note, while the network is down.
+- **SHA-256 still enforced**: a mirror only changes the transport; a ZIP that fails its hash is discarded and the next mirror is tried.
+
+Still failing? Click **重试 (Retry)** on Discover, check the current source under **图库目录源 (Catalog source)** in Settings → Memes, or point it at your own `catalog.json` URL (`"remoteDirUrl"` in `~/.dsh/dsh-expression.json`, blank = automatic). To test a mirror:
+
+```bash
+curl -I https://ghfast.top/https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json
+curl -o /dev/null -w '%{http_code}\n' https://cdn.jsdmirror.com/gh/yyh-001/dsh-meme-packs@main/catalog.json
+```
+
 ## Share your own pack
 
 1. Create a pack in Packs and add images.
