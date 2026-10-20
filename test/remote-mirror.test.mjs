@@ -379,3 +379,79 @@ test('setRemoteDirUrl:空串/auto 恢复自动(内置多镜像),remoteDirUrlSett
   assert.equal(res.json.remoteDirSource, goodUrl)
   assert.deepEqual(res.json.remoteDirUrl, [badUrl, goodUrl])
 })
+
+// ============================================================================
+// 6. 设置页下拉框:预设 official / mirror(纯函数 + op + 落盘)
+// ============================================================================
+
+test('directoryGroupsFor:预设/自动/自定义 → 目录候选分组(纯函数)', async () => {
+  const { directoryGroupsFor, REMOTE_DIR_PRESETS, GITHUB_MIRROR_PREFIXES } = await import('../index.js')
+  assert.deepEqual(REMOTE_DIR_PRESETS, ['official', 'mirror'])
+  const catalog = 'https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json'
+
+  // 官方源:只直连 raw,不留 jsDelivr 兜底(语义 = 用户明确要求直连)
+  const official = directoryGroupsFor('official')
+  assert.equal(official.length, 1)
+  assert.equal(official[0].key, 'official')
+  assert.deepEqual(official[0].tier0, [catalog])
+  assert.deepEqual(official[0].tier1, [])
+
+  // 镜像源:只走国内加速前缀,原始直链不进候选;jsDelivr 家族只当兜底
+  const mirror = directoryGroupsFor('mirror')
+  assert.equal(mirror[0].key, 'mirror')
+  assert.deepEqual(mirror[0].tier0, GITHUB_MIRROR_PREFIXES.map((p) => p + catalog))
+  assert.ok(mirror[0].tier1.length > 0, '镜像全挂时应有 jsDelivr 兜底')
+  assert.ok(mirror[0].tier1.every((u) => u.includes('jsdelivr') || u.includes('jsdmirror')), '兜底层应是 jsDelivr 家族: ' + JSON.stringify(mirror[0].tier1))
+  assert.ok(mirror[0].tier0.every((u) => !u.startsWith('https://raw.githubusercontent.com/')), '镜像预设不该先试直连(国内必挂)')
+
+  // 自动:未设置 → 用 fallback 源列表(自动模式本来就是「多源都试」)
+  const auto = directoryGroupsFor('', [goodUrl])
+  assert.equal(auto.length, 1)
+  assert.equal(auto[0].key, goodUrl)
+  assert.deepEqual(auto[0].tier0, [goodUrl])
+
+  // 自定义 URL:原样作为唯一分组(宿主支持自建镜像)
+  const custom = directoryGroupsFor(good2Url)
+  assert.equal(custom[0].key, good2Url)
+  assert.deepEqual(custom[0].tier0, [good2Url])
+
+  // 手改配置文件写错(非预设非 URL):按自动处理,不能让面板直接炸
+  const broken = directoryGroupsFor('ftp://example.com/x.json', [goodUrl])
+  assert.equal(broken[0].key, goodUrl)
+})
+
+test('setRemoteDirUrl:预设 official/mirror 落盘并展开候选链,非法关键词 400', async () => {
+  const catalog = 'https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json'
+  const { GITHUB_MIRROR_PREFIXES } = await import('../index.js')
+
+  // official:保存后设置原值是 'official',展开列表只有 raw 直链
+  const official = await postApi(instA.api, { op: 'setRemoteDirUrl', remoteDirUrl: 'official' })
+  assert.equal(official.statusCode, 200, JSON.stringify(official.json))
+  assert.equal(official.json.remoteDirUrlSetting, 'official', '预设要原样回传给前端(下拉框回显)')
+  assert.match(String(official.json.message || ''), /已保存图库目录源/)
+  assert.deepEqual(official.json.remoteDirUrl, [catalog])
+  assert.equal(JSON.parse(readFileSync(settingsFileOf(homeA), 'utf8')).remoteDirUrl, 'official')
+
+  // mirror:设置原值 'mirror',候选链 = 3 个 gh 加速 + jsDelivr 家族兜底
+  const mirror = await postApi(instA.api, { op: 'setRemoteDirUrl', remoteDirUrl: 'mirror' })
+  assert.equal(mirror.statusCode, 200, JSON.stringify(mirror.json))
+  assert.equal(mirror.json.remoteDirUrlSetting, 'mirror')
+  assert.match(String(mirror.json.message || ''), /镜像源/)
+  const expectedTier0 = GITHUB_MIRROR_PREFIXES.map((p) => p + catalog)
+  assert.deepEqual(mirror.json.remoteDirUrl.slice(0, expectedTier0.length), expectedTier0, '镜像候选应排在最前')
+  assert.ok(mirror.json.remoteDirUrl.length > expectedTier0.length, '镜像全挂时应有 jsDelivr 兜底候选')
+  assert.ok(mirror.json.remoteDirUrl.every((u) => u !== catalog), '镜像预设的候选里不该有原始直链')
+  assert.equal(JSON.parse(readFileSync(settingsFileOf(homeA), 'utf8')).remoteDirUrl, 'mirror')
+
+  // 非预设、非 http(s) 的关键词要拦住(别把 'foo' 存成目录源)
+  const invalid = await postApi(instA.api, { op: 'setRemoteDirUrl', remoteDirUrl: 'ftp://example.com/x.json' })
+  assert.equal(invalid.statusCode, 400)
+  assert.match(String(invalid.json.error), /预设|http/i)
+  assert.equal(JSON.parse(readFileSync(settingsFileOf(homeA), 'utf8')).remoteDirUrl, 'mirror', '非法值不改现有设置')
+
+  // 恢复自动,回到 patch 配置里的源列表,后续用例/重启仍按配置走
+  const reset = await postApi(instA.api, { op: 'setRemoteDirUrl', remoteDirUrl: 'auto' })
+  assert.equal(reset.statusCode, 200)
+  assert.equal(reset.json.remoteDirUrlSetting, '')
+  assert.deepEqual(reset.json.remoteDirUrl, [badUrl, goodUrl])
+})

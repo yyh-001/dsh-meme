@@ -294,8 +294,21 @@ window.__ModuleLoader__.load({
       const [remoteDirCached, setRemoteDirCached] = React.useState(false)
       const [remoteDirError, setRemoteDirError] = React.useState('')
       const [remoteDirUrlSetting, setRemoteDirUrlSetting] = React.useState('') // 用户设置的目录源原始串(空=自动)
-      const [dirDraft, setDirDraft] = React.useState('') // 设置页输入框草稿
+      const [dirDraft, setDirDraft] = React.useState('') // 设置页「自定义地址」输入框草稿
       const dirDraftTouched = React.useRef(false) // 草稿被用户动过就别让 applyRoot 抢内容
+      const [dirMode, setDirMode] = React.useState('auto') // 目录源下拉框:auto/official/mirror/custom
+      // 设置值 → 下拉框选项值(空=自动;预设原样;其它一律当自定义 URL)
+      const dirModeOf = (setting) => {
+        const value = String(setting || '').trim()
+        if (!value || value.toLowerCase() === 'auto') return 'auto'
+        return value === 'official' || value === 'mirror' ? value : 'custom'
+      }
+      const DIR_MODE_LABELS = {
+        auto: '自动(内置多镜像)',
+        official: '官方源(GitHub 直连)',
+        mirror: '镜像源(国内加速)',
+        custom: '自定义地址',
+      }
       // 挂载即拉目录:初值 true,别让空态/错误态先闪一下再变 loading
       const [remoteDirLoading, setRemoteDirLoading] = React.useState(true)
       const [remoteJobs, setRemoteJobs] = React.useState({})
@@ -320,7 +333,10 @@ window.__ModuleLoader__.load({
         // 目录源设置(原始字符串,空 = 自动)。别覆盖正在编辑的草稿:用户输入到一半时
         // 别的 op 回来一次 applyRoot 就把输入框内容抢走,很难解释。
         setRemoteDirUrlSetting(String(res.remoteDirUrlSetting || ''))
-        if (!dirDraftTouched.current) setDirDraft(String(res.remoteDirUrlSetting || ''))
+        if (!dirDraftTouched.current) {
+          setDirDraft(String(res.remoteDirUrlSetting || ''))
+          setDirMode(dirModeOf(res.remoteDirUrlSetting))
+        }
       }
       // 图库目录:挂载时拉一次;发现页「重试」、设置里保存目录源之后复用同一个函数。
       // 目录由 host 代拉(多镜像竞速 + 磁盘缓存),浏览器只负责展示。null = 彻底拉不到,
@@ -344,6 +360,7 @@ window.__ModuleLoader__.load({
           if (typeof res.remoteDirUrlSetting === 'string' && !dirDraftTouched.current) {
             setRemoteDirUrlSetting(res.remoteDirUrlSetting)
             setDirDraft(res.remoteDirUrlSetting)
+            setDirMode(dirModeOf(res.remoteDirUrlSetting))
           }
         } catch (e) {
           setRemoteDir(null)
@@ -360,6 +377,7 @@ window.__ModuleLoader__.load({
           const res = await apiPost({ op: 'setRemoteDirUrl', remoteDirUrl: next })
           if (!res || !res.ok) {
             setRootNotice('保存失败: ' + ((res && res.error) || ''))
+            setDirMode(dirModeOf(remoteDirUrlSetting)) // 保存失败别让下拉框停在错误选项
             return
           }
           // 新 host 会带完整 pack 字段;极简响应(只有 ok)别拿空值把现有状态覆盖掉
@@ -367,11 +385,23 @@ window.__ModuleLoader__.load({
           dirDraftTouched.current = false
           setDirDraft(next)
           setRemoteDirUrlSetting(next)
+          setDirMode(dirModeOf(next))
           setRootNotice(res.message || '已保存图库目录源')
           loadRemoteDir()
         } catch (e) {
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+          setDirMode(dirModeOf(remoteDirUrlSetting))
         }
+      }
+      // 下拉框切换:自动/官方/镜像立即保存并重拉目录;自定义只展开输入框,点保存才提交
+      const onPickDirMode = (mode) => {
+        setDirMode(mode)
+        if (mode === 'custom') {
+          dirDraftTouched.current = true
+          setDirDraft(remoteDirUrlSetting || '')
+          return
+        }
+        saveRemoteDirUrl(mode === 'auto' ? '' : mode)
       }
       // 设置页「当前源」:显示真正拉通的源 host(用户只关心哪个域名能用);
       // 解析不出 host 就原样显示,别为一个畸形 URL 把整页渲染搞崩
@@ -382,7 +412,7 @@ window.__ModuleLoader__.load({
           return '当前源:' + host
         }
         if (remoteDirCached) return '当前使用本地缓存'
-        return '当前:自动'
+        return '当前:' + (DIR_MODE_LABELS[dirMode] || dirMode)
       }
       const localPackCards = packs.map((p) => {
         const entry = (remoteDir || []).find((e) => e.id === p.id) || null
@@ -1250,7 +1280,7 @@ window.__ModuleLoader__.load({
                         h('div', null, '图库目录暂不可用' + (remoteDirError ? ':' + String(remoteDirError).slice(0, 120) : '(检查网络或稍后重试)')),
                         h('button', { onClick: () => loadRemoteDir(), style: { marginTop: 8 } }, '重试'),
                         h('div', { style: { marginTop: 8, fontSize: 11, lineHeight: 1.6 } },
-                          '国内网络可尝试 设置 → 图库目录源 手动指定镜像目录;目录地址错误也会这样'))
+                          '国内网络可在 设置 → 图库目录源 选择「镜像源」;目录地址错误也会这样'))
                     : (mkQuery
                         ? '没有匹配的图库'
                         : h(React.Fragment, null,
@@ -1288,19 +1318,31 @@ window.__ModuleLoader__.load({
             ),
           ),
         ) : null,
-        // 图库目录源:host 内置多镜像自动竞速,这里让用户手动指定/恢复(专治国内网络)
+        // 图库目录源:host 内置多镜像自动竞速;国内用户下拉选「镜像源」即可,不用手填地址
         h('div', { className: 'section-title' }, '图库目录源'),
         h('div', { className: 'row', style: { width: '100%' } },
+          h('select', {
+            value: dirMode,
+            onChange: (e) => onPickDirMode(e.target.value),
+            title: '自动 = 内置多镜像竞速;镜像源 = 只走国内加速节点;官方源 = 只直连 GitHub',
+            style: { flex: 1, minWidth: 160 },
+          },
+            h('option', { value: 'auto' }, '自动(内置多镜像,推荐)'),
+            h('option', { value: 'official' }, '官方源(GitHub 直连)'),
+            h('option', { value: 'mirror' }, '镜像源(国内加速)'),
+            h('option', { value: 'custom' }, '自定义地址…'),
+          ),
+        ),
+        dirMode === 'custom' ? h('div', { className: 'row', style: { width: '100%' } },
           h('input', {
             type: 'text', value: dirDraft, maxLength: 500,
-            placeholder: '留空 = 自动(内置国内多镜像)',
+            placeholder: 'https://…/catalog.json(自定义图库目录清单地址)',
             onChange: (e) => { dirDraftTouched.current = true; setDirDraft(e.target.value) },
             onKeyDown: (e) => { if (e.key === 'Enter') saveRemoteDirUrl(dirDraft) },
             style: { flex: 1, minWidth: 160 },
           }),
           h('button', { className: 'btn-primary', onClick: () => saveRemoteDirUrl(dirDraft) }, '保存'),
-          h('button', { onClick: () => saveRemoteDirUrl('') }, '恢复自动'),
-        ),
+        ) : null,
         h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } }, dirSourceStatus()),
         // 底部:扫描目录 / 提示词(导入导出在图库页)
         h('div', { className: 'section-title' }, '扫描目录'),

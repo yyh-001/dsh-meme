@@ -75,7 +75,7 @@ The catalog and preview images live on GitHub, so `raw.githubusercontent.com` / 
 - **Disk cache**: the last good catalog is stored in `~/.dsh/dsh-meme-catalog-cache.json` and used, with a local-cache note, while the network is down.
 - **SHA-256 still enforced**: a mirror only changes the transport; a ZIP that fails its hash is discarded and the next mirror is tried.
 
-Still failing? Click **重试 (Retry)** on Discover, check the current source under **图库目录源 (Catalog source)** in Settings → Memes, or point it at your own `catalog.json` URL (`"remoteDirUrl"` in `~/.dsh/dsh-expression.json`, blank = automatic). To test a mirror:
+Still failing? Click **重试 (Retry)** on Discover, check the current source under **图库目录源 (Catalog source)** in Settings → Memes, or use the dropdown there: **自动 (Automatic)**, **官方源 (Official GitHub)**, **镜像源 (Mirrors, best for mainland China)** or **自定义地址 (Custom URL)**. The same values can be written to `"remoteDirUrl"` in `~/.dsh/dsh-expression.json` (`""`/`auto`, `official`, `mirror`, or a `catalog.json` URL) and take effect immediately. To test a mirror:
 
 ```bash
 curl -I https://ghfast.top/https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json

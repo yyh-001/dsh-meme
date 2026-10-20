@@ -224,6 +224,20 @@ export const DEFAULT_REMOTE_DIR_URLS = [
 ]
 
 /**
+ * 图库目录源预设(设置页下拉框):settings.remoteDirUrl 支持
+ *   ''(或 'auto') = 自动,内置多镜像竞速(默认,推荐);
+ *   'official'     = 只直连官方 GitHub raw(海外或直连正常时用);
+ *   'mirror'       = 只走国内加速镜像(国内直连被墙时用);
+ * 仍兼容自定义 http(s) URL;patch 配置里也可以写 URL 数组。
+ */
+export const REMOTE_DIR_PRESETS = ['official', 'mirror']
+const REMOTE_DIR_PRESET_LABELS = {
+  auto: '自动(内置多镜像)',
+  official: '官方源(GitHub 直连)',
+  mirror: '镜像源(国内加速)',
+}
+
+/**
  * GitHub 加速镜像前缀:原样转发 raw / release 资源,内容实时(国内直连 GitHub 常被墙)。
  * 顺序是实测可用性排序;加新镜像时同步更新 remoteMirrors() 与 docs/remote-pack-spec.md。
  */
@@ -321,6 +335,54 @@ function directoryTiers(url) {
     push(tier0, raw)
   }
   return { tier0, tier1 }
+}
+
+/** 给定 GitHub raw URL 的 jsDelivr 家族候选(兜底层,对 @main 有 12h 缓存)。 */
+function jsdelivrFamily(rawUrl) {
+  const rawGh = RAW_GH_RE.exec(String(rawUrl || '').trim())
+  if (!rawGh) return []
+  const [, owner, repo, ref, path] = rawGh
+  const out = JSDELIVR_CDN_HOSTS.map((host) => 'https://' + host + '/gh/' + owner + '/' + repo + '@' + ref + '/' + path)
+  out.push('https://cdn.jsdmirror.com/gh/' + owner + '/' + repo + '@' + ref + '/' + path)
+  return out
+}
+
+/**
+ * 目录源设置 → 候选分组(纯函数,便于单测)。每组 {key, tier0, tier1}:
+ *   key   = 归属标识(预设名或源 URL),磁盘缓存用它判断「还属不属于当前源」;
+ *   tier0 = 内容实时的一层(直链 + gh 加速),先竞速;
+ *   tier1 = jsDelivr 家族兜底(可能滞留 12h 的旧目录,只在 tier0 全挂时用)。
+ * @param {string} setting 设置值:''/'auto'/'official'/'mirror'/自定义 http(s) URL
+ * @param {string[]|string} fallbackUrls 未设置时用的源列表(patch 配置或内置默认)
+ * @returns {{key:string,tier0:string[],tier1:string[]}[]}
+ */
+export function directoryGroupsFor(setting, fallbackUrls = DEFAULT_REMOTE_DIR_URLS) {
+  const raw = String(setting == null ? '' : setting).trim()
+  const lower = raw.toLowerCase()
+  const catalog = DEFAULT_REMOTE_DIR_URLS[0]
+  if (!raw || lower === 'auto') {
+    return [].concat(fallbackUrls || [])
+      .map((u) => String(u || '').trim())
+      .filter((u) => /^https?:\/\//i.test(u))
+      .map((u) => { const { tier0, tier1 } = directoryTiers(u); return { key: u, tier0, tier1 } })
+  }
+  // 预设的目录地址固定用 dsh-meme-packs 仓库的 catalog.json,语义明确:
+  if (lower === 'official') return [{ key: 'official', tier0: [catalog], tier1: [] }]
+  if (lower === 'mirror') {
+    return [{
+      key: 'mirror',
+      // 只用国内加速:镜像原样转发 raw,内容实时
+      tier0: GITHUB_MIRROR_PREFIXES.map((p) => p + catalog),
+      // 镜像全挂时再用 jsDelivr 家族兜底(旧目录也比完全没有强)
+      tier1: jsdelivrFamily(catalog),
+    }]
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    const { tier0, tier1 } = directoryTiers(raw)
+    return [{ key: raw, tier0, tier1 }]
+  }
+  // 非法值(手改配置文件写错):按自动处理,别让面板直接炸
+  return directoryGroupsFor('', fallbackUrls)
 }
 
 export function apply(ctx, config) {
@@ -881,11 +943,40 @@ export function apply(ctx, config) {
     const SIDECAR_NAME = '.dsh-remote.json'
     // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认。
     // 每次请求现读 settings:改配置文件即刻生效,不用重启。
-    const remoteDirUrls = () => readSettings().remoteDirUrl || config?.remoteDirUrl || DEFAULT_REMOTE_DIR_URLS
-    // 给前端统一返回数组:内置默认是数组,自定义单源是字符串,别让两种形状漏到 API
-    const remoteDirUrlList = () => [].concat(remoteDirUrls() || [])
-      .map((u) => String(u || '').trim())
-      .filter((u) => /^https?:\/\//i.test(u))
+    // 设置值:''/'auto' = 自动多镜像;'official'/'mirror' = 预设;自定义 http(s) URL。
+    const remoteDirSetting = () => {
+      const value = readSettings().remoteDirUrl
+      return typeof value === 'string' ? value.trim() : ''
+    }
+    // 原始设置 → 归一值:老配置的 'auto' 统一成 '',预设转小写;自定义 URL 原样返回
+    const normalizedDirSetting = () => {
+      const raw = remoteDirSetting()
+      if (!raw || raw.toLowerCase() === 'auto') return ''
+      const key = raw.toLowerCase()
+      return REMOTE_DIR_PRESETS.includes(key) ? key : raw
+    }
+    const dirSourceLabel = (setting) => {
+      const key = String(setting || '').trim().toLowerCase()
+      if (!key || key === 'auto') return REMOTE_DIR_PRESET_LABELS.auto
+      if (REMOTE_DIR_PRESETS.includes(key)) return REMOTE_DIR_PRESET_LABELS[key]
+      return '自定义源:' + String(setting)
+    }
+    // patch 配置兜底源:可以是数组(源列表)也可以是字符串(单源)
+    const fallbackDirUrls = () => {
+      const value = config?.remoteDirUrl
+      if (Array.isArray(value) || typeof value === 'string') return [].concat(value)
+      return DEFAULT_REMOTE_DIR_URLS
+    }
+    // 目录候选分组:预设/自动/自定义都归一成「源 + 实时层 + 兜底层」,拉取和缓存判断共用
+    const directoryGroups = () => directoryGroupsFor(normalizedDirSetting(), fallbackDirUrls())
+    // 给前端/排错统一返回实际会尝试的目录 URL 数组(展开镜像链,去重)
+    const remoteDirUrlList = () => {
+      const out = []
+      for (const group of directoryGroups()) {
+        for (const u of [...group.tier0, ...group.tier1]) if (!out.includes(u)) out.push(u)
+      }
+      return out
+    }
     const remoteSubs = () => {
       const subs = readSettings().remoteSubs
       return Array.isArray(subs) ? subs : []
@@ -996,16 +1087,15 @@ export function apply(ctx, config) {
         remoteDirMeta = { source: remoteDirCache.source, cached: false, error: '' }
         return remoteDirCache.data
       }
-      const urls = remoteDirUrlList()
+      const groups = directoryGroups()
       const errors = []
       // 总预算:源多(默认 4 条)且都被墙时,不能一条条等满 6s×2 层,12s 后直接走磁盘缓存/报错
       const startedAt = Date.now()
       const DIR_TOTAL_BUDGET = 12000
-      for (const u of urls) {
+      for (const group of groups) {
         if (Date.now() - startedAt > DIR_TOTAL_BUDGET) break
-        const { tier0, tier1 } = directoryTiers(u)
         // 先竞速「内容实时」的一层(直链 + gh 加速);全挂再试 jsDelivr(可能滞留 12h 的旧目录)
-        for (const tier of [tier0, tier1]) {
+        for (const tier of [group.tier0, group.tier1]) {
           const remaining = DIR_TOTAL_BUDGET - (Date.now() - startedAt)
           if (remaining <= 0) break
           const r = await raceDirectoryUrls(tier, Math.min(REMOTE_DIR_ATTEMPT_TIMEOUT, remaining))
@@ -1013,7 +1103,7 @@ export function apply(ctx, config) {
             const data = { entries: r.entries, source: r.source, cached: false }
             remoteDirCache = { at: Date.now(), data, source: r.source }
             preferredMirrorPrefix = mirrorProviderPrefix(r.source) || preferredMirrorPrefix
-            writeCatalogCache(r.source, r.entries, u)
+            writeCatalogCache(r.source, r.entries, group.key)
             remoteDirMeta = { source: r.source, cached: false, error: '' }
             return data
           }
@@ -1022,8 +1112,9 @@ export function apply(ctx, config) {
       }
       // 全部镜像失败:回退上次成功拉到的磁盘缓存(至少让用户看到目录,能装旧版本)
       const cached = readCatalogCache()
-      // 老缓存没有 sourceUrl,只能拿实际拉通的镜像 URL 比对;新缓存按配置源比对
-      if (cached && urls.includes(cached.sourceUrl || cached.url)) {
+      // 缓存归属按「源分组 key」判断(自动=源 URL、预设=official/mirror);
+      // 老缓存没有 sourceUrl,只能拿实际拉通的镜像 URL 比对
+      if (cached && groups.some((g) => g.key === (cached.sourceUrl || cached.url))) {
         remoteDirMeta = { source: cached.url, cached: true, error: errors[0] || '' }
         return { entries: cached.entries, source: cached.url, cached: true }
       }
@@ -1778,19 +1869,30 @@ export function apply(ctx, config) {
             reloadMemeStore(dir)
             json(res, { ok: true, ...packPayload(), message: '已切换图库,立即生效' })
           } else if (op === 'setRemoteDirUrl') {
-            // 图库目录源:留空/auto = 内置多镜像自动(推荐);填 URL = 只用它(自定义/自建镜像后门)
+            // 图库目录源:''/auto = 自动多镜像(推荐);'official'/'mirror' = 预设;http(s) URL = 自定义
             const rawValue = typeof body.remoteDirUrl === 'string' ? body.remoteDirUrl.trim() : ''
-            const value = rawValue && rawValue !== 'auto' ? rawValue : ''
-            if (value) {
-              if (value.length > 500) throw new Error('目录地址过长(不超过 500 字符)')
-              if (!/^https?:\/\//i.test(value)) throw new Error('目录地址必须是 http(s) 链接')
+            let value = ''
+            if (rawValue && rawValue.toLowerCase() !== 'auto') {
+              const key = rawValue.toLowerCase()
+              if (REMOTE_DIR_PRESETS.includes(key)) {
+                value = key
+              } else if (/^https?:\/\//i.test(rawValue)) {
+                if (rawValue.length > 500) throw new Error('目录地址过长(不超过 500 字符)')
+                value = rawValue
+              } else {
+                throw new Error('目录源只能是「官方源/镜像源」预设,或 http(s) 链接')
+              }
             }
             writeSettings({ remoteDirUrl: value })
             // 立刻清缓存:前端保存后会马上重拉目录,不能等 60s 内存缓存过期
             remoteDirCache = null
             remoteDirMeta = { source: '', cached: false, error: '' }
             preferredMirrorPrefix = ''   // 换源后旧的优先镜像链路也不再适用
-            json(res, { ok: true, ...packPayload(), message: value ? '已保存图库目录源,立即生效' : '已恢复自动(内置多镜像)' })
+            json(res, {
+              ok: true,
+              ...packPayload(),
+              message: value ? '已保存图库目录源:' + dirSourceLabel(value) + ',立即生效' : '已恢复自动(内置多镜像)',
+            })
           } else if (op === 'setCompanionPrompt') {
             const text = String(body.text || '').trim()
             writeSettings({ companionPrompt: text })

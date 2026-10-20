@@ -79,7 +79,7 @@ dsh plugin --profile web add dsh-meme
 
 1. 点发现页的 **重试**；
 2. 打开 **设置 → 表情包 →「设置」**，看「图库目录源」的 **当前源**，确认自定义地址没写错（地址错也会这样）；
-3. 换个自己能访问的目录源：在同一处填 `catalog.json` 地址并保存，或点 **恢复自动**；也可以改 `~/.dsh/dsh-expression.json` 的 `"remoteDirUrl"`，即时生效。留空 = 自动。
+3. 在「图库目录源」下拉框选 **镜像源**（只走国内加速节点，最稳）；还不行再选 **自定义地址**，填一个你能访问的 `catalog.json` 地址并保存，或切回 **自动**。也可以直接改 `~/.dsh/dsh-expression.json` 的 `"remoteDirUrl"`（`""`/`auto` = 自动、`official` = 官方直连、`mirror` = 国内镜像、或自定义 URL），即时生效。
 
 自查镜像连通性（任一返回 `200` 即可）：
 

@@ -199,15 +199,23 @@ const findCover = (tree) => {
   })
   return hit
 }
-/** 设置页「图库目录源」那一行(input + 保存 + 恢复自动),别和「扫描目录」那行的同名按钮混了 */
+/** 设置页「图库目录源」自定义地址那一行(input + 保存),别和「扫描目录」那行的同名按钮混了 */
 const findDirRow = (tree) => {
   let row = null
   walk(tree, (n) => {
     if (row || !n.props || n.props.className !== 'row') return
     const kids = n.kids || []
-    if (kids.some((k) => k && k.type === 'input' && String((k.props || {}).placeholder || '').includes('留空 = 自动'))) row = n
+    if (kids.some((k) => k && k.type === 'input' && String((k.props || {}).placeholder || '').includes('catalog.json'))) row = n
   })
   return row
+}
+const findDirSelect = (tree) => {
+  let hit = null
+  walk(tree, (n) => {
+    if (hit || n.type !== 'select' || !n.props || typeof n.props.onChange !== 'function') return
+    hit = n
+  })
+  return hit
 }
 const rowButton = (row, label) => (row ? (row.kids || []).find((k) => k && k.type === 'button' && textOf(k).includes(label)) : null)
 const countDirRequests = () => apiCalls.filter((c) => c.method === 'GET' && c.url.includes('remoteDir=1')).length
@@ -332,7 +340,7 @@ test('远程封面:jsdmirror 加载失败后回退到 ghfast(新 Image 探测成
   assert.equal(findCover(tree), 'url("https://ghfast.top/' + raw + '")', 'jsdmirror 失败后应回退到 ghfast: ' + findCover(tree))
 })
 
-test('设置页「图库目录源」:保存发 setRemoteDirUrl op,恢复自动发空串', async () => {
+test('设置页「图库目录源」:下拉框选预设/自动立即保存,自定义展开输入框再保存', async () => {
   const target = 'https://ghfast.top/https://raw.githubusercontent.com/yyh-001/dsh-meme/main/packs/catalog.json'
   // host 保存后目录响应就会带上 remoteDirUrlSetting(前端保存完会立刻重拉目录)
   let savedSetting = ''
@@ -342,7 +350,9 @@ test('设置页「图库目录源」:保存发 setRemoteDirUrl op,恢复自动�
       if (body && body.op === 'setRemoteDirUrl') {
         savedSetting = body.remoteDirUrl
         return basePayload({
-          message: body.remoteDirUrl ? '已保存图库目录源' : '已恢复自动(内置多镜像)',
+          message: body.remoteDirUrl
+            ? '已保存图库目录源,立即生效'
+            : '已恢复自动(内置多镜像)',
           remoteDirUrlSetting: body.remoteDirUrl,
         })
       }
@@ -355,37 +365,57 @@ test('设置页「图库目录源」:保存发 setRemoteDirUrl op,恢复自动�
   tree = app.render()
   assert.ok(allText(tree).includes('图库目录源'), '设置页应有「图库目录源」小节: ' + allText(tree).slice(0, 300))
 
-  const input = findInput(tree, '留空 = 自动')
-  assert.ok(input, '应提供目录源输入框')
-  assert.equal(input.props.placeholder, '留空 = 自动(内置国内多镜像)', 'placeholder 应说明留空 = 自动')
-  assert.equal(input.props.maxLength, 500, '输入框应限长 500(与 host 校验一致)')
-  assert.equal(input.props.value, '', '默认应是空串(自动)')
+  // 默认自动:下拉框 + 四个选项;非自定义模式不显示地址输入框
+  const picker = findDirSelect(tree)
+  assert.ok(picker, '应提供目录源下拉框')
+  assert.equal(picker.props.value, 'auto', '默认应是「自动」')
+  const optionText = (picker.kids || [])
+    .filter((k) => k && k.type === 'option')
+    .map((k) => textOf(k)).join('|')
+  for (const label of ['自动', '官方源', '镜像源', '自定义']) {
+    assert.ok(optionText.includes(label), '下拉框缺少「' + label + '」选项: ' + optionText)
+  }
+  assert.equal(findInput(tree, 'catalog.json'), null, '自动模式不应先显示地址输入框')
 
-  // 输入 + 保存:POST body 必须带 op 与值,成功后回显 input、提示保存成功
-  findInput(app.render(), '留空 = 自动').props.onChange({ target: { value: target } })
-  tree = app.render()
-  const save = rowButton(findDirRow(tree), '保存')
-  assert.ok(save, '应有保存按钮')
+  // 选「镜像源」:立即发 op(值 mirror),并重拉目录;下拉框回显
   const getBefore = countDirRequests()
-  save.props.onClick()
+  findDirSelect(app.render()).props.onChange({ target: { value: 'mirror' } })
   await app.flush()
   const posts = remoteDirPosts()
-  assert.equal(posts.length, 1, '保存应发一次 setRemoteDirUrl op')
-  assert.equal(posts[0].body.remoteDirUrl, target, 'POST 的 remoteDirUrl 应是输入值')
+  assert.equal(posts.length, 1, '选预设应立即发一次 setRemoteDirUrl op')
+  assert.equal(posts[0].body.remoteDirUrl, 'mirror', '镜像源应对应预设值 mirror')
   assert.equal(countDirRequests(), getBefore + 1, '保存后应立即重拉目录')
   tree = app.render()
-  assert.equal(findInput(tree, '留空 = 自动').props.value, target, '保存成功后输入框应回显新值')
+  assert.equal(findDirSelect(tree).props.value, 'mirror', '保存成功后下拉框应回显预设')
   assert.ok(allText(tree).includes('已保存图库目录源'), '应提示保存成功: ' + allText(tree).slice(0, 300))
 
-  // 恢复自动:发空串,提示恢复成功
-  const reset = rowButton(findDirRow(app.render()), '恢复自动')
-  assert.ok(reset, '应有恢复自动按钮')
-  reset.props.onClick()
+  // 切回「自动」:发空串
+  findDirSelect(app.render()).props.onChange({ target: { value: 'auto' } })
   await app.flush()
-  const posts2 = remoteDirPosts()
-  assert.equal(posts2.length, 2, '恢复自动也应发 setRemoteDirUrl op')
-  assert.equal(posts2[1].body.remoteDirUrl, '', '恢复自动应发空串')
-  assert.ok(allText(app.render()).includes('已恢复自动'), '应提示已恢复自动: ' + allText(app.render()).slice(0, 300))
+  assert.equal(remoteDirPosts()[1].body.remoteDirUrl, '', '自动应对应空串')
+  tree = app.render()
+  assert.equal(findDirSelect(tree).props.value, 'auto')
+  assert.ok(allText(tree).includes('已恢复自动'), '应提示已恢复自动: ' + allText(tree).slice(0, 300))
+
+  // 选「自定义地址…」:只展开输入框,不立刻发请求;输入 + 保存才提交
+  const postsBefore = remoteDirPosts().length
+  findDirSelect(app.render()).props.onChange({ target: { value: 'custom' } })
+  tree = app.render()
+  const input = findInput(tree, 'catalog.json')
+  assert.ok(input, '自定义模式应出现地址输入框')
+  assert.equal(input.props.maxLength, 500, '输入框应限长 500(与 host 校验一致)')
+  assert.equal(input.props.value, '', '默认应是空串(自动)')
+  assert.equal(remoteDirPosts().length, postsBefore, '仅展开输入框不应发保存请求')
+  input.props.onChange({ target: { value: target } })
+  tree = app.render()
+  const save = rowButton(findDirRow(tree), '保存')
+  assert.ok(save, '自定义模式应有保存按钮')
+  save.props.onClick()
+  await app.flush()
+  const saved = remoteDirPosts().slice(-1)[0]
+  assert.equal(saved.body.remoteDirUrl, target, 'POST 的 remoteDirUrl 应是输入值')
+  tree = app.render()
+  assert.equal(findInput(tree, 'catalog.json').props.value, target, '保存成功后输入框应回显新值')
 })
 
 test('imageCandidates:raw GitHub 按契约 §1.1 候选顺序,非 GitHub 原样返回', async () => {

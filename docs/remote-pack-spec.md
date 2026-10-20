@@ -143,7 +143,7 @@
 curl https://purge.jsdelivr.net/gh/yyh-001/dsh-meme-packs@main/catalog.json
 ```
 
-拉目录时会带 `?t=<时间戳>` 挡中间层（透明代理）的缓存，进程内还有 60 秒缓存，不会打爆上游。内网或调试场景可在 `~/.dsh/dsh-expression.json` 里写 `"remoteDirUrl": "https://你的地址/catalog.json"`（或 patch config 的 `remoteDirUrl`），改动即时生效，不用重启。
+拉目录时会带 `?t=<时间戳>` 挡中间层（透明代理）的缓存，进程内还有 60 秒缓存，不会打爆上游。内网或调试场景可在 `~/.dsh/dsh-expression.json` 里写 `"remoteDirUrl": "https://你的地址/catalog.json"`（或 patch config 的 `remoteDirUrl`），改动即时生效，不用重启。设置页「图库目录源」是下拉框：**自动**（空串，内置多镜像竞速，默认）、**官方源**（`"official"`，只直连 `raw.githubusercontent.com`）、**镜像源**（`"mirror"`，只走 gh 加速前缀，jsDelivr 兜底）、**自定义地址**（任意 http(s) `catalog.json` URL）。
 
 ## 国内网络与镜像
 
@@ -168,6 +168,6 @@ raw 文件按国内可达性排序：`cdn.jsdmirror.com` → `ghfast.top` → `g
 
 ### 自定义目录源与缓存
 
-`remoteDirUrl` 优先级：**用户设置（设置页「图库目录源」写入 `~/.dsh/dsh-expression.json`）> patch config 的 `remoteDirUrl` > 内置默认**。设置页只接受单个 http(s) 地址（≤500 字符，留空或 `auto` 恢复自动）；patch config 可写数组。保存后清空目录缓存并立即生效，不用重启。
+`remoteDirUrl` 优先级：**用户设置（设置页「图库目录源」写入 `~/.dsh/dsh-expression.json`）> patch config 的 `remoteDirUrl` > 内置默认**。设置页下拉框会写入 `""`（自动）、`"official"`、`"mirror"` 或自定义 http(s) 地址（≤500 字符）；patch config 可写 URL 数组。保存后清空目录缓存并立即生效，不用重启。目录源分组由纯函数 `directoryGroupsFor(setting, fallbackUrls)` 计算，每个分组带 `key`（预设名或源 URL），磁盘缓存按它判断是否仍属当前源。
 
 磁盘缓存文件：`~/.dsh/dsh-meme-catalog-cache.json`，内容 `{ at, url, sourceUrl, entries }`（`url` 为实际拉通的镜像 URL，`sourceUrl` 为当时的配置源），仅在拉取成功且条目数 > 0 时写入（写失败静默）。单次尝试 6 秒超时，整轮拉取总预算 12 秒。全部源失败时，若缓存里的 `sourceUrl`（老缓存兼容用 `url`）仍属于当前源列表，目录用缓存返回并标记 `remoteDirCached: true`（界面提示「当前使用本地缓存」），否则按彻底失败处理，返回 `null` 和最后一条错误摘要。
