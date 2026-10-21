@@ -15,17 +15,33 @@ const advance = (ms) => { skew += ms }
 
 // ---- 假 DOM:只实现 decorateMemeText 真正用到的那几样 ----
 let walkerCalls = 0
-const textNode = { nodeValue: '[表情: 开心]' }
+const textNode = { nodeValue: '[表情: 开心]', isConnected: true }
 const parent = {
   dataset: {},
-  closest: (sel) => (sel === '[data-chat-flow]' ? parent : null),
+  nodeType: 1,
+  style: {},
+  childNodes: [],
+  querySelectorAll: () => [],
+  querySelector: () => null,
+  getAttribute: () => null,
+  // issue #41:增量扫描靠 closest('[data-chat-flow],[data-chat-flow-key]') 认聊天流容器,
+  // 全量路径同理;这里两个选择器都算命中,否则文本节点会被判定为「不在聊天流里」。
+  closest: (sel) => (sel === '[data-chat-flow],[data-chat-flow-key]' ? parent : null),
   replaceChild(frag, node) { this.replaced = { frag, node } },
 }
 textNode.parentElement = parent
 
 globalThis.document = {
   head: { appendChild() {} },
-  body: {},
+  body: {
+    nodeType: 1,
+    dataset: {},
+    style: {},
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    getAttribute: () => null,
+    isConnected: true,
+  },
   createElement: (tag) => ({ tagName: String(tag).toUpperCase(), style: {}, dataset: {}, setAttribute() {}, remove() {} }),
   createDocumentFragment: () => ({ children: [], appendChild(c) { this.children.push(c); return c } }),
   createTextNode: (value) => ({ nodeValue: value }),
@@ -81,10 +97,18 @@ const drain = async (rounds = 8) => { for (let i = 0; i < rounds; i++) await Pro
 // 测试自己的等待必须走真实定时器,否则一起被吞掉 → 进程挂死。
 const realSetTimeout = globalThis.setTimeout
 const sleep = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms))
-// 客户端里装饰扫描是防抖的(见 #22 第 4 条),所以触发一次 mutation 之后要等过防抖窗口
-// 再断言——这样这条测试在「只合了本条修复」和「两条修复都合了」的树上都是绿的。
+// 客户端里装饰扫描是最小间隔 300ms 的调度(见 #22 第 4 条 / issue #41),所以触发一次
+// mutation 之后要等过这个窗口再断言——这样这条测试在「只合了本条修复」和「两条修复都合了」的树上都是绿的。
+//
+// issue #41:这里用一条「结构性删除」记录(增量扫描见到不是自家 img 的删除必然回退全量),
+// 把一次扫描钉成「全文档 TreeWalker」,才能用 walkerCalls 数出扫描次数。
 const scan = async () => {
-  globalThis.__moCb([{ type: 'childList', addedNodes: [{}], removedNodes: [] }])
+  globalThis.__moCb([{
+    type: 'childList',
+    target: document.body,
+    addedNodes: [],
+    removedNodes: [{ nodeType: 1, matches: () => false }],
+  }])
   await drain()
   await sleep(350)
   await drain()

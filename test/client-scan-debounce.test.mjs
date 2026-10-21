@@ -1,106 +1,101 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-// issue #22 第 4 条:装饰扫描不能每条 mutation 都跑一遍全文档。
-// 旧实现是 `new MutationObserver(() => { decorateMemeText(); decorateNavIcon() })`,
-// 流式输出期间 mutation 密集,长会话(数千节点)下每次都要 createTreeWalker 走全篇 +
-// 正则逐个文本节点,扫描会雪崩。改成 trailing 防抖 300ms + maxWait 1.2s 兜底。
+import { installFakeDom, mountPlugin } from './fake-dom.mjs'
+
+// issue #22 第 4 条 + issue #41:装饰扫描的调度节奏。
 //
-// 这里钉住三件事:① 一串 mutation 只扫一次 ② mutation 不停时仍会在 maxWait 内扫
-// (纯 trailing 防抖会被无限重排,页面从此不再扫描)③ 卸载后不再扫描、定时器已清。
+// 旧实现是纯 trailing 防抖:每次 mutation 都 clearTimeout 重排。流式输出期间变动比 300ms
+// 还密,定时器永远等不到触发点,全靠 maxWait 兜底,而且一次全量扫描本身还可能超过 1.2s
+// (长会话里图永远比文字晚一大截)。现在的语义是「最小间隔 + 排一次不重排」:
+//   · 首条变动立即扫(lastScanAt === 0 时 wait = 0),表情第一时间转图;
+//   · 之后每个 SCAN_MIN_GAP(300ms)窗口最多一批,窗内变动合并到窗末尾;
+//   · 持续变动时按固定节奏一批批扫,而不是一路拖到 maxWait;
+//   · maxWait(1.2s)只是上界;卸载要清掉待触发定时器。
+//
+// 假 DOM 里每次全量扫描都会为 document.body 建一个 TreeWalker,所以「扫描时刻」就是
+// 以 body 为根的 walker 记录:既能数次数,也能量间隔。
 
-let walkerCalls = 0
-const scanAt = [] // 每次扫描的时刻:用来量「首扫离触发有多远」,而不是量测试自己的 sleep
-let observerCallback = null
-let observerOptions = null
-let disconnected = 0
-let observing = false
-
-globalThis.document = {
-  head: { appendChild() {} },
-  body: {},
-  createElement: () => ({ textContent: '', style: {}, dataset: {}, setAttribute() {}, remove() {}, appendChild() {} }),
-  createTreeWalker: () => { walkerCalls++; scanAt.push(Date.now()); return { nextNode: () => null } },
-  querySelector: () => null,
-  querySelectorAll: () => [],
-  createDocumentFragment: () => ({ appendChild() {} }),
-  createTextNode: () => ({}),
-}
-globalThis.NodeFilter = { SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1 }
-// 假 observer:disconnect() 之后就真的不再投递(真实 DOM 也是这个语义),
-// 否则「卸载后不再扫描」这条测的就不是插件,而是测试自己。
-globalThis.MutationObserver = class {
-  constructor(cb) { observerCallback = cb }
-  observe(_target, options) { observing = true; observerOptions = options }
-  disconnect() { observing = false; disconnected++ }
-}
-globalThis.window = {
-  location: { origin: 'http://localhost', href: '' },
-  __ModuleLoader__: {
-    load(def) {
-      globalThis.__dshMeme = def.factory(() => ({
-        Fragment: Symbol('Fragment'),
-        createElement: () => ({}),
-        useState: (v) => [v, () => {}],
-        useEffect: () => {},
-        useRef: (v) => ({ current: v }),
-        useMemo: (fn) => fn(),
-        useCallback: (fn) => fn,
-      }))
-    },
-  },
-}
-globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true, memes: [] }) })
-
-await import('../client.js')
-
-const effects = []
-globalThis.__dshMeme.apply({ get: () => undefined, effect: (fn) => effects.push(fn) })
+const dom = installFakeDom()
+const effects = await mountPlugin({ collectEffects: true })
 const dispose = effects.map((fn) => fn()).filter((fn) => typeof fn === 'function')
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-const mutation = (type = 'childList') => {
-  if (!observing) return
-  observerCallback([{ type, addedNodes: type === 'childList' ? [{}] : [], removedNodes: [] }])
-}
+const sleep = dom.sleep
+const bodyScanTimes = () => dom.walkerStats.records.filter((r) => r.root === dom.body).map((r) => r.at)
 
-test('mutation 成串到达时只扫一次(防抖,issue #22)', async () => {
-  const before = walkerCalls
-  const batch = walkerCalls
-  for (let i = 0; i < 50; i++) mutation() // 同一个 tick 里 50 条,模拟流式输出的密集改动
-  assert.equal(walkerCalls, before, 'observer 回调里不该同步扫描')
+// 一条「结构性删除」记录:增量扫描见到它必然回退全量,所以这条记录等价于「踢一次扫描」,
+// 又不会像真正改 DOM 那样引入别的副作用(这里测的是调度,不是装饰)。
+const mutation = () => dom.emit([{
+  type: 'childList',
+  target: dom.body,
+  addedNodes: [],
+  removedNodes: [{ nodeType: 1, matches: () => false }],
+}])
+
+test('同一 tick 的成串变动只触发一次扫描,且 observer 回调里不同步扫描', async () => {
+  dom.walkerStats.reset()
+  dom.emit(Array.from({ length: 50 }, () => ({
+    type: 'childList',
+    target: dom.body,
+    addedNodes: [],
+    removedNodes: [{ nodeType: 1, matches: () => false }],
+  })))
+  assert.equal(dom.walkerStats.calls, 0, 'observer 回调里不该同步扫描')
   await sleep(450)
-  assert.equal(walkerCalls - batch, 1, '50 条 mutation 应合并成一次扫描')
+  assert.equal(dom.walkerStats.bodyCalls, 1, '50 条变动应合并成一次扫描')
 })
 
-test('mutation 持续不断时仍在 maxWait(1.2s)内扫一次,不会被无限重排', async () => {
-  const before = walkerCalls
+test('持续变动时按 ~300ms 节奏分批扫描,首扫在 maxWait(1.2s)内', async () => {
+  dom.walkerStats.reset()
   const started = Date.now()
-  for (let i = 0; i < 16; i++) { mutation(); await sleep(100) } // 每 100ms 一条,故意比防抖窗口还密
-  // 循环自己的下限就是 16 × 100ms = 1.6s,而 Windows 的定时器粒度还会再叠上 0.2s 左右,
-  // 拿「循环耗时」当上限等于在断言测试自己。这里要钉的是「插件扫得够快」:
-  // 首扫必须落在 maxWait(1.2s) 内——纯 trailing 防抖会被无限重排,永远等不到首扫。
-  const firstScan = scanAt.slice(before).find((at) => at >= started)
-  assert.ok(firstScan !== undefined, '持续 mutation 期间必须至少扫过一次,否则 [表情: x] 会一路裸露且刷新也不自愈')
-  assert.ok(firstScan - started <= 1200 + 400, '首扫应在 maxWait(1.2s)内发生,实测 ' + (firstScan - started) + 'ms')
-  await sleep(400)
-  assert.ok(walkerCalls <= before + 3, '不该每条 mutation 都扫一遍(实测 ' + (walkerCalls - before) + ' 次/16 条)')
+  for (let i = 0; i < 16; i++) {
+    mutation() // 每 100ms 一条,故意比 300ms 窗口还密
+    await sleep(100)
+  }
+  await sleep(400) // 等最后一批的排期到点
+
+  const at = bodyScanTimes()
+  assert.ok(at.length > 0, '持续变动期间必须至少扫过一次,否则 [表情: x] 会一路裸露')
+  assert.ok(at[0] - started <= 1200 + 400, '首扫应在 maxWait(1.2s)内发生,实测 ' + (at[0] - started) + 'ms')
+
+  const gaps = at.slice(1).map((t, i) => t - at[i])
+  for (const gap of gaps) {
+    assert.ok(gap >= 250, '同一个 300ms 窗口最多扫一次,实测相邻间隔 ' + gaps.join(',') + 'ms')
+  }
+  // 1.6s 的持续变动,按 300ms 一批应有 5~7 次;旧的「一直重排」实现只会拖到 maxWait 后扫一次
+  assert.ok(at.length >= 4, '持续变动应分批扫描多次,不能一直往后拖(实测 ' + at.length + ' 次)')
+  assert.ok(at.length <= 9, '也不该每条变动都扫一遍(实测 ' + at.length + ' 次)')
 })
 
-test('订阅里带 characterData(宿主原地改文本也要能装饰)', () => {
-  assert.equal(observerOptions.childList, true)
-  assert.equal(observerOptions.subtree, true)
-  assert.equal(observerOptions.characterData, true)
+test('订阅里带 childList/subtree/characterData(宿主原地改文本也要能装饰)', () => {
+  assert.equal(dom.observerStats.options.childList, true)
+  assert.equal(dom.observerStats.options.subtree, true)
+  assert.equal(dom.observerStats.options.characterData, true)
 })
 
 test('卸载时清掉待触发的扫描定时器,断开后也不再投递', async () => {
-  const before = walkerCalls
-  mutation()                     // 排一次防抖扫描,但还没到点
+  dom.walkerStats.reset()
+  mutation() // 排一次扫描,但还没到点
   for (const fn of dispose) fn() // 到点之前卸载
-  assert.ok(disconnected >= 1, '应断开 observer')
+  assert.ok(dom.observerStats.disconnects >= 1, '应断开 observer')
   await sleep(450)
-  assert.equal(walkerCalls, before, '卸载时待触发的扫描定时器应被清掉')
-  mutation()                     // disconnect 之后宿主不会再投递,这里模拟也不该生效
+  assert.equal(dom.walkerStats.calls, 0, '卸载时待触发的扫描定时器应被清掉')
+  mutation() // disconnect 之后宿主不会再投递,这里模拟也不该生效
   await sleep(450)
-  assert.equal(walkerCalls, before, '已卸载就不该再有扫描')
+  assert.equal(dom.walkerStats.calls, 0, '已卸载就不该再有扫描')
+})
+
+test('卸载后重新挂载会复位节奏:首条变动立即扫,不带上一轮的排期', async () => {
+  const effects2 = await mountPlugin({ collectEffects: true })
+  const dispose2 = effects2.map((fn) => fn()).filter((fn) => typeof fn === 'function')
+  dom.walkerStats.reset()
+
+  const started = Date.now()
+  mutation()
+  await sleep(150) // 远小于 300ms 的最小间隔
+  const at = bodyScanTimes()
+  assert.equal(at.length, 1, '卸载复位了 lastScanAt,重挂载后首条变动应立即扫描')
+  assert.ok(at[0] - started <= 150, '首扫不该等 300ms 窗口,实测 ' + (at[0] - started) + 'ms')
+
+  for (const fn of dispose2) fn()
 })

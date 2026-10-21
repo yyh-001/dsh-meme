@@ -2489,53 +2489,62 @@ window.__ModuleLoader__.load({
           seen.add(caption)
         }
       }
-      const decorateMemeText = () => {
-        // 宿主重渲染(切语言/切主题/HMR)会让 React 对纯文本 children 走 textContent 覆写:
-        // 注入的 img 和 ghost 一起被抹掉、原文裸露,而 data-meme-decorated 在元素属性上,
-        // 覆写不影响它 → 标记还在、注入已不在,下面的 acceptNode 见标记就永久跳过,图再也
-        // 回不来,刷新页面才恢复(issue #26)。每轮扫描先摘孤儿标记:注入 = img + ghost,
-        // 两个都不在了才认孤儿;降级装饰(图库未命中、只有 ghost)不能动,否则每轮扫描都在
-        // 白白重写这段 DOM。摘完标记本轮就会重新装饰;上一轮幸存的同描述图由 dedupeMemeImages 去重。
-        // 同一轮顺带处理「隐藏残留」:hide walk 只藏不露,React 之后往同一个元素写回可见文本
-        // (流式追加/编辑消息)时元素还带着 display:none,内容会永久不可见——按「现在有没有
-        // 可见文本」翻回来,只动打过 data-meme-empty 标记的,宿主自己隐藏的元素不碰。
-        for (const el of document.querySelectorAll('[data-meme-decorated],[data-meme-empty]')) {
-          if (!el.querySelector('img[data-meme-img],[data-meme-hidden]')) delete el.dataset.memeDecorated
+      // ---- 增量扫描配套 ----
+      // 文字节点该不该被装饰:判据与原 acceptNode 完全一致(增量扫描复用同一套,
+      // 免得两条路径行为分叉)。
+      const memeTextAcceptable = (node) => {
+        const parent = node.parentElement
+        if (!parent) return false
+        // 只渲染「对话」气泡。轨迹 / Think / 工具卡 / 输入框保持纯文本。
+        // 容器标记认两个:老版本是 data-chat-flow,DSH 0.1.2 起消息行是 data-chat-flow-key
+        // (issue #22 附录,使用者在新版上实测)。只认前者的话新版上 TreeWalker 一个节点都
+        // 扫不到、表情永不转图;多认一个纯增益。
+        const flowEl = parent.closest('[data-chat-flow],[data-chat-flow-key]')
+        if (!flowEl) return false
+        if (parent.closest('input,textarea,[contenteditable="true"],[data-variant="think"],[data-variant="others"],pre,code')) {
+          return false
+        }
+        // 自己的 ghost 里装着 [表情: x] 原文,不排掉就会被反复装饰
+        if (parent.closest('[data-meme-hidden]')) return false
+        if (parent.dataset && parent.dataset.memeDecorated) return false
+        // 0.2 宿主(dsh-client-ui-chat 0.2.0-rc.2)源码核对:① 工具/步骤轨迹整行是
+        // data-chat-flow-kind="turn-process",宿主自己枚举行时也排除它,不排的话新版上
+        // 轨迹文本会被装饰;② 分组折叠容器 ChatGroupSeat 的根上同时挂着
+        // data-chat-group-key 和 data-chat-flow-key,分组头部文本最近命中的是分组本身,
+        // 放行会把图提到分组顶上。消息行(FlowItem)只有 flow-key,不受影响。两个标记
+        // 老版宿主都没有,加了纯增益。
+        if (parent.closest('[data-chat-flow-kind="turn-process"]')) return false
+        if (flowEl.getAttribute('data-chat-group-key') !== null) return false
+        return MEME_TEXT_TEST.test(node.nodeValue || '')
+      }
+      // 清理孤儿标记与隐藏残留:scope 为元素时只清它自己和它的后代,为 null 时清全文档。
+      // 返回「标记被清掉、需要重新装饰」的元素列表。
+      const cleanupMemeMarkers = (scope) => {
+        const root = scope && scope.nodeType === 1 ? scope : null
+        const list = []
+        if (root) {
+          if (root.dataset && (root.dataset.memeDecorated || root.dataset.memeEmpty)) list.push(root)
+          for (const el of root.querySelectorAll('[data-meme-decorated],[data-meme-empty]')) list.push(el)
+        } else {
+          for (const el of document.querySelectorAll('[data-meme-decorated],[data-meme-empty]')) list.push(el)
+        }
+        const revived = []
+        for (const el of list) {
+          if (!el.querySelector('img[data-meme-img],[data-meme-hidden]')) {
+            if (el.dataset.memeDecorated) revived.push(el)
+            delete el.dataset.memeDecorated
+          }
           if (el.dataset.memeEmpty && textWithoutGhosts(el).trim()) {
             delete el.dataset.memeEmpty
             el.style.display = ''
           }
         }
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-          acceptNode(node) {
-            const parent = node.parentElement
-            if (!parent) return NodeFilter.FILTER_REJECT
-            // 只渲染「对话」气泡。轨迹 / Think / 工具卡 / 输入框保持纯文本。
-            // 容器标记认两个:老版本是 data-chat-flow,DSH 0.1.2 起消息行是 data-chat-flow-key
-            // (issue #22 附录,使用者在新版上实测)。只认前者的话新版上 TreeWalker 一个节点都
-            // 扫不到、表情永不转图;多认一个纯增益。
-            const flowEl = parent.closest('[data-chat-flow],[data-chat-flow-key]')
-            if (!flowEl) return NodeFilter.FILTER_REJECT
-            if (parent.closest('input,textarea,[contenteditable="true"],[data-variant="think"],[data-variant="others"],pre,code')) {
-              return NodeFilter.FILTER_REJECT
-            }
-            // 自己的 ghost 里装着 [表情: x] 原文,不排掉就会被反复装饰
-            if (parent.closest('[data-meme-hidden]')) return NodeFilter.FILTER_REJECT
-            if (parent.dataset && parent.dataset.memeDecorated) return NodeFilter.FILTER_REJECT
-            // 0.2 宿主(dsh-client-ui-chat 0.2.0-rc.2)源码核对:① 工具/步骤轨迹整行是
-            // data-chat-flow-kind="turn-process",宿主自己枚举行时也排除它,不排的话新版上
-            // 轨迹文本会被装饰;② 分组折叠容器 ChatGroupSeat 的根上同时挂着
-            // data-chat-group-key 和 data-chat-flow-key,分组头部文本最近命中的是分组本身,
-            // 放行会把图提到分组顶上。消息行(FlowItem)只有 flow-key,不受影响。两个标记
-            // 老版宿主都没有,加了纯增益。
-            if (parent.closest('[data-chat-flow-kind="turn-process"]')) return NodeFilter.FILTER_REJECT
-            if (flowEl.getAttribute('data-chat-group-key') !== null) return NodeFilter.FILTER_REJECT
-            return MEME_TEXT_TEST.test(node.nodeValue || '') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
-          },
-        })
-        const nodes = []
-        let n
-        while ((n = walker.nextNode())) nodes.push(n)
+        return revived
+      }
+      // 装饰一批文本节点:全量扫描与增量扫描共用同一段装饰逻辑。
+      // forceDedupe=true(全量路径)照旧每轮去重;增量路径只在真的装饰了东西时才去重。
+      const decorateMemeNodes = (nodes, forceDedupe) => {
+        let decoratedAny = false
         for (const node of nodes) {
           const parent = node.parentElement
           if (!parent || parent.dataset.memeDecorated) continue
@@ -2551,6 +2560,7 @@ window.__ModuleLoader__.load({
             continue
           }
           parent.dataset.memeDecorated = '1'
+          decoratedAny = true
           const frag = document.createDocumentFragment()
           const imgs = []
           let last = 0
@@ -2564,6 +2574,9 @@ window.__ModuleLoader__.load({
               img.title = hit[0].slice(0, 60)
               img.dataset.memeImg = foldCaption(hit[1]) // 去重用的描述标记
               img.style.cssText = 'max-width:180px;max-height:180px;border-radius:10px;display:block;margin:8px 0'
+              // 图在聊天流里常常一屏放不下:懒加载省首屏解码,异步解码避免长任务卡渲染。
+              img.loading = 'lazy'
+              img.decoding = 'async'
               frag.appendChild(img)
               frag.appendChild(ghostFor(hit[0]))
               imgs.push(img)
@@ -2604,7 +2617,29 @@ window.__ModuleLoader__.load({
             }
           }
         }
-        dedupeMemeImages()
+        if (forceDedupe || decoratedAny) dedupeMemeImages()
+        return decoratedAny
+      }
+      const decorateMemeText = () => {
+        // 宿主重渲染(切语言/切主题/HMR)会让 React 对纯文本 children 走 textContent 覆写:
+        // 注入的 img 和 ghost 一起被抹掉、原文裸露,而 data-meme-decorated 在元素属性上,
+        // 覆写不影响它 → 标记还在、注入已不在,下面的 acceptNode 见标记就永久跳过,图再也
+        // 回不来,刷新页面才恢复(issue #26)。每轮扫描先摘孤儿标记:注入 = img + ghost,
+        // 两个都不在了才认孤儿;降级装饰(图库未命中、只有 ghost)不能动,否则每轮扫描都在
+        // 白白重写这段 DOM。摘完标记本轮就会重新装饰;上一轮幸存的同描述图由 dedupeMemeImages 去重。
+        // 同一轮顺带处理「隐藏残留」:hide walk 只藏不露,React 之后往同一个元素写回可见文本
+        // (流式追加/编辑消息)时元素还带着 display:none,内容会永久不可见——按「现在有没有
+        // 可见文本」翻回来,只动打过 data-meme-empty 标记的,宿主自己隐藏的元素不碰。
+        cleanupMemeMarkers(null)
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+          acceptNode(node) {
+            return memeTextAcceptable(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
+          },
+        })
+        const nodes = []
+        let n
+        while ((n = walker.nextNode())) nodes.push(n)
+        decorateMemeNodes(nodes, true)
       }
       // 设置侧边栏「表情包」行的齿轮图标替换成笑脸(dsh navIcon 硬编码,不支持自定义)
       const decorateNavIcon = () => {
@@ -2637,45 +2672,137 @@ window.__ModuleLoader__.load({
       }
       // 扫描是「全文档 TreeWalker + 每个文本节点跑一遍正则」,不便宜;流式输出期间
       // mutation 密集,每来一条就整篇扫一遍会在长会话里雪崩(点进去明显卡顿)。
-      // 防抖 300ms,但必须有 maxWait 兜底:纯 trailing 防抖在 mutation 连续不断时会被
-      // 无限重排(每次 mutation 都清掉重排 300ms),页面从此不再扫描、[表情: x] 一路
-      // 裸露,刷新也不自愈——这是比卡顿更难查的一层。
-      const SCAN_DEBOUNCE = 300
+      // 原先靠 300ms 纯 trailing 防抖压频率,但每次 mutation 都清掉重排,变动比 300ms
+      // 更密时定时器永远等不到触发点,只能靠 SCAN_MAX_WAIT 兜底;一次全量扫描本身还可能
+      // 超过 1.2s,长会话里会一直扫——图于是永远比文字晚一大截(实测中位 600ms、
+      // p90 1100ms)。现在改成「最小间隔 + 排一次不重排」:扫描一结束就把下一次排上,
+      // 窗内变动合并到窗末尾,节奏固定、不会被后续 mutation 无限推迟。
+      const SCAN_MIN_GAP = 300
+      // 调度上界:从本轮第一次变动算起最多推迟这么久。最小间隔(300ms)恒小于它,due 不会
+      // 晚于 now+SCAN_MIN_GAP,正常节奏下命中不了;保留它是给调度公式一个硬上界。
       const SCAN_MAX_WAIT = 1200
       let scanTimer = 0
       let scanDeadline = 0
       let scanning = false
+      // 增量扫描:只处理 MutationObserver 记录里真正变过的文本节点/新增子树;
+      // 只有结构性重排(删了别的东西元素)才回退全量扫描。首轮与索引到达仍走全量。
+      const MEME_NODE_TEXT = 3
+      const MEME_NODE_ELEMENT = 1
+      const MEME_PENDING_LIMIT = 2000
+      let pendingRecords = []
+      let forceFullScan = true
+      const collectMemeTextNodes = (node, out) => {
+        if (!node) return
+        if (node.nodeType === MEME_NODE_TEXT) { out.push(node); return }
+        if (node.nodeType !== MEME_NODE_ELEMENT) return
+        const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT)
+        let n
+        while ((n = walker.nextNode())) out.push(n)
+      }
+      // 增量路径的「解藏」:hide walk 会把 parent→行容器之间的空中间层都 display:none,并打上
+      // data-meme-empty(见 decorateMemeNodes 末尾)。宿主之后往这些层里补可见文本(流式追加 /
+      // 编辑消息)时,增量清理的范围只在变动点子树内、碰不到祖先,新文字会一直隐着,直到下一次
+      // 全量扫描才回来。这里从变动点向上,把带着标记、且已经有可见文本的祖先翻回来;只动自己
+      // 打过标记的元素,宿主自己隐藏的不碰。
+      const unhideStale = (start) => {
+        for (let el = start; el; el = el.parentElement) {
+          if (el.dataset && el.dataset.memeEmpty && textWithoutGhosts(el).trim()) {
+            delete el.dataset.memeEmpty
+            el.style.display = ''
+          }
+          if (el.matches && el.matches('[data-time-hover-root],[data-chat-flow-key]')) return
+        }
+      }
+      // 增量装饰:只处理记录里指向的节点。返回 false = 需要回退全量扫描。
+      const decorateMemeIncremental = (records) => {
+        const candidates = []
+        for (const record of records) {
+          if (record.type === 'characterData') {
+            collectMemeTextNodes(record.target, candidates)
+            // 原地改写也可能把可见文本写回上一轮被 hide 的中间层,先解藏再装饰。
+            unhideStale(record.target.parentElement || record.target)
+            continue
+          }
+          if (record.type !== 'childList') continue
+          const target = record.target
+          // 宿主覆写 textContent 会把注入的 img/ghost 一起删掉,元素上的标记成了孤儿(issue
+          // #26)。只有真的删了东西才需要清目标容器:纯新增(新消息行插进流容器)时 target
+          // 是整个历史容器,清它的标记是 O(历史) 的 —— 增量扫描就白做了。
+          if (target && target.nodeType === MEME_NODE_ELEMENT && record.removedNodes.length > 0) {
+            for (const el of cleanupMemeMarkers(target)) collectMemeTextNodes(el, candidates)
+          }
+          for (const added of record.addedNodes) {
+            collectMemeTextNodes(added, candidates)
+            // 新内容落进上一轮被 hide 的空中间层时,把显示恢复回来。
+            unhideStale(added.nodeType === MEME_NODE_ELEMENT ? added : added.parentElement)
+          }
+          for (const removed of record.removedNodes) {
+            // 删掉的是自己注入的 img/ghost → 上面的局部清理已经处理;
+            // 删掉的是别的东西 → 布局变了,全量扫描才稳妥。
+            if (removed.nodeType !== MEME_NODE_ELEMENT) continue
+            const ours = typeof removed.matches === 'function' && removed.matches('img[data-meme-img],[data-meme-hidden]')
+            if (!ours) return false
+          }
+        }
+        const nodes = []
+        for (const node of candidates) {
+          if (!node.isConnected) continue
+          if (!memeTextAcceptable(node)) continue
+          nodes.push(node)
+        }
+        if (nodes.length > 0) decorateMemeNodes(nodes, false)
+        return true
+      }
       const runScan = () => {
         if (scanning) return // 重入保护:装饰本身改 DOM,会再触发 observer
         scanning = true
         try {
-          decorateMemeText()
+          const records = pendingRecords
+          pendingRecords = []
+          let handled = false
+          if (!forceFullScan && records.length > 0 && records.length <= MEME_PENDING_LIMIT) {
+            handled = decorateMemeIncremental(records)
+          }
+          if (!handled) decorateMemeText()
+          forceFullScan = false
           decorateNavIcon()
         } catch (error) {
-          // 装饰失败不该打断宿主渲染:最多是这一轮表情不转图
+          // 装饰失败不该打断宿主渲染:最多是这一轮表情不转图。
+          // 但这一轮可能只处理了一半:下一轮退回全量,别让增量背着半成品状态继续。
+          forceFullScan = true
           console.warn('[dsh-expression] 表情装饰失败:', error && error.message ? error.message : error)
         } finally {
           scanning = false
         }
       }
+      let lastScanAt = 0
+      // 关键:已排期的扫描不再被后续变动重排(旧实现每次都 clearTimeout 重来)。
+      // 触发时刻由「上次扫描时刻」唯一定出,后续变动只合并、不改变它,因此密流式
+      // 也不会把扫描无限往后推 —— 那正是旧实现「图比文字晚一大截」的根因。
       const scheduleScan = () => {
+        if (scanTimer !== 0) return // 本轮已有排期,合流即可
         const now = Date.now()
         if (scanDeadline === 0) scanDeadline = now + SCAN_MAX_WAIT
-        clearTimeout(scanTimer)
+        const due = lastScanAt === 0 ? now : lastScanAt + SCAN_MIN_GAP
+        const wait = Math.max(0, Math.min(due, scanDeadline) - now)
         scanTimer = setTimeout(() => {
           scanTimer = 0
           scanDeadline = 0
+          lastScanAt = Date.now()
           runScan()
-        }, Math.max(0, Math.min(SCAN_DEBOUNCE, scanDeadline - now)))
+        }, wait)
       }
       const observer = new MutationObserver((records) => {
-        // 只认真正影响文本的变动;纯属性变化(宿主的 hover/动画很吵)不值得重扫
+        // 只认真正影响文本的变动;纯属性变化(宿主的 hover/动画很吵)不值得重扫。
+        // 记录攒起来给增量扫描用。
+        let relevant = 0
         for (const record of records) {
           if (record.type === 'characterData' || record.addedNodes.length || record.removedNodes.length) {
-            scheduleScan()
-            return
+            pendingRecords.push(record)
+            relevant++
           }
         }
+        if (relevant > 0) scheduleScan()
       })
       observer.observe(document.body, { childList: true, subtree: true, characterData: true })
       runScan()
@@ -2684,6 +2811,11 @@ window.__ModuleLoader__.load({
         clearTimeout(scanTimer)
         scanTimer = 0
         scanDeadline = 0
+        // 模块级状态不清会让「卸载→重新挂载」继承上一轮的节奏:复位后首条变动仍立即扫,
+        // 待处理记录也不会被带进下一次挂载。
+        pendingRecords = []
+        lastScanAt = 0
+        forceFullScan = true
       }, 'dsh-expression-entry: meme text observer')
 
       const slots = ctx.get('slots')
