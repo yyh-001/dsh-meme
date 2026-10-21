@@ -18,7 +18,18 @@ const React = {
   useSyncExternalStore: (_subscribe, get) => get(),
 }
 globalThis.document = {
-  head: { appendChild() {} }, body: {},
+  head: { appendChild() {} },
+  // issue #41:全量扫描的 cleanupMemeMarkers / decorateMemeText 会把 document.body 当根用,
+  // 所以它得是个像样的元素(nodeType/dataset/querySelectorAll)。
+  body: {
+    nodeType: 1,
+    dataset: {},
+    style: {},
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    getAttribute: () => null,
+    isConnected: true,
+  },
   createElement: (tag) => ({ tagName: tag.toUpperCase(), style: {}, dataset: {}, setAttribute() {}, remove() {} }),
   createDocumentFragment: () => ({ children: [], appendChild(c) { this.children.push(c) } }),
   createTextNode: (v) => ({ nodeValue: v }),
@@ -62,15 +73,30 @@ const { apiPost } = globalThis.plugin.__test
 after(() => { for (const dispose of disposers) dispose() })
 
 const bubble = (caption = newRow.caption) => {
+  // issue #41:装饰前要能认到聊天流容器(closest),否则 memeTextAcceptable 直接拒绝;
+  // 装饰末尾「隐藏空中间层」的循环还会读 parent.childNodes/style/dataset。
   const parent = {
-    dataset: {}, closest: () => null,
+    dataset: {},
+    nodeType: 1,
+    style: {},
+    childNodes: [],
+    querySelectorAll: () => [],
+    querySelector: () => null,
+    getAttribute: () => null,
+    closest: (sel) => (sel === '[data-chat-flow],[data-chat-flow-key]' ? parent : null),
     replaceChild(frag) { this.rendered = frag.children },
   }
   nodes.push({ nodeValue: `[表情: ${caption}]`, parentElement: parent })
   return parent
 }
 const scan = async () => {
-  globalThis.scanCallback([{ type: 'childList', addedNodes: [{}], removedNodes: [] }])
+  // 结构性删除记录 → 增量扫描必然回退全量,好让「这一轮扫描」的行为确定可断言。
+  globalThis.scanCallback([{
+    type: 'childList',
+    target: document.body,
+    addedNodes: [],
+    removedNodes: [{ nodeType: 1, matches: () => false }],
+  }])
   await new Promise((resolve) => setTimeout(resolve, 350))
   await drain()
 }

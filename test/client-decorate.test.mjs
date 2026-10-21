@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
+import { installFakeDom, mountPlugin } from './fake-dom.mjs'
+
 /**
  * issue #22 第 2、3 条(装饰侧的两个不变式):
  *
@@ -11,172 +13,26 @@ import assert from 'node:assert/strict'
  * ③ 流式渲染会覆盖注入,同一个 [表情: x] 可能被装饰两次 → 同一消息行两张相同的图。
  *    修法:按「消息行 + 描述」幂等去重。
  *
- * 这两个不变式都长在 textContent 上,所以这里搭了一个能算 textContent、能跑 TreeWalker
- * 的极小 DOM——比断言「调过某个函数」结实得多。
+ * 这两个不变式都长在 textContent 上。假 DOM(test/fake-dom.mjs)能算 textContent、能跑
+ * TreeWalker,还会像真 MutationObserver 一样把每次 DOM 改动记成 MutationRecord——
+ * 所以这里的扫描走的是插件的增量路径,和浏览器里跑的一致。
  */
 
-// ---------- 极小 DOM:够 decorateMemeText 用就行 ----------
-const dataKey = (k) => 'data-' + k.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase())
-
-class TextNode {
-  constructor(value) {
-    this.nodeType = 3
-    this.nodeValue = value
-    this.parentElement = null
-  }
-  get textContent() { return this.nodeValue }
-}
-
-class Element {
-  constructor(tag) {
-    this.nodeType = 1
-    this.tagName = String(tag).toUpperCase()
-    this.childNodes = []
-    this.parentElement = null
-    this.style = {}
-    this.attrs = {}
-    // 真实 DOM 里 dataset 与 data-* 属性是同一份数据,这里用 Proxy 也保持同步
-    // (deleteProperty 也要跟上:孤儿标记清理走的是 delete,见 issue #26)
-    const self = this
-    this.dataset = new Proxy({}, {
-      get: (_t, k) => (typeof k === 'string' ? self.attrs[dataKey(k)] : undefined),
-      set: (_t, k, v) => { self.attrs[dataKey(k)] = String(v); return true },
-      has: (_t, k) => typeof k === 'string' && dataKey(k) in self.attrs,
-      deleteProperty: (_t, k) => { delete self.attrs[dataKey(k)]; return true },
-    })
-  }
-  get textContent() { return this.childNodes.map((c) => c.textContent).join('') }
-  set textContent(v) {
-    this.childNodes = []
-    if (String(v) !== '') this.appendChild(new TextNode(String(v)))
-  }
-  get firstChild() { return this.childNodes[0] || null }
-  get firstElementChild() { return this.childNodes.find((c) => c.nodeType === 1) || null }
-  querySelector(sel) { return this.querySelectorAll(sel)[0] || null }
-  appendChild(child) { return this._insert(child, null) }
-  insertBefore(child, ref) { return this._insert(child, ref) }
-  replaceWith(el) { if (this.parentElement) this.parentElement.replaceChild(el, this) }
-  _insert(child, ref) {
-    if (child.nodeType === 11) { for (const c of child.childNodes.slice()) this._insert(c, ref); return child }
-    if (child.parentElement) child.parentElement.removeChild(child)
-    const i = ref ? this.childNodes.indexOf(ref) : -1
-    this.childNodes.splice(i < 0 ? this.childNodes.length : i, 0, child)
-    child.parentElement = this
-    return child
-  }
-  replaceChild(frag, node) {
-    const i = this.childNodes.indexOf(node)
-    if (i < 0) return node
-    const kids = frag.nodeType === 11 ? frag.childNodes.slice() : [frag]
-    for (const c of kids) if (c.parentElement) c.parentElement.removeChild(c)
-    this.childNodes.splice(i, 1, ...kids)
-    for (const c of kids) c.parentElement = this
-    node.parentElement = null
-    return node
-  }
-  removeChild(child) {
-    const i = this.childNodes.indexOf(child)
-    if (i >= 0) this.childNodes.splice(i, 1)
-    child.parentElement = null
-    return child
-  }
-  remove() { if (this.parentElement) this.parentElement.removeChild(this) }
-  setAttribute(k, v) { this.attrs[k] = String(v) }
-  getAttribute(k) { return k in this.attrs ? this.attrs[k] : null }
-  closest(sel) {
-    let el = this
-    while (el) { if (matches(el, sel)) return el; el = el.parentElement }
-    return null
-  }
-  querySelectorAll(sel) {
-    const out = []
-    const walk = (el) => {
-      for (const c of el.childNodes) {
-        if (c.nodeType !== 1) continue
-        if (matches(c, sel)) out.push(c)
-        walk(c)
-      }
-    }
-    walk(this)
-    return out
-  }
-}
-
-const matchesOne = (el, part) => {
-  const m = /^([a-z]*)((?:\[[^\]]*\])*)$/i.exec(String(part).trim())
-  if (!m) return false
-  const [, tag, attrPart] = m
-  if (tag && el.tagName !== tag.toUpperCase()) return false
-  for (const a of attrPart.match(/\[[^\]]*\]/g) || []) {
-    const inner = a.slice(1, -1)
-    const eq = inner.indexOf('=')
-    if (eq < 0) { if (el.getAttribute(inner) === null) return false; continue }
-    if (el.getAttribute(inner.slice(0, eq)) !== inner.slice(eq + 1).replace(/^["']|["']$/g, '')) return false
-  }
-  return true
-}
-const matches = (el, sel) => String(sel).split(',').some((part) => matchesOne(el, part))
-
-const body = new Element('body')
-let navEl = null // decorateNavIcon 用 document.querySelector 取 nav,测试里从这里塞
-globalThis.document = {
-  head: { appendChild() {} },
-  body,
-  createElement: (tag) => new Element(tag),
-  createElementNS: (_ns, tag) => new Element(tag),
-  createDocumentFragment: () => { const f = new Element('#fragment'); f.nodeType = 11; return f },
-  createTextNode: (v) => new TextNode(String(v)),
-  createTreeWalker(root, _what, { acceptNode }) {
-    const all = []
-    const walk = (el) => {
-      for (const c of el.childNodes) {
-        if (c.nodeType === 3) all.push(c)
-        else if (c.nodeType === 1) walk(c)
-      }
-    }
-    walk(root)
-    let i = 0
-    return { nextNode: () => { while (i < all.length) { const t = all[i++]; if (acceptNode(t) === 1) return t } return null } }
-  },
-  querySelector: (sel) => (sel === '[role="dialog"] nav' && navEl ? navEl : null),
-  querySelectorAll: (sel) => body.querySelectorAll(sel),
-}
-globalThis.NodeFilter = { SHOW_TEXT: 4, FILTER_REJECT: 2, FILTER_ACCEPT: 1 }
-globalThis.MutationObserver = class {
-  constructor(cb) { globalThis.__moCb = cb }
-  observe() {}
-  disconnect() {}
-}
-globalThis.window = {
-  location: { origin: 'http://localhost', href: '' },
-  __ModuleLoader__: {
-    load(def) {
-      globalThis.__dshMeme = def.factory(() => ({
-        Fragment: Symbol('Fragment'),
-        createElement: () => ({}),
-        useState: (v) => [v, () => {}],
-        useEffect: () => {},
-        useRef: (v) => ({ current: v }),
-        useMemo: (fn) => fn(),
-        useCallback: (fn) => fn,
-      }))
-    },
-  },
-}
-globalThis.fetch = async () => ({
-  ok: true,
-  status: 200,
-  json: async () => ({
+const dom = installFakeDom({
+  fetch: async () => ({
     ok: true,
-    memes: [{ path: 'memes/happy/a.jpg', tag: 'happy', file_name: 'a.jpg', caption: '开心', keywords: '' }],
+    status: 200,
+    json: async () => ({
+      ok: true,
+      memes: [{ path: 'memes/happy/a.jpg', tag: 'happy', file_name: 'a.jpg', caption: '开心', keywords: '' }],
+    }),
   }),
 })
+const { body, Element, TextNode } = dom
 
 // ---------- 挂载插件 ----------
-await import('../client.js')
-globalThis.__dshMeme.apply({ get: () => undefined, effect: () => {} })
-const drain = async (rounds = 8) => { for (let i = 0; i < rounds; i++) await Promise.resolve() }
-await drain() // 等索引拉回来 + 补装饰
+await mountPlugin()
+await dom.drain() // 等安装完成(此时 body 还空着,索引要等第一次命中才懒加载)
 
 const bubble = (marker) => {
   const flow = new Element('div')
@@ -191,11 +47,23 @@ const bubble = (marker) => {
   body.appendChild(flow)
   return { flow, row, p }
 }
-const scan = async () => {
-  globalThis.__moCb([{ type: 'childList', addedNodes: [{}], removedNodes: [] }])
-  await drain()
-  await new Promise((ok) => setTimeout(ok, 350)) // 过防抖窗口(300ms)
-  await drain()
+
+/**
+ * 把这一轮真实的 DOM 改动投给 observer,再过掉一次扫描窗口(SCAN_MIN_GAP=300ms)。
+ * forceFull:手动塞一条结构性删除记录,让插件回退全量扫描——
+ *   · 手动造重复图时 observer 看不到「图是重复的」这种事实,增量路径又只在真装饰了东西
+ *     之后才去重,所以那一步要显式全量;
+ *   · nav 是 detached 节点,挂在上面的改动不会进 mutation 日志,同理。
+ */
+const scan = async ({ forceFull = false } = {}) => {
+  const records = dom.takeMutations()
+  if (forceFull) {
+    records.push({ type: 'childList', target: body, addedNodes: [], removedNodes: [{ nodeType: 1, matches: () => false }] })
+  }
+  if (records.length > 0) dom.emit(records)
+  await dom.drain()
+  await dom.sleep(350) // 过最小扫描间隔(SCAN_MIN_GAP=300)
+  await dom.drain()
 }
 const imgsIn = (el) => el.querySelectorAll('img[data-meme-img]')
 
@@ -222,6 +90,7 @@ test('② 无命中降级成描述原文时,textContent 同样不变', async () 
 })
 
 test('② ghost 不会被自己再装饰一遍(重复扫描不叠加)', async () => {
+  // 增量扫描下这一轮的日志里还有上一轮装饰自己产生的改动,正是最容易「自己吃自己」的场景
   const { row, p } = bubble('再来一张 [表情: 开心]')
   await scan()
   assert.equal(imgsIn(row).length, 1)
@@ -241,9 +110,9 @@ test('③ 同一消息行里的重复图被幂等去重(流式竞态)', async ()
   dup.dataset.memeImg = '开心'
   row.appendChild(dup)
   assert.equal(imgsIn(row).length, 2)
-  await scan()
+  await scan({ forceFull: true })
   assert.equal(imgsIn(row).length, 1, '同一行同描述的重复图应被去掉')
-  await scan()
+  await scan({ forceFull: true })
   assert.equal(imgsIn(row).length, 1, '去重必须幂等(没有重复时零副作用)')
   assert.equal(p.textContent, '双图 [表情: 开心]', '去重只摘图,不动 ghost/textContent')
 })
@@ -333,20 +202,21 @@ test('⑥ 降级装饰(无 img 只有 ghost)不算孤儿,不被反复重写', as
 })
 
 test('⑥ 设置侧栏笑脸被宿主覆写后也能自愈', async () => {
+  // nav 是 detached 的,挂在上面的改动 observer 看不到;全量扫描才会跑到 decorateNavIcon
   const nav = new Element('nav')
   const btn = new Element('button')
   btn.appendChild(new Element('i')) // 宿主自己的齿轮图标
   btn.appendChild(new TextNode('表情包'))
   nav.appendChild(btn)
-  navEl = nav
-  await scan()
+  dom.state.nav = nav
+  await scan({ forceFull: true })
   const smile = btn.querySelector('svg[data-meme-nav-icon]')
   assert.ok(smile, '齿轮应被换成笑脸,svg 要带 data-meme-nav-icon 标记')
   btn.textContent = '表情包' // 面板重渲染:注入没了,btn 上的标记还在
   assert.equal(btn.querySelector('svg[data-meme-nav-icon]'), null)
   btn.appendChild(new Element('i')) // 宿主把自己的图标又挂回来了
   btn.appendChild(new TextNode('表情包'))
-  await scan()
+  await scan({ forceFull: true })
   assert.ok(btn.querySelector('svg[data-meme-nav-icon]'), '笑脸恢复')
   assert.equal(btn.querySelectorAll('svg').length, 1, '不该出现两个图标')
   // 「没得换」的按钮(图标是 IMG)标记是 skip,不该被清理反复摘
@@ -354,11 +224,11 @@ test('⑥ 设置侧栏笑脸被宿主覆写后也能自愈', async () => {
   imgBtn.appendChild(new Element('img'))
   imgBtn.appendChild(new TextNode('表情包'))
   nav.appendChild(imgBtn)
-  await scan()
+  await scan({ forceFull: true })
   assert.equal(imgBtn.getAttribute('data-meme-nav'), 'skip')
-  await scan()
+  await scan({ forceFull: true })
   assert.equal(imgBtn.getAttribute('data-meme-nav'), 'skip', 'skip 档稳定,不被清理扰动')
-  navEl = null
+  dom.state.nav = null
 })
 
 // ---------- 宿主 0.2.0-rc.2 源码核对出的守卫(issue #26 附加信息) ----------
