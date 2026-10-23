@@ -160,6 +160,18 @@ For custom catalogs and pack formats, see the [remote pack specification](./docs
 
 Replace `C:\Users\<you>` with `~` on Linux/macOS. Add whichever directories hold your packs; `send_meme` picks from every enabled pack, so include the bundled pack's path too.
 
+### Read-only meme service for other plugins
+
+Other plugins in the same DSH process (and agent tools running inside them) can call `ctx.get('dshMeme')` to reuse this plugin's native search instead of reading pack indexes themselves:
+
+| Method | Returns |
+| --- | --- |
+| `packs()` | Enabled packs `{ id, name, count, path }[]` |
+| `search({ query, tag, limit })` | `{ ok, query, memes: [{ path, tag, caption, keywords, pack, packName }] }` |
+| `pick({ query, tag })` | On a hit `{ ok: true, path, tag, caption, keywords, pack, packName }`; otherwise `{ ok: false, reason, tags, tagStats }` (it never forces a random image) |
+
+`query` matches captions/keywords/file names across every enabled pack, and `tag` is a mood bucket (`happy/angry/sad/shy/confused/daily`). On a miss, `tags` lists the mood buckets and `tagStats` gives the real per-tag distribution (`{ tag, count }[]`, descending) so the caller can retry with better words. The service is read-only, idempotent, sends nothing, and every returned `path` is an absolute path that exists on disk. The Bilibili comment-image plugin is built on it.
+
 Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`) by default. To view memes from a phone or tablet over the LAN, turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default) — only IP literals are allowed (loopback, RFC1918 private ranges, link-local). Remember to open the port in your firewall.
 
 Behind a **reverse proxy** (browser → `https://your.domain` → nginx/frp → `127.0.0.1:2233`) the Host is your own domain, so declare it explicitly (issue #56; the list is empty by default and behaviour is unchanged):
