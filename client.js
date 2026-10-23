@@ -323,6 +323,8 @@ window.__ModuleLoader__.load({
       const [remoteQuery, setRemoteQuery] = React.useState('')
       const [packView, setPackView] = React.useState('') // 非空 = 进入该图库的表情包页(二级页,不是标签页)
       const [promptOn, setPromptOn] = React.useState(true)
+      // AI 发送方式:auto=按渠道自动 / text=纯文字不发图 / image=总是发图
+      const [sendMode, setSendMode] = React.useState('auto')
       const [pluginVersion, setPluginVersion] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -330,6 +332,7 @@ window.__ModuleLoader__.load({
         setPackId(res.packId || '')
         setPacks(Array.isArray(res.packs) ? res.packs : [])
         setPromptOn(res.promptEnabled !== false)
+        setSendMode(res.sendMode === 'text' || res.sendMode === 'image' ? res.sendMode : 'auto')
         setPluginVersion(res.pluginVersion || '')
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
@@ -659,6 +662,24 @@ window.__ModuleLoader__.load({
             setRootNotice('操作失败: ' + ((res && res.error) || ''))
           }
         } catch (e) { setRootNotice('操作失败') }
+      }
+      // 发送方式下拉框:立即保存(不需要「保存」按钮),失败回滚选中项
+      const onPickSendMode = async (mode) => {
+        const prev = sendMode
+        setSendMode(mode)
+        try {
+          const res = await apiPost({ op: 'setSendMode', sendMode: mode })
+          if (res && res.ok) {
+            if (Array.isArray(res.packs)) applyRoot(res)
+            setRootNotice(res.message || '已更新发送方式,下一条消息生效')
+          } else {
+            setSendMode(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setSendMode(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
       }
       const [packDialog, setPackDialog] = React.useState('')
       const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
@@ -1357,6 +1378,26 @@ window.__ModuleLoader__.load({
           h('button', { onClick: () => onPickDir() }, '选择目录'),
           h('button', { className: 'btn-primary', onClick: () => onSavePacksDir() }, '保存'),
         ),
+        // 发送方式:只控制 AI 怎么发,不影响前端把 [表情: 描述] 配成图
+        h('div', { className: 'section-title' }, '发送方式'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('select', {
+            value: sendMode,
+            onChange: (e) => onPickSendMode(e.target.value),
+            title: '控制 AI 怎么发图:自动 = Web 配图、IM 原生图片;纯文字 = 只用文字接梗;图片 = 每次都发图',
+            style: { flex: 1, minWidth: 160 },
+          },
+            h('option', { value: 'auto' }, '自动(按渠道,推荐)'),
+            h('option', { value: 'text' }, '纯文字(不发图)'),
+            h('option', { value: 'image' }, '图片(总是发图)'),
+          ),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          sendMode === 'text'
+            ? 'AI 只用文字接梗,不写 [表情: 描述] 标记,也不发表情图片'
+            : sendMode === 'image'
+              ? 'AI 每次斗图都必须把图片发出来:Web 显示图片,IM 发原生图片'
+              : 'Web 聊天显示图片;QQ/微信等 IM 聊天发原生图片'),
         h('div', { className: 'section-title' }, '陪伴提示词'),
         h('div', { className: 'row' },
           h('span', {

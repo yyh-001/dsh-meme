@@ -73,6 +73,7 @@ const packPayload = () => ({
   companionPrompt: '',
   defaultCompanionPrompt: '内置默认提示词',
   promptEnabled: true,
+  sendMode: 'auto',
   pluginVersion: '9.9.9',
   remoteSubs: [],
   remoteDirUrl: [],
@@ -99,7 +100,7 @@ const remoteDir = [
 const apiHit = []
 globalThis.fetch = async (url, init) => {
   const u = String(url)
-  apiHit.push(u)
+  apiHit.push({ url: u, body: init && init.body ? String(init.body) : '' })
   const reply = (data) => ({ ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) })
   if (u.includes('remoteDir=1')) return reply({ ok: true, remoteDir })
   if (u.includes('/dsh-memes-api') && (!init || init.method !== 'POST')) {
@@ -151,6 +152,11 @@ const allText = (tree) => textOf(tree).replace(/\s+/g, ' ')
 const findButton = (tree, label) => {
   let hit = null
   walk(tree, (n) => { if (hit || n.type !== 'button' || !n.props || typeof n.props.onClick !== 'function') return; if (textOf(n).includes(label)) hit = n })
+  return hit
+}
+const findSelect = (tree, label) => {
+  let hit = null
+  walk(tree, (n) => { if (hit || n.type !== 'select' || !n.props || typeof n.props.onChange !== 'function') return; if (textOf(n).includes(label)) hit = n })
   return hit
 }
 const findClickable = (tree, label) => {
@@ -225,11 +231,21 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   assert.match(feedback.props.href, /template=feedback\.yml/, '要带 issue 模板: ' + feedback.props.href)
   assert.match(feedback.props.href, /version=/, '要预填插件版本: ' + feedback.props.href)
 
-  // 设置页:提示词开关与扫描目录
+  // 设置页:提示词开关、扫描目录与发送方式
   findButton(discover, '设置').props.onClick()
   const settings = render()
   text = allText(settings)
   assert.ok(text.includes('扫描目录') && text.includes('陪伴提示词'), '设置页应有扫描目录与提示词: ' + text.slice(0, 200))
+  assert.ok(text.includes('发送方式') && text.includes('纯文字') && text.includes('图片'), '设置页应有发送方式下拉框: ' + text.slice(0, 300))
+  const sendModeSelect = findSelect(settings, '纯文字')
+  assert.ok(sendModeSelect, '设置页应有发送方式 select')
+  assert.equal(sendModeSelect.props.value, 'auto', '默认发送方式是自动')
+  // 下拉框立即保存,不走「保存」按钮
+  sendModeSelect.props.onChange({ target: { value: 'text' } })
+  await flush()
+  const saved = apiHit.filter((h) => h.url.includes('/dsh-memes-api') && h.body && JSON.parse(h.body).op === 'setSendMode')
+  assert.equal(saved.length, 1, '选发送方式应 POST setSendMode: ' + JSON.stringify(apiHit.slice(-3)))
+  assert.equal(JSON.parse(saved[0].body).sendMode, 'text')
 
   // 详情页:点「编辑」进去,这条路径以前因为 TDZ 整页空白
   findButton(settings, '图库').props.onClick()
