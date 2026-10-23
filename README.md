@@ -71,9 +71,11 @@ dsh plugin --profile web add dsh-meme
 
 ## 插件更新失败 / 更新后消失？
 
-在市场里点「更新」时，宿主会用 pnpm 替换插件目录。如果 DSH 进程还加载着插件文件（Windows 上文件被占用），pnpm 改名/替换目录会失败；市场界面往往只留一行 `exit 1`，完整报错被截断，看起来像「没报错但失败了」。失败后目录可能只装了一半，再进市场会校验失败（例如提示 `ENOENT ... cordis.patch.yml`），插件列表里也找不到它。
+在市场里点「更新」时，宿主会用 pnpm 把 `node_modules/dsh-meme` 整个目录改名替换。**Windows 上只要目录里还有打开的文件，rename 就会 `EPERM`**，pnpm 只能报 `exit 1`；市场界面往往只留一行 `exit 1`，完整报错被截断，看起来像「没报错但失败了」。失败后目录可能只装了一半，再进市场会校验失败（例如提示 `ENOENT ... cordis.patch.yml`），插件列表里也找不到它。
 
-遇到时按顺序处理：
+**0.1.59 起插件侧已修（issue [#43](https://github.com/yyh-001/dsh-meme/issues/43)）**：以前的版本在启动时会一直打开内置图库的 `memes/dafeiyu-001/index.db`（管理面板还有一条常驻可写连接），这个文件就在插件包目录里 → 更新时包目录被占住，pnpm 改名必然失败（`ERR_PNPM_EPERM ... rename '..._tmp_...' -> '...dsh-meme'`）。现在图库索引只在启动时读一次进内存，上传/学图时临时打开、写完立刻关闭，内置图库激活时插件不再长期占用包内任何文件。这也解释了以前「有时成功有时失败」：激活的是 `~/.dsh/meme-packs` 里的用户图库时不占包目录，激活内置图库时才会卡住更新。
+
+在 0.1.59 之前更新失败的用户，仍按下面三步处理：
 
 1. **完全退出 DSH**（托盘图标退出，任务管理器里确认没有 dsh / Electron 进程），重新打开后再点一次更新。
 2. 还失败，或插件已从列表消失：**退出 DSH 后**到对应 profile 目录手动更新（默认在 `~/.dsh/profiles/<profile>`；桌面版是 `desktop`，Web / CLI 常见 `web`）：
@@ -86,7 +88,7 @@ dsh plugin --profile web add dsh-meme
    然后重新打开 DSH，在「设置 → 表情包」确认插件已启用。
 3. 图库和设置都存在 `~/.dsh`（`dsh-expression.json` 等），更新或重装不会丢；仍不行可以先卸载再重装。
 
-插件本身只读自己的包目录、不写它；更新时的文件占用来自宿主的 pnpm 流程。如果经常复现，可以把 profile 目录、市场里的 `exit 1` 上下文和是否有 `ERR_PNPM_EPERM` 一并反馈给 DSH 插件市场。
+升到 0.1.59 之后仍更新失败，说明占用来自插件之外（宿主进程、杀毒软件或其它程序）：把 profile 目录、市场里的 `exit 1` 上下文和是否有 `ERR_PNPM_EPERM` 一并反馈给 DSH 插件市场；插件这边已确认不再占用包内文件，有一个回归测试专门模拟 pnpm 改名（`test/update-lock.test.mjs`）。
 
 ## 国内网络 / 图库市场拉不到？
 

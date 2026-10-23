@@ -38,6 +38,35 @@ export function defaultPacksDir() {
 }
 
 /**
+ * 本插件包自己的根目录。
+ * 装成插件时就是 `node_modules/dsh-meme`;插件市场更新会用 pnpm 把整个目录改名替换。
+ * @param {string} [fromDir] 测试用:以某个目录作为「插件包根」,不传则按本模块位置推。
+ */
+export function pluginPackageDir(fromDir) {
+  return fromDir ? resolve(fromDir) : resolve(bundledPacksDir(), '..')
+}
+
+/**
+ * dir 是否落在插件包目录里。
+ *
+ * 为什么关心这件事:内置图库在 `<插件包>/memes/<id>` 里,用户在上面学图/上传时
+ * 插件会写这个目录。Windows 上目录里只要有打开的文件句柄,`rename` 该目录(或它的
+ * 祖先)就报 `EPERM`;而 pnpm 更新正是 rename 整个包目录 → 插件更新失败(issue #43)。
+ * 包内路径上的 SQLite 连接一律不常驻,见 openIndexWriter。
+ * @param {string} dir 要判断的目录
+ * @param {string} [packageDir] 插件包根目录(默认按本模块位置推;测试可传)
+ */
+export function isInsidePluginPackage(dir, packageDir) {
+  try {
+    const target = resolve(dir)
+    const pkg = pluginPackageDir(packageDir)
+    return target === pkg || target.startsWith(pkg + sep)
+  } catch {
+    return false
+  }
+}
+
+/**
  * 删除图库时该删哪个目录。只认两种路径,别的一律拒绝(防越界/防误删):
  * - 内置包:插件包内 `memes/<id>`
  * - 用户包:扫描目录子树里一个真正的包目录(`<packsDir>/<id>`,或历史遗留的嵌套包)
@@ -172,6 +201,8 @@ export function liveStore(store) {
     search(...a) { return box._s.search(...a) },
     sampleMood(...a) { return box._s.sampleMood(...a) },
     resolveStored(...a) { return box._s.resolveStored(...a) },
+    /** 写库之后刷新内存索引快照(store 内部已关闭连接,不再有长期句柄,#43)。 */
+    refresh() { if (typeof box._s.refresh === 'function') box._s.refresh() },
     replace(next) {
       const prev = box._s
       box._s = next
@@ -375,21 +406,47 @@ export function searchRows(rows, query, limit = 8) {
   }
 }
 
+/** 图库索引的读取语句(内存快照和一次性读取共用)。 */
+const SELECT_ROWS = 'SELECT path, tag, file_name, caption, COALESCE(keywords, \'\') AS keywords FROM memes'
+
+/**
+ * 图库索引(只读检索)。
+ *
+ * issue #43:以前这里在构造时打开 SQLite 连接并**一直持有**。插件默认激活内置图库
+ * (`<插件包>/memes/dafeiyu-001`),它就在 npm 包目录里;Windows 上只要目录里还有
+ * 打开的文件,`rename` 该目录就会 EPERM/EBUSY,而插件市场更新正是用 pnpm 把
+ * `node_modules/dsh-meme` 整个目录改名替换 → 更新失败(`ERR_PNPM_EPERM ... rename`)。
+ * 现在构造时一次性把索引读进内存并立刻关掉连接;写操作由 openIndexWriter 落盘后
+ * 调 refresh() 刷新快照。索引只有几千行(947K 的图库,索引本身几百 KB),
+ * 常驻内存的代价可以忽略,换来的好处是插件运行期**不占用图库文件**。
+ */
 export class MemesStore {
   constructor(root = defaultMemeRoot()) {
     this.root = resolve(root)
-    const indexPath = join(this.root, 'index.db')
-    if (!existsSync(indexPath)) {
-      throw new Error('缺少表情包索引: ' + indexPath)
+    if (!existsSync(join(this.root, 'index.db'))) {
+      throw new Error('缺少表情包索引: ' + join(this.root, 'index.db'))
     }
-    this.db = new DatabaseSync(indexPath, { readOnly: true })
+    this.rows = this.readRows()
+  }
+
+  /** 一次性读全表并关闭连接(不在磁盘上留长连接)。 */
+  readRows() {
+    const db = new DatabaseSync(join(this.root, 'index.db'), { readOnly: true })
+    try {
+      return db.prepare(SELECT_ROWS).all()
+    } finally {
+      try { db.close() } catch { /* 已关闭 */ }
+    }
+  }
+
+  /** 写操作(openIndexWriter)落盘后刷新内存快照,否则校验/搜图还看到旧数据。 */
+  refresh() {
+    this.rows = this.readRows()
   }
 
   /** 列表情包:tag 为情绪桶或细分类;query 只做 caption/keywords 子串(管理面板用)。 */
   list(tag, query) {
-    const rows = this.db
-      .prepare('SELECT path, tag, file_name, caption, COALESCE(keywords, \'\') AS keywords FROM memes')
-      .all()
+    const rows = this.rows
     const tags = moodNames()
     let memes = rows
     const fine = fineTagsFor(tag)
@@ -411,9 +468,7 @@ export class MemesStore {
    * @returns {{query: string, tokens: string[], memes: object[], tags: string[]}}
    */
   search(query, n = 8, tag = null) {
-    const rows = this.db
-      .prepare('SELECT path, tag, file_name, caption, COALESCE(keywords, \'\') AS keywords FROM memes')
-      .all()
+    const rows = this.rows
     const fine = fineTagsFor(tag)
     const scoped = fine ? rows.filter((m) => fine.includes(m.tag)) : rows
     return { ...searchRows(scoped, query, n), tags: moodNames() }
@@ -439,8 +494,51 @@ export class MemesStore {
     return target
   }
 
-  close() {
-    try { this.db.close() } catch { /* 已关闭 */ }
+  /** 接口保留:连接已在构造时关闭,热切换时调用 close() 不需要额外动作。 */
+  close() {}
+}
+
+/**
+ * 图库索引的**可写**连接(管理 API 上传/删除、learn_meme 学图用)。
+ *
+ * 用户图库(~/.dsh/meme-packs)保持常驻连接,和以前一样省去每次开关库的开销。
+ * 插件包内的图库则绝不常驻:更新时 pnpm 要 rename 整个包目录,Windows 上目录里
+ * 只要有打开的文件就会 EPERM(#43)。这类目录改成每条语句临时 open→执行→close,
+ * 写完立刻释放;对调用方暴露的 prepare/exec/close 接口保持不变。
+ *
+ * @param {string} root 图库根目录
+ * @param {{packageDir?: string}} [opts] packageDir 供测试指定「插件包根」,默认按本模块位置推
+ */
+export function openIndexWriter(root, opts = {}) {
+  const dir = resolve(root)
+  const indexPath = join(dir, 'index.db')
+  // 用户图库(包外):维持常驻可写连接。
+  if (!isInsidePluginPackage(dir, opts.packageDir)) {
+    const db = new DatabaseSync(indexPath)
+    return {
+      prepare: (...args) => db.prepare(...args),
+      exec: (...args) => db.exec(...args),
+      close: () => { try { db.close() } catch { /* 已关闭 */ } },
+    }
+  }
+  // 插件包内:每条语句开、关一次,插件运行期不占包内文件。
+  const withDb = (fn) => {
+    const db = new DatabaseSync(indexPath)
+    try {
+      return fn(db)
+    } finally {
+      try { db.close() } catch { /* 已关闭 */ }
+    }
+  }
+  const statement = (sql) => ({
+    run: (...args) => withDb((db) => db.prepare(sql).run(...args)),
+    get: (...args) => withDb((db) => db.prepare(sql).get(...args)),
+    all: (...args) => withDb((db) => db.prepare(sql).all(...args)),
+  })
+  return {
+    prepare: statement,
+    exec: (sql) => withDb((db) => db.exec(sql)),
+    close: () => { /* 无常驻连接 */ },
   }
 }
 

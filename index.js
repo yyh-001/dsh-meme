@@ -23,7 +23,7 @@ import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
   searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
-  SEND_MODES, normalizeSendMode,
+  SEND_MODES, normalizeSendMode, openIndexWriter,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -732,7 +732,9 @@ export function apply(ctx, config) {
     return packs
   }
   if (webServer) {
-    let adminDb = new DatabaseSync(join(memes.root, 'index.db')) // 可写连接
+    // 可写连接。插件包内的图库(默认内置包)不常驻:每次写临时开、写完就关,
+    // 否则 Windows 上包目录被占住,pnpm 更新 rename 会 EPERM(issue #43)。
+    let adminDb = openIndexWriter(memes.root)
     const packPayload = () => {
       const s = readSettings()
       const packs = listAllPacks()
@@ -772,7 +774,7 @@ export function apply(ctx, config) {
         initDb.close()
       }
       const next = new MemesStore(dir)
-      const nextDb = new DatabaseSync(indexPath)
+      const nextDb = openIndexWriter(dir)
       const abs = resolve(dir)
       const hit = scanPacks(packsDirNow()).find((p) => resolve(p.path) === abs)
       writeSettings({
@@ -896,6 +898,7 @@ export function apply(ctx, config) {
           writeFileSync(join(memes.root, rel), buf)
           adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+          memes.refresh()
           return { ok: true, path: rel, tag, url: ROUTE + '/' + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别)' : '') + ' → ' + rel }
         } catch (error) {
           return { ok: false, message: '收录失败: ' + (error instanceof Error ? error.message : String(error)) }
@@ -1753,6 +1756,7 @@ export function apply(ctx, config) {
             writeFileSync(join(memes.root, rel), Buffer.from(data, 'base64'))
             adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
               .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+            memes.refresh()
             json(res, { ok: true, meme: { path: rel, tag, file_name: name, caption, keywords, url: ROUTE + '/' + rel } })
           } else if (op === 'update') {
             const path = String(body.path || '')
@@ -1763,17 +1767,20 @@ export function apply(ctx, config) {
             const caption = body.caption != null ? String(body.caption).trim() : row.caption
             const keywords = body.keywords != null ? String(body.keywords).trim() : row.keywords
             adminDb.prepare('UPDATE memes SET tag = ?, caption = ?, keywords = ? WHERE path = ?').run(tag, caption, keywords, path)
+            memes.refresh()
             json(res, { ok: true })
           } else if (op === 'delete') {
             const path = String(body.path || '')
             if (!memes.list().memes.some((m) => m.path === path)) throw new Error('未知路径: ' + path)
             adminDb.prepare('DELETE FROM memes WHERE path = ?').run(path)
+            memes.refresh()
             try { unlinkSync(join(memes.root, path)) } catch { /* 文件已不存在 */ }
             json(res, { ok: true })
           } else if (op === 'deleteTag') {
             const tag = String(body.tag || '').trim().toLowerCase()
             if (!tag || !validTagRe.test(tag)) throw new Error('tag 只能是小写字母/数字/-/_')
             const n = adminDb.prepare('DELETE FROM memes WHERE tag = ?').run(tag).changes
+            memes.refresh()
             rmSync(join(memes.root, 'memes', tag), { recursive: true, force: true })
             json(res, { ok: true, deleted: n })
           } else if (op === 'importMemePack') {

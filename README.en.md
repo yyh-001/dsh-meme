@@ -38,6 +38,26 @@ dsh plugin --profile web add dsh-meme
 
 Requires **Node.js ≥ 22.13.0**. The old package name `dsh-expression` is deprecated; its internal plugin ID is retained for compatibility.
 
+## Update failed / plugin disappeared?
+
+The marketplace updates a plugin by having pnpm rename and replace the whole `node_modules/dsh-meme` directory. **On Windows, a directory cannot be renamed while any file inside it is still open**, so pnpm fails with `exit 1` (`ERR_PNPM_EPERM ... rename '..._tmp_...' -> '...dsh-meme'`); the marketplace often shows only a truncated one-line error.
+
+**Fixed in 0.1.59 (issue [#43](https://github.com/yyh-001/dsh-meme/issues/43))**: older versions kept a SQLite connection open on the bundled pack index (`memes/dafeiyu-001/index.db`) for the whole session — that file lives inside the plugin package, so the update rename was bound to fail whenever the built-in pack was active (it usually worked with a user pack under `~/.dsh/meme-packs`). The store now loads its index into memory once at startup and opens the database only briefly when writing, so the plugin no longer holds any file in its own package directory.
+
+If you are updating from a version **before 0.1.59** and the update already failed:
+
+1. **Quit DSH completely** (tray → quit; confirm no `dsh` / Electron process is running), then retry the update.
+2. If it still fails or the plugin vanished: with DSH closed, update manually in the profile directory (`~/.dsh/profiles/desktop` for the desktop app; `web` is common for Web/CLI):
+
+   ```bash
+   cd ~/.dsh/profiles/web
+   pnpm add dsh-meme@latest
+   ```
+
+3. Packs and settings live in `~/.dsh` (`dsh-expression.json` etc.) and survive updates/reinstalls.
+
+If updating still fails on 0.1.59 or later, the lock comes from outside the plugin, so please report the profile directory and the full `exit 1` context to the DSH marketplace. The regression test `test/update-lock.test.mjs` simulates the pnpm rename to keep this fixed.
+
 ## Get started
 
 | Goal | Action |
