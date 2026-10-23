@@ -683,6 +683,87 @@ export function apply(ctx, config) {
     try { return memes.sampleMood(tag, query, 1).mood } catch { return null }
   }
 
+  // ---- 给其它插件用的只读取图服务 ----
+  // 之前的教训:外部插件(B站评论区发图等)自己读 index.db 只能读到数据,用不上这里的
+  // 跨图库检索/情绪桶/告警,等于复制一份弱化版。所以这里把「查/挑」直接作为服务
+  // 提供给同进程内的其它插件:ctx.get('dshMeme').pick({query,tag}) → 绝对路径,
+  // 调用方只管拿去发,不需要(也不应该)自己读图库。
+  // 只读、幂等、不发图;返回的 path 一定是磁盘绝对路径且图库内已索引的文件。
+  const absMemePath = (row) => {
+    try { return sampler.resolveStored(row.path) } catch { return '' }
+  }
+  const packOfRow = (row) => {
+    const raw = String(row.path || '')
+    const slash = raw.indexOf('/')
+    if (slash > 0) {
+      const id = raw.slice(0, slash)
+      if (packRows().some((p) => p.id === id)) return id
+    }
+    return activePackId()
+  }
+  const memeService = {
+    contractVersion: 1,
+    /** 已打开的图库列表(只读) */
+    packs() {
+      try { return packRows().map((p) => ({ id: p.id, name: p.name, count: p.count, path: p.path })) } catch { return [] }
+    },
+    /**
+     * 检索:query 关键词(可空) + tag 情绪桶(可空) + limit。
+     * 有关键词走跨图库关键词检索;没有关键词按情绪随机抽。
+     * 返回 { ok, query?, mood?, memes: [{ path(绝对), tag, caption, keywords, pack }] }。
+     */
+    search({ query = '', tag = '', limit = 8 } = {}) {
+      const n = Math.max(1, Math.min(Number(limit) || 8, 30))
+      const q = String(query || '').trim()
+      const t = String(tag || '').trim().toLowerCase()
+      const rows = []
+      if (q) {
+        const found = sampler.search(q, n, t)
+        for (const row of found.memes) rows.push({ row, pack: packOfRow(row) })
+      } else {
+        const sampled = sampler.sampleMood(t, '', n)
+        for (const row of sampled.memes) rows.push({ row, pack: packOfRow(row) })
+      }
+      const memes = rows
+        .map(({ row, pack }) => ({
+          path: absMemePath(row),
+          tag: row.tag,
+          caption: row.caption || row.file_name || '',
+          keywords: row.keywords || '',
+          pack,
+        }))
+        .filter((m) => m.path)
+      return { ok: true, query: q, memes }
+    },
+    /**
+     * 挑一张:先按关键词精确检索;查不到(且给了 tag)再按情绪抽;都没有就返回
+     * ok:false + reason/tags,让调用方决定是换词还是别配图(不会瞎塞一张)。
+     */
+    pick({ query = '', tag = '', limit = 8 } = {}) {
+      const q = String(query || '').trim()
+      const t = String(tag || '').trim().toLowerCase()
+      const direct = memeService.search({ query: q, tag: t, limit })
+      if (direct.memes.length > 0) {
+        const first = direct.memes[0]
+        return { ok: true, path: first.path, tag: first.tag, caption: first.caption, keywords: first.keywords, pack: first.pack }
+      }
+      if (q && t) {
+        // 关键词没命中时,给个情绪桶兜底(但只挑 tag 匹配的,不跨情绪乱给)
+        const byTag = memeService.search({ query: '', tag: t, limit })
+        if (byTag.memes.length > 0) {
+          const first = byTag.memes[0]
+          return { ok: true, path: first.path, tag: first.tag, caption: first.caption, keywords: first.keywords, pack: first.pack }
+        }
+      }
+      let tags = []
+      try { tags = memes.list().tags || [] } catch { /* 图库坏了也要能回一句 */ }
+      return { ok: false, reason: q ? `没找到「${q}」相关的图` : '没有打开的图库', tags }
+    },
+  }
+  if (typeof ctx.provide === 'function') {
+    try { ctx.provide('dshMeme', Object.freeze(memeService)) } catch (e) { /* 老宿主/重复注册:拿不到服务时调用方要能自行兜底 */ }
+  }
+
   // ---- 发送通道:QQ 优先,Web 兜底;Web 里再按会话来源分流到 IM 原生图片 ----
   // dsh-im 只在进程内时提供 dsh_im_return_file;这里传的是「运行时判断」而不是
   // apply 时的快照——插件装载顺序不定,dsh-im 可能比 dsh-meme 晚就绪。
