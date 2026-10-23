@@ -25,6 +25,7 @@ import {
   searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
   SEND_MODES, normalizeSendMode, openIndexWriter,
 } from './memes.js'
+import { ANIM_DEFAULT_FRAMES, detectAnimation, buildAnimationFilmstrip, animationModelNote } from './anim.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
 const CRC_TABLE = (() => {
@@ -882,11 +883,13 @@ export function apply(ctx, config) {
           if (buf.byteLength === 0 || buf.byteLength > 8 * 1024 * 1024) return { ok: false, message: '图片大小超限(≤8MB)' }
           // 未指定分类时自动识图(学图即识图)
           let auto = false
+          let animInfo = null
           if (!tag) {
             const sel = ctx.agentDefaultModel && typeof ctx.agentDefaultModel.currentSelection === 'function'
               ? ctx.agentDefaultModel.currentSelection() : null
             const r = await recognizeImageBytes(ctx.get('llm'), sel, buf, mime, fileName)
             auto = true
+            animInfo = r.animation
             if (!tag) tag = r.tag
             if (!caption) caption = r.caption
             if (!keywords) keywords = r.keywords
@@ -899,7 +902,7 @@ export function apply(ctx, config) {
           adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
             .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
           memes.refresh()
-          return { ok: true, path: rel, tag, url: ROUTE + '/' + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别)' : '') + ' → ' + rel }
+          return { ok: true, path: rel, tag, url: ROUTE + '/' + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别' + (animInfo ? ',动图 ' + animInfo.frameCount + ' 帧' + (animInfo.filmstrip ? ',已抽帧给模型' : '') : '') + ')' : '') + ' → ' + rel }
         } catch (error) {
           return { ok: false, message: '收录失败: ' + (error instanceof Error ? error.message : String(error)) }
         }
@@ -922,18 +925,22 @@ export function apply(ctx, config) {
       const prepared = await llm.prepareCall(base)
       const prompt = '你是表情包分类助手。识别这张表情包图片,只输出 JSON(不要任何其他文字):\n' +
         '{"tag":"分类(小写英文,参考: angry生气 happy开心 sad难过 shy害羞 confused困惑 surprised惊讶 sleep睡觉 work上班 like喜欢 see看看 meow喵喵 speechless无语),选最贴切的一个","caption":"一句话中文描述这张图表达的情绪/梗","keywords":"3-5个中文搜索词,空格分隔"}\n'
+      const anim = detectAnimation(buf)
+      const strip = anim && anim.format === 'gif' ? buildAnimationFilmstrip(buf, { maxFrames: ANIM_DEFAULT_FRAMES }) : null
+      const animNote = anim ? animationModelNote(anim, strip) : ''
+      const textPart = { type: 'text', text: animNote ? prompt + '\n\n' + animNote : prompt }
+      let imagePart
+      if (strip) {
+        const rawName = fileName || 'meme'
+        const dot = rawName.lastIndexOf('.')
+        const baseName = dot > 0 ? rawName.slice(0, dot) : 'meme'
+        imagePart = { type: 'image', attachment: await ctx.get('attachments').saveImage({ data: strip.png, mediaType: 'image/png', name: baseName + '-frames.png' }) }
+      } else {
+        imagePart = { type: 'image', attachment: await ctx.get('attachments').saveImage({ data: buf, mediaType: mime, name: fileName }) }
+      }
       let out = ''
       let reason = ''
-      for await (const chunk of prepared.stream({
-        ...base,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'text', text: prompt },
-            { type: 'image', attachment: await ctx.get('attachments').saveImage({ data: buf, mediaType: mime, name: fileName }) },
-          ],
-        }],
-      })) {
+      for await (const chunk of prepared.stream({ ...base, messages: [{ role: 'user', content: [textPart, imagePart] }] })) {
         if (chunk.type === 'text-delta') out += chunk.text
         else if (chunk.type === 'reasoning-delta') reason += chunk.text
         else if (chunk.type === 'finish' && chunk.reason && chunk.reason.kind === 'error') {
@@ -948,7 +955,10 @@ export function apply(ctx, config) {
       const caption = String(parsed.caption || '').trim().slice(0, 200)
       const keywords = String(parsed.keywords || '').trim().slice(0, 200)
       if (!tag) throw new Error('模型未给出分类')
-      return { tag, caption, keywords }
+      return {
+        tag, caption, keywords,
+        animation: anim ? { format: anim.format, frameCount: anim.frameCount, totalMs: anim.totalMs, filmstrip: !!strip } : null,
+      }
     }
 
     // ---- 远程图库订阅:清单 JSON → 按需下载成本地包(格式见 docs/remote-pack-spec.md) ----
@@ -1739,7 +1749,7 @@ export function apply(ctx, config) {
               ? ctx.agentDefaultModel.currentSelection() : null
             const r = await recognizeImageBytes(ctx.get('llm'), sel, buf, MIME[ext.slice(1)] || 'image/jpeg', fileName)
             if (!r.tag || !validTagRe.test(r.tag)) throw new Error('AI 未识别出有效分类,请手动选择')
-            json(res, { ok: true, tag: r.tag, caption: r.caption, keywords: r.keywords })
+            json(res, { ok: true, tag: r.tag, caption: r.caption, keywords: r.keywords, animation: r.animation || null })
           } else if (op === 'upload') {
             const tag = String(body.tag || '').trim().toLowerCase()
             const fileName = String(body.fileName || '').trim()

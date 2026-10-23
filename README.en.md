@@ -65,6 +65,7 @@ If updating still fails on 0.1.59 or later, the lock comes from outside the plug
 | Send a meme yourself | Click 😊 beside the composer and pick an image; search, multi-select filters and hover previews are available |
 | Ask the AI to send one | Say “send a happy meme” or “find a cat making a heart” |
 | Save a new image | Upload it and say “save this image to my meme pack”; automatic recognition requires an image-capable model |
+| Save an animated meme | Upload a GIF; automatic recognition samples frames across the timeline so the AI reads the motion, not just the first frame |
 | View a larger image | Click a meme in chat; scroll to zoom, double-click to reset, and press Esc or click the background to close |
 
 In chat: send a meme, and the AI replies with one.
@@ -81,7 +82,7 @@ Open **设置 (Settings) → 表情包 (Memes)**:
 
 - **图库 (Packs)**: click a card to manage images. Each switch controls whether the AI can use that pack; several can be enabled. Create, import, export, submit or delete packs; “Update” appears when a newer version is available.
 - **发现 (Discover)**: preview marketplace packs and install them directly; Release ZIP installations verify SHA-256.
-- **设置 (Settings)**: change the scan directory, toggle proactive memes, and edit the prompt.
+- **设置 (Settings)**: change the scan directory, toggle proactive memes, edit the prompt, and choose how the AI sends memes (automatic / text-only / image).
 
 ![Installed packs with independent enable switches](./docs/panel-library.png)
 
@@ -124,6 +125,8 @@ learn_meme
 ```
 
 Mood buckets: `happy` / `angry` / `sad` / `shy` / `confused` / `daily`. The model should copy a candidate's `[表情: caption]` marker verbatim; the frontend renders it only in chat content. If no candidate fits, try other keywords or reply with text.
+
+**Animated GIFs are actually read**: `learn_meme` and the upload dialog's AI recognition sample a GIF along its timeline, tile the frames into a labelled filmstrip and send that to the model, so captions can describe the motion (for example “a cat shaking its head wildly”) instead of only the first frame. The original GIF is still what gets saved and it keeps animating in chat. Animated WebP / APNG currently contribute metadata only (frame count, duration) and are still recognized from their first frame; the prompt says so. The decoder is plain JavaScript with no third-party dependencies.
 
 When the conversation comes from QQ / WeChat / Feishu / WeCom or another IM channel through [dsh-im](https://github.com/xmanrui/dsh-im), the sticker is sent as a native image message: the plugin detects the IM source, `send_meme` returns each candidate's **absolute path**, and the model passes it to dsh-im's `dsh_im_return_file`. IM chats never render `[表情: caption]`, so no marker is written. This delivery rule is injected together with the proactive-meme prompt — **no prior user instruction such as “you may send memes on QQ/WeChat” is needed**. Web chats keep the `[表情: caption]` rendering, and both kinds of conversation can coexist in one profile.
 
