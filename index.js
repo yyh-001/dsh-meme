@@ -921,7 +921,7 @@ export function apply(ctx, config) {
       }
       // 先 materialize 默认配置(reasoningEffort 等),否则 stream 时配置比对不一致报错
       // (历史教训: prepared LLM call config changed before adapter dispatch)
-      const base = await llm.resolveCallConfig({ provider, model, maxTokens: 1024 })
+      const base = await llm.resolveCallConfig({ provider, model, maxTokens: 4096 })
       const prepared = await llm.prepareCall(base)
       const prompt = '你是表情包分类助手。识别这张表情包图片,只输出 JSON(不要任何其他文字):\n' +
         '{"tag":"分类(小写英文,参考: angry生气 happy开心 sad难过 shy害羞 confused困惑 surprised惊讶 sleep睡觉 work上班 like喜欢 see看看 meow喵喵 speechless无语),选最贴切的一个","caption":"一句话中文描述这张图表达的情绪/梗","keywords":"3-5个中文搜索词,空格分隔"}\n'
