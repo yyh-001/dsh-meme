@@ -142,6 +142,18 @@ learn_meme
 
 自建图库目录或市场源见 [远程图库规范](./docs/remote-pack-spec.md)。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接入 QQ 发图。
 
+### 给其它插件的只读取图服务
+
+同一 DSH 进程内的其它插件（以及跑在里面的 agent 工具）可以直接 `ctx.get('dshMeme')` 拿到本插件的原生检索能力，不用自己读图库索引、也不会读到脏数据：
+
+| 方法 | 返回 |
+| --- | --- |
+| `packs()` | 已启用的图库 `{ id, name, count, path }[]` |
+| `search({ query, tag, limit })` | `{ ok, query, memes: [{ path, tag, caption, keywords, pack }] }` |
+| `pick({ query, tag })` | 成功 `{ ok: true, path, tag, caption, keywords, pack }`；没命中 `{ ok: false, reason, tags }`（**不会瞎塞一张**） |
+
+`query` 按关键词/文件名搜（跨所有启用的图库），`tag` 是情绪桶（`happy/angry/sad/shy/confused/daily`）。服务只读、幂等、不发送任何消息；返回的 `path` 一定是磁盘绝对路径且文件存在。B站评论区配图就是接的这个服务。
+
 插件 HTTP 接口仅支持本机回环地址（`localhost` / `127.0.0.1` / `[::1]`），通过局域网地址或自定义域名访问会被拒绝。
 
 代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。
