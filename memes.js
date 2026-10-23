@@ -530,6 +530,18 @@ export function imChannelOfSession(session) {
 }
 
 /**
+ * AI 的发送方式(设置页「发送方式」下拉框):
+ * - auto(默认):按渠道自动——Web 写 [表情: 描述] 由前端配图,IM 会话改走 dsh_im_return_file;
+ * - text:纯文字,不发表情图片(仍可查候选,但只用文字描述/接梗);
+ * - image:总是发图——Web 写标记,IM 必须调 dsh_im_return_file。
+ * 只影响 AI 怎么发,不改前端把 [表情: 描述] 配成图的渲染逻辑。
+ */
+export const SEND_MODES = ['auto', 'text', 'image']
+export function normalizeSendMode(value) {
+  return SEND_MODES.includes(value) ? value : 'auto'
+}
+
+/**
  * 注册 send_meme 工具。
  *
  * 三种模式:
@@ -550,6 +562,7 @@ export function imChannelOfSession(session) {
  * @param {(session: object) => string | null} [options.imChannelOf]
  *   判断某个会话本轮来自哪个 IM 渠道(dsh-im 可用时由 index.js 传入;返回 null = 非 IM 或能力缺失)
  * @param {boolean} [options.imReady] 注册时 dsh-im 是否已在进程内(只影响工具描述措辞)
+ * @param {() => string} [options.sendMode] 运行时读发送方式设置(auto/text/image)
  */
 function clampLimit(n) {
   const x = typeof n === 'number' ? n : Number(n)
@@ -562,6 +575,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
   const imChannelOf = typeof options.imChannelOf === 'function' ? options.imChannelOf : null
   /** 注册时 dsh-im 是否已在进程内——只决定工具描述要不要提 IM 的发送方式 */
   const imReady = options.imReady === true
+  /** 运行时的发送方式设置(auto/text/image):每次执行读一次,设置改了下一条消息就生效 */
+  const sendModeOf = typeof options.sendMode === 'function' ? options.sendMode : () => 'auto'
 
   const parameters = {
     tag: {
@@ -596,6 +611,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
             ? '发送方式看工具结果末尾的说明:Web 聊天把 [表情: 描述] 原样写进回复(描述抄候选原文,不要带网址);IM(QQ/微信等)聊天调用 dsh_im_return_file 传候选的 path 发原生图片,不要写 [表情: ...] 标记。'
             : '挑中后把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址)——自己编的描述前端配不上图。')
         : '两步:search 看候选,再用 send + path 发出。') +
+      '发送方式以设置里的「发送方式」下拉框为准(自动/纯文字/图片),每次结果末尾的「发图」说明会告诉你怎么发。' +
       '气氛对了就主动发;发完短接,让图自己说话。',
     parameters,
     output: {
@@ -608,8 +624,14 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       const tag = typeof args.tag === 'string' ? args.tag.trim().toLowerCase() : ''
       const path = typeof args.path === 'string' ? args.path.trim() : ''
       const limit = clampLimit(args.limit)
+      const sendMode = normalizeSendMode(sendModeOf())
+      const textMode = sendMode === 'text'
+      const imageMode = sendMode === 'image'
 
       if (action === 'send') {
+        if (textMode) {
+          return { ok: false, message: '当前发送方式是「纯文字」,不发图片;直接用文字接梗/描述即可' }
+        }
         if (!path) {
           return { ok: false, message: 'send 需要 path——先 search 看候选,再挑一张发' }
         }
@@ -634,7 +656,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       // [表情: 描述] 标记只有 Web 前端会配图,IM 聊天里它只是一行方括号文字。
       // 所以候选要带上绝对路径,交给 dsh-im 的 dsh_im_return_file 投递。
       const imChannel = !sendImage && imChannelOf ? imChannelOf(exec?.agent?.session) : null
-      const imMode = !sendImage && !!imChannel
+      // 纯文字模式:Web/IM 都不发图;候选不带路径,免得模型顺手把 path 交给投递工具
+      const imMode = !textMode && !sendImage && !!imChannel
       const imLabel = imMode ? (IM_CHANNEL_LABELS[imChannel] || 'IM') : ''
 
       const captionOf = (m) => String(m.caption || m.file_name || '').slice(0, 80)
@@ -649,6 +672,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
 
       const lines = (rows) => rows.map((m, i) => {
         const caption = captionOf(m)
+        // 纯文字模式:只给描述,不给 [表情: …] 标记也不给路径——标记在前端仍会配成图
+        if (textMode) return (i + 1) + '. 描述=' + caption + ' | 分类=' + m.tag
         // IM 模式不要用 "[tag] caption" 的方括号样式:模型会照着把方括号抄进回复,
         // 而 IM 客户端只把方括号里的文字显示出来(用户看到的是 [无语死鱼脸] 之类)。
         if (imMode) return (i + 1) + '. path=' + absolutePathOf(m) + ' | 分类=' + m.tag + ' | 描述=' + caption
@@ -657,17 +682,21 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
       })
       const hits = (rows) => {
+        if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m) }))
         if (imMode) return rows.map((m) => ({ path: absolutePathOf(m), tag: m.tag, caption: captionOf(m) }))
         return webMode
           ? rows.map((m) => ({ caption: captionOf(m) }))
           : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption }))
       }
-      const howToSend = imMode
-        ? '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)——它会作为 ' + imLabel +
-          ' 原生图片消息发出;不用等用户要求,现在就能主动发。回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
-        : webMode
-          ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
-          : '用 send + path 发出。'
+      const howToSend = textMode
+        ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
+        : (imageMode ? '当前发送方式是「图片」:挑好图就必须真的发出去,不能只写文字描述。' : '') +
+          (imMode
+            ? '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)——它会作为 ' + imLabel +
+              ' 原生图片消息发出;不用等用户要求,现在就能主动发。回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
+            : webMode
+              ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
+              : '用 send + path 发出。')
 
       // 关键词优先:有关键词就先精确搜(caption/关键词/图名),命中了直接给候选。
       // 全都没命中才退回老路——拿 query 推断情绪随机抽,并在消息里说清是退回来的。

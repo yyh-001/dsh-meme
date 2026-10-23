@@ -23,6 +23,7 @@ import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
   searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
+  SEND_MODES, normalizeSendMode,
 } from './memes.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
@@ -450,6 +451,15 @@ export function apply(ctx, config) {
       return service !== undefined && service !== null
     } catch { return false }
   }
+  /**
+   * 发送方式设置(settings.sendMode):只影响 AI 怎么发,不改前端把 [表情: 描述]
+   * 渲染成图片的逻辑。auto = 按渠道自动(默认);text = 纯文字不发图;image = 总是发图。
+   */
+  const sendModeOf = () => normalizeSendMode(readSettings().sendMode)
+  /** 纯文字模式:默认提示词里教模型写 [表情:] 标记的规则要压掉,否则前端仍会配图 */
+  const TEXT_MODE_RULE = '发送方式设置为「纯文字」:不要发图片。不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file,也不要把图片路径贴进回复;想斗图就用文字接梗、吐槽、卖萌。可以用 send_meme 查候选拿描述,但不要真的把图发出去。'
+  /** 图片模式:在自动行为上强调「必须真发图」,不允许只描述 */
+  const IMAGE_MODE_RULE = '发送方式设置为「图片」:每次用 send_meme 挑好图后都必须把图片真的发出去——Web 聊天把 [表情: 描述] 原样写进回复;IM 聊天把候选 path 交给 dsh_im_return_file。不能只写文字描述、不发图。'
   const memeRoot = resolveActiveRoot(readSettings(), config?.memeRoot)
   let memes = null
   try {
@@ -464,15 +474,21 @@ export function apply(ctx, config) {
   // IM 会话(dsh-im)追加投递规则:候选路径交给 dsh_im_return_file,不要写标记。
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
-    if (readSettings().promptEnabled === false) return assembled
+    const settingsNow = readSettings()
+    if (settingsNow.promptEnabled === false) return assembled
+    const sendMode = normalizeSendMode(settingsNow.sendMode)
     const channel = hasImDelivery() ? imChannelOfSession(context?.agent?.session) : null
-    const custom = readSettings().companionPrompt
+    const custom = settingsNow.companionPrompt
     let text = custom || DEFAULT_COMPANION_PROMPT
-    if (channel) {
+    if (sendMode === 'text') {
+      // 纯文字:默认提示词里的发图指令全部压掉(仍保留斗图语气),也不追加 IM 投递规则
+      text = text + '\n\n' + TEXT_MODE_RULE
+    } else if (channel) {
       // IM 会话:默认提示词整段换成 IM 版([表情:] 那条在 IM 里是错的);
       // 用户自定义提示词则保留原文,只在末尾补投递规则。
       text = custom ? custom + '\n\n' + imCompanionRules(channel) : imCompanionPrompt(channel)
     }
+    if (sendMode === 'image') text = text + '\n\n' + IMAGE_MODE_RULE
     assembled.sections.push({ name: 'dsh-expression:companion', text })
     return assembled
   })
@@ -673,6 +689,7 @@ export function apply(ctx, config) {
   const imToolOptions = () => ({
     imChannelOf: (session) => (hasImDelivery() ? imChannelOfSession(session) : null),
     imReady: hasImDelivery(),
+    sendMode: sendModeOf,
   })
   const qq = ctx.get('companionQq')
   const sendImage = qq !== undefined && typeof qq.sendImage === 'function'
@@ -735,6 +752,8 @@ export function apply(ctx, config) {
         companionPrompt: readSettings().companionPrompt || '',
         defaultCompanionPrompt: DEFAULT_COMPANION_PROMPT,
         promptEnabled: readSettings().promptEnabled !== false,
+        // AI 发送方式设置:auto(默认)/ text(纯文字)/ image(总是发图)
+        sendMode: normalizeSendMode(s.sendMode),
         pluginVersion,
         remoteSubs: remoteSubs(),
         remoteDirUrl: remoteDirUrlList(),
@@ -1901,6 +1920,13 @@ export function apply(ctx, config) {
             const enabled = body.enabled !== false
             writeSettings({ promptEnabled: enabled })
             json(res, { ok: true, ...packPayload(), message: enabled ? '已开启陪伴提示词,下一条消息生效' : '已关闭陪伴提示词,下一条消息生效' })
+          } else if (op === 'setSendMode') {
+            // AI 发送方式:auto = 按渠道自动(Web 配图 / IM 原生图片);text = 纯文字不发图;image = 总是发图
+            const mode = String(body.sendMode == null ? '' : body.sendMode).trim()
+            if (!SEND_MODES.includes(mode)) throw new Error('发送方式只能是 auto / text / image')
+            writeSettings({ sendMode: mode })
+            const label = mode === 'text' ? '纯文字' : mode === 'image' ? '图片' : '自动(按渠道)'
+            json(res, { ok: true, ...packPayload(), message: '发送方式已改为「' + label + '」,下一条消息生效' })
           } else if (op === 'setPackEnabled') {
             // 每张卡片一个开关,可同时开多个;没设置过时以当前图库为初始值
             const target = String(body.packId || '').trim()
