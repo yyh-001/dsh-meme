@@ -136,9 +136,12 @@ window.__ModuleLoader__.load({
     /**
      * 点击聊天里的图放大查看:滚轮缩放、双击复位、Esc 或点背景关闭。
      *
-     * 只认聊天流容器(`[data-chat-flow]`,DSH 0.1.2 起是 `[data-chat-flow-key]`)里的图 ——
-     * 输入框预览、面板缩略图、遮罩里自己那张都不碰。监听挂在 document 的**捕获阶段**、
-     * 装一次就够:流式输出期间消息行反复重建,挂在容器上的监听会跟着丢。
+     * 只认**消息正文里的图**和本插件提到行首的 `img[data-meme-img]` —— 消息正文在宿主的
+     * 内容槽 `[data-slot="conversation.chat.node"]` 里。别的插件(比如自定义会话头像)也会
+     * 往 FlowItem 行里注入装饰性图片,它们是内容槽的兄弟节点,按整行认会连装饰图一起放大
+     * 并显示 zoom-in 光标(issue #44)。输入框预览、面板缩略图、遮罩里自己那张也都不碰。
+     * 监听挂在 document 的**捕获阶段**、装一次就够:流式输出期间消息行反复重建,
+     * 挂在容器上的监听会跟着丢。
      *
      * @param {Document} [doc] 测试注入用;缺省取全局 document
      * @returns {() => void} 卸载:摘监听、摘遮罩
@@ -199,7 +202,10 @@ window.__ModuleLoader__.load({
       const onClick = (e) => {
         const t = e.target
         if (!t || t.tagName !== 'IMG' || t === pic) return
-        if (!t.closest || !t.closest('[data-chat-flow],[data-chat-flow-key]')) return
+        // 只认消息正文里的图,加上本插件自己提到行首的 img[data-meme-img];
+        // 行里其它插件注入的装饰图不在内容槽内、也没有我们的标记,直接放过(issue #44)。
+        if (!t.closest) return
+        if (!t.closest('img[data-meme-img]') && !t.closest('[data-slot="conversation.chat.node"]')) return
         e.preventDefault()
         e.stopPropagation()
         open(t.currentSrc || t.src, t.alt)
@@ -2334,7 +2340,8 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => { pickerStyle.remove() }, 'dsh-expression-entry: meme-picker styles')
 
       // 点图放大:光标提示样式同样走 createOwnedStyle(issue #32),遮罩与监听装一次、卸载时摘掉。
-      const zoomStyle = createOwnedStyle('[data-chat-flow] img,[data-chat-flow-key] img{cursor:zoom-in}')
+      // 范围与 installMemeZoom 的点击判定保持一致:只给内容槽里的图和本插件提到行首的图上光标(issue #44)。
+      const zoomStyle = createOwnedStyle('img[data-meme-img],[data-slot="conversation.chat.node"] img{cursor:zoom-in}')
       ctx.effect(() => () => { zoomStyle.remove() }, 'dsh-expression-entry: zoom styles')
       const disposeZoom = installMemeZoom()
       ctx.effect(() => () => { disposeZoom() }, 'dsh-expression-entry: zoom overlay')

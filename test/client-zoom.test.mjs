@@ -23,7 +23,7 @@ const bodyEl = {
 const makeEl = (tag) => ({
   tagName: String(tag || '').toUpperCase(),
   style: {}, dataset: {}, attrs: {}, children: [], parentNode: null,
-  textContent: '', src: '', alt: '', inFlow: false, _ls: [],
+  textContent: '', src: '', alt: '', inFlow: false, inSlot: false, _ls: [],
   appendChild(child) { child.parentNode = this; this.children.push(child); return child },
   removeChild(child) { const at = this.children.indexOf(child); if (at >= 0) this.children.splice(at, 1); child.parentNode = null; return child },
   setAttribute(k, v) { this.attrs[k] = String(v) },
@@ -31,8 +31,15 @@ const makeEl = (tag) => ({
   addEventListener(type, fn) { this._ls.push({ type, fn }) },
   removeEventListener(type, fn) { this._ls = this._ls.filter((l) => l.fn !== fn) },
   fire(type, event) { for (const l of this._ls.filter((l) => l.type === type)) l.fn(event) },
-  // 认两个容器标记:老版 data-chat-flow / 新版 data-chat-flow-key
-  closest(sel) { return this.inFlow && String(sel).includes('data-chat-flow') ? {} : null },
+  // 认三个范围:老版容器 data-chat-flow / 新版行 data-chat-flow-key / 消息内容槽;
+  // 以及本插件自己的 img[data-meme-img]。issue #44 起放大只认后两者。
+  closest(sel) {
+    const s = String(sel)
+    if (s.includes('data-meme-img')) return 'data-meme-img' in this.attrs ? this : null
+    if (s.includes('conversation.chat.node')) return this.inSlot ? {} : null
+    if (s.includes('data-chat-flow')) return this.inFlow ? {} : null
+    return null
+  },
 })
 
 const docEl = {
@@ -77,11 +84,27 @@ const { installMemeZoom } = globalThis.__dshMeme.__test
 const imgInFlow = (src = 'http://localhost/dsh-memes/p/memes/happy/1.jpg', alt = '猫') => {
   const el = makeEl('img')
   el.inFlow = true
+  el.inSlot = true // 消息正文在内容槽 [data-slot="conversation.chat.node"] 里
   el.src = src
   el.alt = alt
   return el
 }
 const imgOutside = () => { const el = makeEl('img'); el.src = 'http://localhost/other.png'; return el }
+// 别的插件注入的装饰图:在 FlowItem 行内,但不在消息内容槽里(#44 的头像/贴纸场景)
+const imgDecor = () => {
+  const el = makeEl('img')
+  el.inFlow = true
+  el.src = 'http://localhost/avatar.png'
+  return el
+}
+// 本插件自己提到行首的 [表情: x] 图:在内容槽外,但带 data-meme-img
+const imgOwn = () => {
+  const el = makeEl('img')
+  el.inFlow = true
+  el.attrs['data-meme-img'] = '1'
+  el.src = 'http://localhost/dsh-memes/p/memes/happy/2.jpg'
+  return el
+}
 const evt = () => {
   const e = { key: '', deltaY: 0, defaultPrevented: false, stopped: false, target: null }
   e.preventDefault = () => { e.defaultPrevented = true }
@@ -212,4 +235,30 @@ test('⑧ 重复装只装一份;卸载摘干净,还能再装回来', () => {
   const dispose2 = installMemeZoom(docEl)
   assert.equal(docListeners.length, 2, '重新挂载能再装一次')
   dispose2()
+})
+
+test('⑨ 别的插件往消息行里注入的装饰图不放大(issue #44)', () => {
+  const dispose = installMemeZoom(docEl)
+  for (const deco of [imgDecor(), imgDecor()]) {
+    const e = evt()
+    e.target = deco
+    fireDoc('click', e)
+    assert.equal(box(), undefined, '装饰图(内容槽外、无 data-meme-img)不该弹放大层')
+    assert.equal(e.defaultPrevented, false, '别人的图别拦点击')
+    assert.equal(e.stopped, false)
+  }
+  dispose()
+})
+
+test('⑩ 本插件提到行首的表情图仍可放大(在内容槽外,但带 data-meme-img)', () => {
+  const dispose = installMemeZoom(docEl)
+  const own = imgOwn()
+  const e = evt()
+  e.target = own
+  fireDoc('click', e)
+  const b = box()
+  assert.ok(b, '自己的表情图要能放大')
+  assert.equal(b.children[0].src, 'http://localhost/dsh-memes/p/memes/happy/2.jpg')
+  assert.ok(e.defaultPrevented && e.stopped)
+  dispose()
 })
