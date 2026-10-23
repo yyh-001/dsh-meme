@@ -60,6 +60,11 @@ test('apply() 建的每个 <style> 都带 data-plugin=dsh-meme(issue #32)', () =
   assert.ok(appended[0].textContent.includes('.meme-panel'), '第一个是设置面板 CSS')
   assert.ok(appended[1].textContent.includes('.meme-picker'), '第二个是选图器 CSS')
   assert.ok(appended[2].textContent.includes('cursor:zoom-in'), '第三个是点图放大的光标提示')
+  // issue #44:光标范围必须和点击判定一致 —— 只给消息内容槽里的图和本插件自己的表情图,
+  // 不能再按 [data-chat-flow-key] 整行给别的插件注入的装饰图(头像等)也加 zoom-in。
+  assert.ok(appended[2].textContent.includes('img[data-meme-img]'), '自己的表情图要有放大光标')
+  assert.ok(appended[2].textContent.includes('[data-slot="conversation.chat.node"] img'), '消息内容槽里的图要有放大光标')
+  assert.equal(appended[2].textContent.includes('[data-chat-flow]'), false, '范围不能再是整条 FlowItem 行(issue #44)')
 })
 
 test('没有无主 <style>:宿主的 claimStyles 认不到东西(issue #32 的根因)', () => {
