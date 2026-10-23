@@ -14,6 +14,7 @@
   "type": "module",
   "main": "index.js",
   "files": [
+    "anim.js",
     "client.js",
     "cordis.patch.yml",
     "docs/",
