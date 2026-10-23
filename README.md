@@ -67,6 +67,25 @@ dsh plugin --profile web add dsh-meme
 
 默认扫描 `~/.dsh/meme-packs`，设置保存在 `~/.dsh/dsh-expression.json`，升级插件会保留。更多图库可在「发现」安装，也可导入别人分享的 ZIP。
 
+## 插件更新失败 / 更新后消失？
+
+在市场里点「更新」时，宿主会用 pnpm 替换插件目录。如果 DSH 进程还加载着插件文件（Windows 上文件被占用），pnpm 改名/替换目录会失败；市场界面往往只留一行 `exit 1`，完整报错被截断，看起来像「没报错但失败了」。失败后目录可能只装了一半，再进市场会校验失败（例如提示 `ENOENT ... cordis.patch.yml`），插件列表里也找不到它。
+
+遇到时按顺序处理：
+
+1. **完全退出 DSH**（托盘图标退出，任务管理器里确认没有 dsh / Electron 进程），重新打开后再点一次更新。
+2. 还失败，或插件已从列表消失：**退出 DSH 后**到对应 profile 目录手动更新（默认在 `~/.dsh/profiles/<profile>`；桌面版是 `desktop`，Web / CLI 常见 `web`）：
+
+   ```bash
+   cd ~/.dsh/profiles/web
+   pnpm add dsh-meme@latest
+   ```
+
+   然后重新打开 DSH，在「设置 → 表情包」确认插件已启用。
+3. 图库和设置都存在 `~/.dsh`（`dsh-expression.json` 等），更新或重装不会丢；仍不行可以先卸载再重装。
+
+插件本身只读自己的包目录、不写它；更新时的文件占用来自宿主的 pnpm 流程。如果经常复现，可以把 profile 目录、市场里的 `exit 1` 上下文和是否有 `ERR_PNPM_EPERM` 一并反馈给 DSH 插件市场。
+
 ## 国内网络 / 图库市场拉不到？
 
 图库目录和预览图托管在 GitHub 上，国内直连 `raw.githubusercontent.com` / `cdn.jsdelivr.net` 经常超时，发现页于是显示「图库目录暂不可用(检查网络或稍后重试)」。插件默认走多镜像，通常无需配置：
