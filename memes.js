@@ -640,6 +640,17 @@ export function normalizeSendMode(value) {
 }
 
 /**
+ * 表情排布方式(设置页「表情排布」下拉框,issue #50):
+ * - inline(默认):图与正文并排——图提到消息行行首,正文在右,短消息紧凑;
+ * - stacked:图独占一行在上,正文按正常宽度铺开在下,阅读宽度完整。
+ * 只影响前端把 [表情: 描述] 渲染成图后的排布,默认保持并排不改已有用户观感。
+ */
+export const LAYOUT_MODES = ['inline', 'stacked']
+export function normalizeLayoutMode(value) {
+  return LAYOUT_MODES.includes(value) ? value : 'inline'
+}
+
+/**
  * 注册 send_meme 工具。
  *
  * 三种模式:

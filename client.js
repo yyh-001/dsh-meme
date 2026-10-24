@@ -234,6 +234,25 @@ window.__ModuleLoader__.load({
     // 管理页和气泡装饰共享变更通知,避免发图面板已看到新库而气泡仍查旧索引(#39)。
     let memeLibraryRevision = 0
     const memeIndexListeners = new Set()
+    // 表情排布模式(issue #50):inline = 图与正文并排(默认,行为同旧版);stacked = 图
+    // 独占一行在上、正文按正常宽度铺开在下。设置页(排布下拉框)和 host 的索引/设置
+    // 响应都会回写这里;翻转只改行元素上的 data-meme-layout 属性,排布交给 CSS,
+    // 不动行布置 JS。放在模块级:管理页与气泡装饰两个作用域都要读写同一个值。
+    let memeLayoutMode = 'inline'
+    const applyMemeLayout = () => {
+      for (const img of document.querySelectorAll('img[data-meme-img]')) {
+        const row = img.closest('[data-time-hover-root],[data-chat-flow-key]')
+        if (!row) continue
+        if (memeLayoutMode === 'stacked') row.setAttribute('data-meme-layout', 'stacked')
+        else row.removeAttribute('data-meme-layout')
+      }
+    }
+    const setMemeLayoutMode = (mode) => {
+      const next = mode === 'stacked' ? 'stacked' : 'inline'
+      if (next === memeLayoutMode) return
+      memeLayoutMode = next
+      applyMemeLayout()
+    }
     const completedRemoteJobs = new Set()
     const memeMutationOps = new Set([
       'importMemePack', 'createMemePack', 'deleteMemePack', 'setPack', 'setMemeRoot',
@@ -325,6 +344,8 @@ window.__ModuleLoader__.load({
       const [promptOn, setPromptOn] = React.useState(true)
       // AI 发送方式:auto=按渠道自动 / text=纯文字不发图 / image=总是发图
       const [sendMode, setSendMode] = React.useState('auto')
+      // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
+      const [layoutMode, setLayoutMode] = React.useState('inline')
       const [pluginVersion, setPluginVersion] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -333,6 +354,10 @@ window.__ModuleLoader__.load({
         setPacks(Array.isArray(res.packs) ? res.packs : [])
         setPromptOn(res.promptEnabled !== false)
         setSendMode(res.sendMode === 'text' || res.sendMode === 'image' ? res.sendMode : 'auto')
+        // 排布设置(old host 不带该字段,按默认并排处理),同时回写模块级状态
+        // 让气泡装饰即时翻新(issue #50)
+        setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
+        setMemeLayoutMode(res.layoutMode)
         setPluginVersion(res.pluginVersion || '')
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
@@ -678,6 +703,24 @@ window.__ModuleLoader__.load({
           }
         } catch (e) {
           setSendMode(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // 表情排布下拉框(issue #50):立即保存,失败回滚;切换只翻 data 属性,不动行布置
+      const onPickLayoutMode = async (mode) => {
+        const prev = layoutMode
+        setLayoutMode(mode)
+        try {
+          const res = await apiPost({ op: 'setLayoutMode', layoutMode: mode })
+          if (res && res.ok) {
+            if (Array.isArray(res.packs)) applyRoot(res)
+            setRootNotice(res.message || '已更新表情排布')
+          } else {
+            setLayoutMode(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setLayoutMode(prev)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
@@ -1398,6 +1441,23 @@ window.__ModuleLoader__.load({
             : sendMode === 'image'
               ? 'AI 每次斗图都必须把图片发出来:Web 显示图片,IM 发原生图片'
               : 'Web 聊天显示图片;QQ/微信等 IM 聊天发原生图片'),
+        // 表情排布:图文同条时怎么排,只影响前端渲染,默认并排不改已有观感(issue #50)
+        h('div', { className: 'section-title' }, '表情排布'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('select', {
+            value: layoutMode,
+            onChange: (e) => onPickLayoutMode(e.target.value),
+            title: '图文同一条消息时怎么排:并排紧凑省纵向空间;独占一行正文按正常宽度铺开',
+            style: { flex: 1, minWidth: 160 },
+          },
+            h('option', { value: 'inline' }, '并排(默认,紧凑)'),
+            h('option', { value: 'stacked' }, '独占一行(正文铺开)'),
+          ),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          layoutMode === 'stacked'
+            ? '表情图独占一行在上,正文按正常宽度铺开在下'
+            : '表情图与正文并排,短消息更紧凑'),
         h('div', { className: 'section-title' }, '陪伴提示词'),
         h('div', { className: 'row' },
           h('span', {
@@ -2036,7 +2096,7 @@ window.__ModuleLoader__.load({
             }
             pickerCache = next
             // 打开面板也同步索引:其它页面或 AI 学图带来的变化无需刷新整个页面。
-            for (const listener of memeIndexListeners) listener(next.memes)
+            for (const listener of memeIndexListeners) listener(next.memes, res.layoutMode)
             setData(next)
             setLoaded(true)
           })
@@ -2328,6 +2388,35 @@ window.__ModuleLoader__.load({
       .map((t) => t.replace(/["']/g, ''))
       .filter((t) => t.length >= 2)
       .sort((a, b) => b.length - a.length)
+    // 索引 key 入表(原文/折叠/紧凑三形态)。同层同 key 不隐式覆盖:先注册者优先
+    // (包顺序,内置包在前)——后到的同 key 是跨包撞车,悄悄挤掉先到的只会配错图(issue #52)。
+    const addIndexKey = (map, key, url) => {
+      const raw = String(key || '').trim()
+      if (!raw) return
+      for (const form of new Set([raw, foldCaption(raw), looseCaption(raw)])) {
+        if (form && !map.has(form)) map.set(form, url)
+      }
+    }
+    // 精确索引分两层(issue #52):caption 层(caption/文件名/超长 caption 截断)与
+    // keyword 层(keywords 逐词 + 整串)。此前三路塞同一个 Map,keywords 只有整串能
+    // 精确命中,单个词只能掉进分词兜底——兜底里 caption 与 keyword 同权、平手先到
+    // 先得,内置包排前面就赢走用户包同词的图。拆层后 caption 精确 > keyword 精确 >
+    // 分词兜底,同层撞 key 按包顺序 first-wins,不再隐式互相覆盖。
+    const buildMemeIndex = (rows, toUrl) => {
+      const captions = new Map()
+      const keywords = new Map()
+      for (const row of rows || []) {
+        const url = toUrl(row)
+        addIndexKey(captions, row.caption, url)
+        addIndexKey(captions, row.file_name, url)
+        addIndexKey(captions, String(row.caption || '').slice(0, 80), url)
+        addIndexKey(captions, String(row.caption || '').slice(0, 100), url)
+        const kw = String(row.keywords || '')
+        addIndexKey(keywords, kw, url)
+        for (const word of kw.split(/\s+/)) addIndexKey(keywords, word, url)
+      }
+      return { caption: captions, keyword: keywords }
+    }
     // 分词兜底的 haystack:caption/关键词/文件名的折叠与紧凑形态 + 分词。
     const buildMemeSearch = (rows, toUrl) => (rows || []).map((row) => {
       const hay = []
@@ -2342,12 +2431,23 @@ window.__ModuleLoader__.load({
       const tokens = [...new Set(splitDescTokens(parts.join(' ')))]
       return { hay, tokens, url: toUrl(row) }
     })
-    // 组合匹配:精确(原文/折叠/紧凑三级)→ 分词在 caption/关键词里双向包含。
+    // 组合匹配:caption 精确(原文/折叠/紧凑)→ keyword 精确 → 分词在 caption/关键词里双向包含。
+    // caption/文件名是这张图的确切身份,keywords 只是检索词:跨包撞词时 caption 命中必须压过
+    // keyword 命中(issue #52:内置包 keywords 含「下班」,不该抢走用户包 caption="下班！！！"的配图)。
+    // index 兼容两种形态:单层 Map(旧调用/测试)或 { caption, keyword } 双层 Map。
     const matchDesc = (desc, index, search) => {
-      if (index) {
-        const raw = String(desc || '').trim()
-        const exact = index.get(raw) || index.get(foldCaption(raw)) || index.get(looseCaption(raw))
-        if (exact) return exact
+      const captionIndex = index && typeof index.get === 'function'
+        ? index
+        : (index && index.caption && typeof index.caption.get === 'function' ? index.caption : null)
+      const keywordIndex = index && index.keyword && typeof index.keyword.get === 'function' ? index.keyword : null
+      const raw = String(desc || '').trim()
+      const forms = [raw, foldCaption(raw), looseCaption(raw)]
+      for (const map of [captionIndex, keywordIndex]) {
+        if (!map) continue
+        for (const form of forms) {
+          const exact = map.get(form)
+          if (exact) return exact
+        }
       }
       const needles = [...new Set(splitDescTokens(desc).map(looseCaption).filter(Boolean))]
       let best = null
@@ -2384,6 +2484,16 @@ window.__ModuleLoader__.load({
       // 范围与 installMemeZoom 的点击判定保持一致:只给内容槽里的图和本插件提到行首的图上光标(issue #44)。
       const zoomStyle = createOwnedStyle('img[data-meme-img],[data-slot="conversation.chat.node"] img{cursor:zoom-in}')
       ctx.effect(() => () => { zoomStyle.remove() }, 'dsh-expression-entry: zoom styles')
+
+      // 表情排布「独占一行」(issue #50):行元素翻成纵向 flex——图在上,正文在下按正常
+      // 宽度铺开;user/steering 行右对齐(并排模式下靠 marginLeft:auto,这里靠 flex 尾对齐)。
+      // 默认「并排」不给行打 data-meme-layout,CSS 完全不命中,观感与旧版一致。
+      const layoutStyle = createOwnedStyle(
+        '[data-meme-layout="stacked"]{display:flex;flex-direction:column;align-items:flex-start;gap:6px}'
+        + '[data-meme-layout="stacked"][data-chat-flow-kind="user"],'
+        + '[data-meme-layout="stacked"][data-chat-flow-kind="steering"]{align-items:flex-end}'
+      )
+      ctx.effect(() => () => { layoutStyle.remove() }, 'dsh-expression-entry: meme layout styles')
       const disposeZoom = installMemeZoom()
       ctx.effect(() => () => { disposeZoom() }, 'dsh-expression-entry: zoom overlay')
 
@@ -2418,26 +2528,9 @@ window.__ModuleLoader__.load({
         const rel = u || (path ? '/dsh-memes/' + path : '')
         try { return new URL(rel, window.location.origin).href } catch (e) { return rel }
       }
-      const addCaptionKey = (map, key, url) => {
-        const raw = String(key || '').trim()
-        if (!raw) return
-        map.set(raw, url)
-        map.set(foldCaption(raw), url)
-        const loose = looseCaption(raw)
-        if (loose) map.set(loose, url)
-      }
       const findMemeUrl = (desc) => matchDesc(desc, memeIndex, memeSearch)
       const setMemeIndex = (rows) => {
-        const next = new Map()
-        for (const row of rows) {
-          const url = absMemeUrl(row.url, row.path)
-          addCaptionKey(next, row.caption, url)
-          addCaptionKey(next, row.file_name, url)
-          addCaptionKey(next, row.keywords, url)
-          addCaptionKey(next, String(row.caption || '').slice(0, 80), url)
-          addCaptionKey(next, String(row.caption || '').slice(0, 100), url)
-        }
-        memeIndex = next
+        memeIndex = buildMemeIndex(rows, (row) => absMemeUrl(row.url, row.path))
         memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
         memeIndexAttempts = 0
         memeIndexRetryAfter = 0
@@ -2459,6 +2552,8 @@ window.__ModuleLoader__.load({
           .then((res) => {
             if (disposed || generation !== memeIndexGeneration) return
             if (!res || !res.ok || !Array.isArray(res.memes)) throw new Error('无效的表情索引响应')
+            // 排布设置随索引一起下发:设置页不开,装饰器也能拿到持久化的排布(issue #50)
+            if (typeof res.layoutMode === 'string') setMemeLayoutMode(res.layoutMode)
             setMemeIndex(res.memes)
           })
           .catch((error) => {
@@ -2479,8 +2574,9 @@ window.__ModuleLoader__.load({
             }
           })
       }
-      const refreshMemeIndex = (rows) => {
+      const refreshMemeIndex = (rows, layoutMode) => {
         if (disposed) return
+        if (typeof layoutMode === 'string' && layoutMode) setMemeLayoutMode(layoutMode)
         memeIndexGeneration++
         if (memeIndexController) memeIndexController.abort()
         memeIndexController = null
@@ -2654,6 +2750,9 @@ window.__ModuleLoader__.load({
               for (const img of imgs) img.style.marginLeft = 'auto'
             }
             for (const img of imgs) row.insertBefore(img, row.firstChild)
+            // 排布模式(issue #50):stacked 时行翻成纵向 flex,图在上正文在下;
+            // inline 不打标记,CSS 不命中,观感与旧版一致。
+            if (memeLayoutMode === 'stacked') row.setAttribute('data-meme-layout', 'stacked')
             // 中间层被掏空才隐藏,并打 memeEmpty 标记(回显逻辑见函数开头的清理段)
             let el = parent
             while (el && el !== row) {
@@ -2901,7 +3000,8 @@ window.__ModuleLoader__.load({
     // 辅助入口仅用于回归测试(node --test),宿主不消费
     exports.__test = {
       apiPost,
-      foldCaption, looseCaption, splitDescTokens, buildMemeSearch, matchDesc, compareVersions,
+      foldCaption, looseCaption, splitDescTokens, buildMemeIndex, buildMemeSearch, matchDesc, compareVersions,
+      setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
       packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, inKeepZone, uniqueKeys,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存

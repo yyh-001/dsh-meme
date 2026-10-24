@@ -96,6 +96,45 @@ test('matchDesc index 未加载时仍可走分词兜底', () => {
   assert.equal(T.matchDesc('无语', null, null), null)
 })
 
+// issue #52:内置包 keywords 含「下班」,用户包另一张图 caption="下班！！！"。
+// 点击缩略图发 [表情: 下班！！！],此前单层索引里 keywords 与 caption 同权、
+// 平手先到先得,内置包排前面就赢走配图 → 渲染成摸鱼躺平图。
+const clashRows = [
+  { caption: '摸鱼躺平，半睁眼摊着不想动', keywords: '摸鱼 躺平 下班 不想干活 大肥鱼', file_name: 'tangping.jpg', url: 'built/tangping.jpg' },
+  { caption: '下班！！！', keywords: '下班 累趴', file_name: '下班！！！.jpg', url: 'user/xiaban.jpg' },
+]
+const clashIndex = T.buildMemeIndex(clashRows, (r) => r.url)
+const clashSearch = T.buildMemeSearch(clashRows, (r) => r.url)
+
+test('buildMemeIndex 分 caption/keyword 两层,keywords 逐词入层(#52)', () => {
+  assert.equal(clashIndex.caption.get('下班！！！'), 'user/xiaban.jpg')
+  assert.equal(clashIndex.caption.get('摸鱼躺平，半睁眼摊着不想动'), 'built/tangping.jpg')
+  assert.equal(clashIndex.keyword.get('下班'), 'built/tangping.jpg', '同层撞词 first-wins(包顺序)')
+  assert.ok(!clashIndex.caption.has('下班'), '单个检索词不进 caption 层')
+})
+
+test('matchDesc caption 精确命中压过跨包 keywords 撞词(#52)', () => {
+  assert.equal(T.matchDesc('下班！！！', clashIndex, clashSearch), 'user/xiaban.jpg')
+})
+
+test('matchDesc keyword 层精确命中单词描述,不再依赖分词兜底(#52)', () => {
+  assert.equal(T.matchDesc('下班', clashIndex, clashSearch), 'built/tangping.jpg')
+  assert.equal(T.matchDesc('不想干活', clashIndex, clashSearch), 'built/tangping.jpg')
+})
+
+test('matchDesc 同层同 key 后注册者不隐式覆盖先注册者(#52)', () => {
+  const idx = T.buildMemeIndex([
+    { caption: '开心', url: 'first' },
+    { caption: '开心', url: 'second' },
+  ], (r) => r.url)
+  assert.equal(idx.caption.get('开心'), 'first')
+})
+
+test('matchDesc 兼容旧的单层 Map 索引(仅 caption 精确)', () => {
+  const index = new Map([['开心到飞起', 'u-happy']])
+  assert.equal(T.matchDesc('开心到飞起', index, search), 'u-happy')
+})
+
 test('compareVersions:数值段比较、v 前缀、长度不足补 0', () => {
   const C = T.compareVersions
   assert.equal(C('1.2.0', '1.2.0'), 0)

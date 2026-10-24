@@ -53,7 +53,7 @@ globalThis.__dshMeme.apply({ get: () => undefined, effect: () => {} })
 const OWNER = 'dsh-meme'
 
 test('apply() 建的每个 <style> 都带 data-plugin=dsh-meme(issue #32)', () => {
-  assert.equal(appended.length, 3, '应建三个 style:设置面板 CSS + 选图器 CSS + 点图放大光标')
+  assert.equal(appended.length, 4, '应建四个 style:设置面板 CSS + 选图器 CSS + 点图放大光标 + 表情排布(issue #50)')
   for (const el of appended) {
     assert.equal(el.getAttribute('data-plugin'), OWNER, '<style> 必须打上模块注册 id')
   }
@@ -65,6 +65,7 @@ test('apply() 建的每个 <style> 都带 data-plugin=dsh-meme(issue #32)', () =
   assert.ok(appended[2].textContent.includes('img[data-meme-img]'), '自己的表情图要有放大光标')
   assert.ok(appended[2].textContent.includes('[data-slot="conversation.chat.node"] img'), '消息内容槽里的图要有放大光标')
   assert.equal(appended[2].textContent.includes('[data-chat-flow]'), false, '范围不能再是整条 FlowItem 行(issue #44)')
+  assert.ok(appended[3].textContent.includes('[data-meme-layout="stacked"]'), '第四个是「独占一行」排布规则(issue #50)')
 })
 
 test('没有无主 <style>:宿主的 claimStyles 认不到东西(issue #32 的根因)', () => {

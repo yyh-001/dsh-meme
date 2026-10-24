@@ -197,6 +197,7 @@ export class Element {
   setAttribute(k, v) { this.attrs[k] = String(v) }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null }
   hasAttribute(k) { return k in this.attrs }
+  removeAttribute(k) { delete this.attrs[k] }
 }
 
 // 图片属性:代码里是 img.src = ... / img.loading = 'lazy' 这种反射赋值

@@ -23,7 +23,7 @@ import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
   searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
-  SEND_MODES, normalizeSendMode, openIndexWriter,
+  SEND_MODES, normalizeSendMode, LAYOUT_MODES, normalizeLayoutMode, openIndexWriter,
 } from './memes.js'
 import { ANIM_DEFAULT_FRAMES, detectAnimation, buildAnimationFilmstrip, animationModelNote } from './anim.js'
 
@@ -387,6 +387,75 @@ export function directoryGroupsFor(setting, fallbackUrls = DEFAULT_REMOTE_DIR_UR
   return directoryGroupsFor('', fallbackUrls)
 }
 
+/**
+ * 工具注册时机兜底(issue #51)。
+ *
+ * dsh 0.2.1-rc.x 冷启动时,apply 同步路径里 ctx.tools 可能还没对 agent 平面生效:
+ * register() 不抛错、但工具不进表(learn_meme 当时连 try/catch 都没有),市场里
+ * 照样显示 live,API/面板/图片路由全都正常——直到热重挂(服务已 ACTIVE)工具才出现。
+ *
+ * 注册策略:
+ *   * 宿主有 ctx.inject:整体挪进 inject(['tools']) 回调,tools 服务 ACTIVE 后再注册,
+ *     恰好一次(这是 dsh-live-reload README 记录的 0.2.x 官方姿势:apply 阶段只 ctx.get()
+ *     会静默失败,必须 inject 等依赖就绪);
+ *   * 老宿主没有 inject:保持同步注册,抛错则指数退避重试;duplicate 视为已注册
+ *     (第一次其实写进去了,重试撞名说明不用再挂)。
+ *
+ * 任何失败都补一份 ctx.logger.error:桌面端把宿主子进程的 stdout 收走,
+ * console.error 用户侧一点痕迹都没有,没日志就没法报障。
+ *
+ * @param {object} ctx 插件上下文
+ * @param {string} label 工具名(日志用)
+ * @param {() => void} register 真正执行注册的 thunk(ctx.tools.register 自带生命周期挂接)
+ * @param {{retryBaseMs?: number, retryMax?: number}} [options] 测试注入退避参数
+ */
+export function registerToolWhenReady(ctx, label, register, options = {}) {
+  const retryBaseMs = typeof options.retryBaseMs === 'number' ? options.retryBaseMs : 1000
+  const retryMax = typeof options.retryMax === 'number' ? options.retryMax : 5
+  const report = (error, attempt) => {
+    const detail = error instanceof Error ? error.message : String(error)
+    const text = `[dsh-expression] ${label} 注册失败(不影响 API/面板${attempt ? `,第 ${attempt} 次重试` : ''}): ${detail}`
+    console.error(text)
+    try {
+      if (ctx.logger && typeof ctx.logger.error === 'function') ctx.logger.error(text)
+    } catch { /* logger 缺席不连坐 */ }
+  }
+  const safeRegister = (attempt) => {
+    try {
+      register()
+      return true
+    } catch (error) {
+      if (/duplicate/i.test(String((error && error.message) || error))) return true
+      report(error, attempt)
+      return false
+    }
+  }
+  if (typeof ctx.inject === 'function') {
+    try {
+      ctx.inject(['tools'], () => { safeRegister(null) })
+      return
+    } catch (error) { report(error, null) /* inject 挂不上:退回同步+重试 */ }
+  }
+  if (safeRegister(null)) return
+  // 同步注册失败:指数退避重试(1s、2s、4s…),总共 retryMax 次;每次失败都上报。
+  const timers = new Set()
+  if (typeof ctx.effect === 'function') {
+    try { ctx.effect(() => () => { for (const t of timers) clearTimeout(t); timers.clear() }, `dsh-expression: ${label} retry timers`) } catch { /* effect 缺席不连坐 */ }
+  }
+  let attempts = 0
+  const scheduleRetry = () => {
+    attempts++
+    const delay = retryBaseMs * Math.pow(2, attempts - 1)
+    const timer = setTimeout(() => {
+      timers.delete(timer)
+      if (safeRegister(attempts)) return
+      if (attempts < retryMax) scheduleRetry()
+    }, delay)
+    timers.add(timer)
+  }
+  scheduleRetry()
+}
+
 export function apply(ctx, config) {
   // 图库目录设置存 ~/.dsh(稳定,不受包升级/图库变化影响):
   // 优先级 用户设置(settings) > patch 配置(config.memeRoot) > 包内默认
@@ -697,12 +766,10 @@ export function apply(ctx, config) {
     ? (path, caption) => qq.sendImage(path, caption)
     : null
   if (sendImage || urlPrefix) {
-    try {
+    registerToolWhenReady(ctx, 'send_meme', () => {
       registerSendMemeTool(ctx, sampler, sendImage, urlPrefix, imToolOptions())
       console.log(`[dsh-expression] send_meme 已注册(${sendImage ? 'QQ' : 'Web'}通道${!sendImage && hasImDelivery() ? '+IM' : ''},${urlPrefix || '无路由'})`)
-    } catch (error) {
-      console.error('[dsh-expression] send_meme 注册失败(不影响 API/面板):', error instanceof Error ? error.message : String(error))
-    }
+    })
   } else {
     console.log('[dsh-expression] 无可用发送通道(需要 dsh-companion 的 QQ 或 webServer),未注册 send_meme')
   }
@@ -712,7 +779,9 @@ export function apply(ctx, config) {
     if (sendImage || urlPrefix) return
     const qqNow = ctx.get('companionQq')
     if (qqNow !== undefined && typeof qqNow.sendImage === 'function') {
-      registerSendMemeTool(ctx, sampler, (path, caption) => qqNow.sendImage(path, caption), urlPrefix, imToolOptions())
+      registerToolWhenReady(ctx, 'send_meme', () => {
+        registerSendMemeTool(ctx, sampler, (path, caption) => qqNow.sendImage(path, caption), urlPrefix, imToolOptions())
+      })
     }
   }
   ctx.on('companionQq/available', register)
@@ -757,6 +826,8 @@ export function apply(ctx, config) {
         promptEnabled: readSettings().promptEnabled !== false,
         // AI 发送方式设置:auto(默认)/ text(纯文字)/ image(总是发图)
         sendMode: normalizeSendMode(s.sendMode),
+        // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
+        layoutMode: normalizeLayoutMode(s.layoutMode),
         pluginVersion,
         remoteSubs: remoteSubs(),
         remoteDirUrl: remoteDirUrlList(),
@@ -815,7 +886,9 @@ export function apply(ctx, config) {
     }
 
     // ---- AI 自动学表情包:用户附件或 URL,下载收录进图库 ----
-    ctx.tools.register(defineTool({
+    // 与 send_meme 一样走 registerToolWhenReady:冷启动时 ctx.tools 未就绪,
+    // 同步 register 静默无效,learn_meme 会跟着一起缺席(issue #51)。
+    registerToolWhenReady(ctx, 'learn_meme', () => ctx.tools.register(defineTool({
       name: 'learn_meme',
       description: '把一张图片收录进表情包图库(自动学图)。' +
         '仅当用户明确要求收藏/收录/保存这张图时使用(如「收藏这个表情」「收进图库」)。' +
@@ -907,7 +980,7 @@ export function apply(ctx, config) {
           return { ok: false, message: '收录失败: ' + (error instanceof Error ? error.message : String(error)) }
         }
       },
-    }))
+    })))
 
     // ---- AI 识图核心:当前默认模型识别图片 → 分类/描述/关键词 ----
     async function recognizeImageBytes(llm, sel, buf, mime, fileName) {
@@ -1667,7 +1740,7 @@ export function apply(ctx, config) {
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList() })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode) })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -1695,6 +1768,7 @@ export function apply(ctx, config) {
             memes: rows.map((m) => urlFor(m, pid)),
             remoteSubs: remoteSubs(),
             remoteDirUrl: remoteDirUrlList(),
+            layoutMode: normalizeLayoutMode(readSettings().layoutMode),
           })
           return
         }
@@ -1944,6 +2018,13 @@ export function apply(ctx, config) {
             writeSettings({ sendMode: mode })
             const label = mode === 'text' ? '纯文字' : mode === 'image' ? '图片' : '自动(按渠道)'
             json(res, { ok: true, ...packPayload(), message: '发送方式已改为「' + label + '」,下一条消息生效' })
+          } else if (op === 'setLayoutMode') {
+            // 表情排布:inline = 图与正文并排(默认);stacked = 图独占一行、正文铺开(issue #50)
+            const mode = String(body.layoutMode == null ? '' : body.layoutMode).trim()
+            if (!LAYOUT_MODES.includes(mode)) throw new Error('排布方式只能是 inline / stacked')
+            writeSettings({ layoutMode: mode })
+            const label = mode === 'stacked' ? '独占一行' : '并排'
+            json(res, { ok: true, ...packPayload(), message: '表情排布已改为「' + label + '」' })
           } else if (op === 'setPackEnabled') {
             // 每张卡片一个开关,可同时开多个;没设置过时以当前图库为初始值
             const target = String(body.packId || '').trim()
