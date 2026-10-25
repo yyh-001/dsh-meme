@@ -444,23 +444,31 @@ export class MemesStore {
     this.rows = this.readRows()
   }
 
-  /** 列表情包:tag 为情绪桶或细分类;query 只做 caption/keywords 子串(管理面板用)。 */
-  list(tag, query) {
-    const rows = this.rows
-    const tags = moodNames()
-    let memes = rows
-    const fine = fineTagsFor(tag)
-    if (fine) memes = memes.filter((m) => fine.includes(m.tag))
-    const q = query && String(query).trim().toLowerCase()
-    if (q) {
-      const tokens = q.split(/\s+/).filter(Boolean)
-      memes = memes.filter((m) => {
-        const hay = (m.tag + ' ' + (m.caption ?? '') + ' ' + (m.keywords ?? '')).toLowerCase()
-        return tokens.some((t) => hay.includes(t))
-      })
+    /**
+     * 列表情包:tag 为情绪桶或细分类;query 只做 caption/keywords 子串(管理面板用)。
+     * exact = true 时按 tag 精确匹配、不做情绪桶展开——管理面板的分类下拉列的是
+     * 图库里真实的 tag,选「开心」却混进 like/meow 的桶展开行为会把用户搞糊涂(用户反馈)。
+     */
+    list(tag, query, exact = false) {
+      const rows = this.rows
+      const tags = moodNames()
+      let memes = rows
+      if (exact && tag) {
+        memes = memes.filter((m) => m.tag === String(tag).trim().toLowerCase())
+      } else {
+        const fine = fineTagsFor(tag)
+        if (fine) memes = memes.filter((m) => fine.includes(m.tag))
+      }
+      const q = query && String(query).trim().toLowerCase()
+      if (q) {
+        const tokens = q.split(/\s+/).filter(Boolean)
+        memes = memes.filter((m) => {
+          const hay = (m.tag + ' ' + (m.caption ?? '') + ' ' + (m.keywords ?? '')).toLowerCase()
+          return tokens.some((t) => hay.includes(t))
+        })
+      }
+      return { memes, tags }
     }
-    return { memes, tags }
-  }
 
   /**
    * 关键词搜图。给了 tag 就先把范围限在那个情绪桶里(细 tag 展开同 list),

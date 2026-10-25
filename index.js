@@ -18,13 +18,15 @@ import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, rmSync,
 import { join, dirname, resolve, sep, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import { inflateRawSync } from 'node:zlib'
+import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir, bundledPacksDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
   searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
   SEND_MODES, normalizeSendMode, LAYOUT_MODES, normalizeLayoutMode, openIndexWriter,
-  scanRowFor, walkPackImages, ensurePackAt, movePackEntries, isInsidePluginPackage,
+  scanRowFor, walkPackImages, ensurePackAt, movePackEntries, isInsidePluginPackage, SCAN_IMAGE_EXTS,
 } from './memes.js'
 import { ANIM_DEFAULT_FRAMES, detectAnimation, buildAnimationFilmstrip, animationModelNote } from './anim.js'
 
@@ -158,6 +160,7 @@ export function unzipStore(buf) {
   let pos = buf.readUInt32LE(eocd + 16)
   for (let n = 0; n < count; n++) {
     if (buf.readUInt32LE(pos) !== 0x02014b50) throw new Error('ZIP 中央目录损坏')
+    const flags = buf.readUInt16LE(pos + 8)
     const method = buf.readUInt16LE(pos + 10)
     const compSize = buf.readUInt32LE(pos + 20)
     const nameLen = buf.readUInt16LE(pos + 28)
@@ -165,14 +168,19 @@ export function unzipStore(buf) {
     const commentLen = buf.readUInt16LE(pos + 32)
     const localOffset = buf.readUInt32LE(pos + 42)
     const name = buf.toString('utf8', pos + 46, pos + 46 + nameLen)
+    if (flags & 1) throw new Error('ZIP 含加密条目,不支持: ' + name)
     // local header
     const lNameLen = buf.readUInt16LE(localOffset + 26)
     const lExtraLen = buf.readUInt16LE(localOffset + 28)
     const dataStart = localOffset + 30 + lNameLen + lExtraLen
+    // 常规打包工具(WinRAR/7-Zip/系统右键压缩)默认 DEFLATE,此前只认 STORE,
+    // 正常压缩包一进来就抛「ZIP 含压缩条目」,用户只能一张张传(用户反馈)。
     const data = method === 0
       ? Buffer.from(buf.subarray(dataStart, dataStart + compSize))
-      : null
-    if (data === null) throw new Error('ZIP 含压缩条目(仅支持未压缩): ' + name)
+      : method === 8
+        ? inflateRawSync(buf.subarray(dataStart, dataStart + compSize))
+        : null
+    if (data === null) throw new Error('ZIP 使用了不支持的压缩方式(method ' + method + '): ' + name)
     out.set(name, data)
     pos += 46 + nameLen + extraLen + commentLen
   }
@@ -925,7 +933,7 @@ export function apply(ctx, config) {
         packs: packs.map((p) => ({
           ...p,
           // 本地图库的封面走插件自己的图片路由:图已经装到本地了,不该再去拉远程预览图
-          cover: p.cover ? ROUTE + '/' + p.id + '/' + p.cover : '',
+          cover: p.cover ? ROUTE + '/' + p.id + '/' + String(p.cover).split('/').map(encodeURIComponent).join('/') : '',
           enabled: enabled.includes(p.id),
         })),
         enabledPacks: enabled,
@@ -1971,8 +1979,21 @@ export function apply(ctx, config) {
           const packs = listAllPacks()
           const activeId = readSettings().packId
             || ((packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || '')
-          const urlFor = (m, pid) => ({ ...m, url: ROUTE + '/' + pid + '/' + m.path })
+          // 图片 URL 的路径段要百分号编码:扫描入库保留原始文件名,名字里带 # ? %
+          // 这类字符时浏览器会把 URL 截断,缩略图 404(用户反馈「都是 jpg 却不显示」;
+          // 上传/学图是时间戳命名所以没事)。图片路由本来就先 decodeURIComponent(issue #28),
+          // 编码后的 URL 落到白名单匹配刚好对上。
+          const encPath = (rel) => String(rel || '').split('/').map(encodeURIComponent).join('/')
+          const urlFor = (m, pid) => ({ ...m, url: ROUTE + '/' + pid + '/' + encPath(m.path) })
           const packList = () => packs.map((p) => ({ id: p.id, name: p.name, count: p.count }))
+          // 面板的分类下拉要列图库里真实的 tag(按张数降序),不是写死的六个情绪桶;
+          // 按 tag 筛选也改为精确匹配——桶展开(选「开心」混进 like/meow)对浏览图库
+          // 的人类用户是反直觉的(用户反馈)。send_meme 工具侧保留情绪桶语义。
+          const realTags = (rowsIn) => {
+            const counts = new Map()
+            for (const m of rowsIn) counts.set(m.tag, (counts.get(m.tag) || 0) + 1)
+            return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t)
+          }
           const packId = u.searchParams.get('packId') || activeId
           // packId=all:合并全部包,url 带包前缀(悬浮窗配图索引用,跨包也能渲染/取图)
           if (packId === 'all') {
@@ -1995,15 +2016,15 @@ export function apply(ctx, config) {
             let store = null
             try {
               store = new MemesStore(pack.path)
-              const r = store.list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined)
+              const r = store.list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined, true)
               rows = r.memes
-              tags = r.tags
+              tags = realTags(store.list().memes)
             } catch { /* 坏库/缺索引 → 空列表 */ }
             finally { if (store) store.close() }
           } else {
-            const r = memes.list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined)
+            const r = memes.list(u.searchParams.get('tag') || undefined, u.searchParams.get('q') || undefined, true)
             rows = r.memes
-            tags = r.tags
+            tags = realTags(memes.list().memes)
           }
           const pid = pack ? pack.id : activeId
           json(res, {
@@ -2109,16 +2130,20 @@ export function apply(ctx, config) {
             // 扫描图库目录:把手动拷进去、还没进索引的图片收进来。动图 GIF 走这条路
             // 保真——磁盘文件原始字节入库。扫描内置图库时新收的文件顺手搬去
             // 「我的收藏」(内置图库随插件升级会被清空)。
+            // 同时清理失效行:文件被改名/删除后旧行永远留着,面板里就是一张永远
+            // 加载不出缩略图的死条目(用户反馈「只有添加没有删除/修改」)。
             const wanted = String(body.packId || '').trim()
             const packs = listAllPacks()
             const pack = packs.find((p) => p.id === (wanted || packPayload().packId))
             if (!pack) throw new Error('图库不存在: ' + (wanted || '(当前)'))
-            const known = new Set(packPaths(pack.path))
-            const fresh = walkPackImages(pack.path).filter((relPath) => !known.has(relPath))
+            const known = packPaths(pack.path)
+            const fresh = walkPackImages(pack.path).filter((relPath) => !known.includes(relPath))
+            // 失效行 = 在索引里但磁盘上没有对应文件的(改名/删除之后的残留)
+            const stale = known.filter((relPath) => !existsSync(join(pack.path, relPath)))
             let relocated = 0
-            if (fresh.length) {
-              const w = openIndexWriter(pack.path)
-              try {
+            const w = openIndexWriter(pack.path)
+            try {
+              if (fresh.length) {
                 const insert = w.prepare('INSERT OR IGNORE INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
                 for (const relPath of fresh) {
                   const row = scanRowFor(relPath)
@@ -2126,18 +2151,26 @@ export function apply(ctx, config) {
                   try { mtime = statSync(join(pack.path, relPath)).mtimeMs } catch { /* 用当前时间 */ }
                   insert.run(row.path, row.tag, row.file_name, row.caption, '', mtime, null)
                 }
-              } finally { try { w.close() } catch { /* 已关闭 */ } }
-              if (isVolatileRoot(pack.path)) {
-                const moved = movePackEntries(pack.path, ensureUserPack(), fresh)
-                relocated = moved.moved.length
               }
+              if (stale.length) {
+                const del = w.prepare('DELETE FROM memes WHERE path = ?')
+                for (const relPath of stale) del.run(relPath)
+              }
+            } finally { try { w.close() } catch { /* 已关闭 */ } }
+            if (fresh.length && isVolatileRoot(pack.path)) {
+              const moved = movePackEntries(pack.path, ensureUserPack(), fresh)
+              relocated = moved.moved.length
             }
             if (resolve(pack.path) === resolve(memes.root)) memes.refresh()
+            const parts = []
+            if (fresh.length) parts.push('新增 ' + fresh.length + ' 张')
+            if (stale.length) parts.push('清理 ' + stale.length + ' 条失效记录(文件已改名或删除)')
+            if (relocated) parts.push('已搬入「我的收藏」(内置图库随插件升级会被清空)')
             json(res, {
-              ok: true, added: fresh.length, relocated, ...packPayload(),
-              message: fresh.length
-                ? '扫描到 ' + fresh.length + ' 张新图' + (relocated ? ',已搬入「我的收藏」(内置图库随插件升级会被清空)' : '') + ';描述默认取文件名,可到图库里编辑'
-                : '没有新图:目录里的图片都已入索引',
+              ok: true, added: fresh.length, pruned: stale.length, relocated, ...packPayload(),
+              message: parts.length
+                ? parts.join(';') + (fresh.length ? ';描述默认取文件名,可到图库里编辑' : '')
+                : '没有变化:目录里的图片都已入索引,索引里的文件都还在',
             })
           } else if (op === 'update') {
             const path = String(body.path || '')
@@ -2166,9 +2199,44 @@ export function apply(ctx, config) {
             json(res, { ok: true, deleted: n })
           } else if (op === 'importMemePack') {
             const data = String(body.dataBase64 || '')
-            const name = packSlug(body.name) || 'meme-pack'
             if (!data) throw new Error('缺少 ZIP 数据')
             const entries = unzipStore(Buffer.from(data, 'base64'))
+            // 图库 id:调用方给的名称优先;没给(或中文被清成空)时用 ZIP 里
+            // manifest.json 的 id,再不行才回落 meme-pack
+            let name = packSlug(body.name)
+            if (!name) {
+              try {
+                const m = JSON.parse(String(entries.get('manifest.json') || '{}'))
+                name = packSlug(m.id)
+              } catch { /* 没有/坏 manifest → 走回落 */ }
+            }
+            name = name || 'meme-pack'
+            // 纯图片 ZIP(没有 index.db):自动建索引收进来——分类取目录名、描述取文件名,
+            // 和「扫描新增」同一套规则。此前这种包直接被拒,用户只能一张张上传(用户反馈)。
+            if (!entries.get('index.db')) {
+              const isImageEntry = (rel) => {
+                if (!rel || /[\\\/]$/.test(rel)) return false
+                if (rel.split('/').some((seg) => !seg || seg.startsWith('.') || seg === '__MACOSX')) return false
+                const dot = rel.lastIndexOf('.')
+                const ext = dot >= 0 ? rel.slice(dot).toLowerCase() : ''
+                return SCAN_IMAGE_EXTS.includes(ext)
+              }
+              const images = [...entries.keys()].filter(isImageEntry)
+              if (images.length === 0) throw new Error('ZIP 里没有 index.db,也没有可识别的图片(jpg/png/gif/webp)')
+              const tmpDb = join(tmpdir(), 'dsh-meme-import-' + Date.now() + '-' + Math.random().toString(16).slice(2, 8) + '.db')
+              const db = new DatabaseSync(tmpDb)
+              try {
+                db.exec('CREATE TABLE memes (path TEXT PRIMARY KEY, tag TEXT, file_name TEXT, caption TEXT, keywords TEXT, mtime REAL, captioned_at REAL)')
+                const insert = db.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                for (const rel of images) {
+                  const row = scanRowFor(rel)
+                  insert.run(row.path, row.tag, row.file_name, row.caption, '', Date.now(), null)
+                }
+              } finally { db.close() }
+              try {
+                entries.set('index.db', readFileSync(tmpDb))
+              } finally { rmSync(tmpDb, { force: true }) }
+            }
             installZipEntries(entries, name)
             json(res, { ok: true, ...packPayload(), total: memes.list().memes.length, message: '导入成功,已切换到新图库' })
           } else if (op === 'installRemoteArchive') {

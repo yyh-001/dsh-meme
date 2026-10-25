@@ -1,7 +1,7 @@
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, renameSync } from 'node:fs'
 import { join, resolve, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -185,10 +185,11 @@ test('scanPack:手动塞进目录的图片入库,分类取目录名;重复扫描
   const first = JSON.parse((await post({ op: 'scanPack' })).body)
   assert.equal(first.ok, true)
   assert.equal(first.added, 3, '三张新图入库: ' + first.message)
-  assert.match(first.message, /3 张新图/)
+  assert.match(first.message, /新增 3 张/)
 
   const second = JSON.parse((await post({ op: 'scanPack' })).body)
   assert.equal(second.added, 0, '已入库的不再重复收')
+  assert.equal(second.pruned, 0)
 
   const { MemesStore } = memesMod
   const store = new MemesStore(root)
@@ -201,6 +202,24 @@ test('scanPack:手动塞进目录的图片入库,分类取目录名;重复扫描
   assert.equal(byPath['root-dropped.webp'].tag, 'misc', '根目录散图归 misc')
   assert.equal(byPath['root-dropped.webp'].caption, 'root-dropped', '描述兜底取文件名')
   assert.equal(byPath['memes/work/tangping.gif'].keywords, '')
+})
+
+test('scanPack:文件改名后旧失效行被清理,不再是「只有添加」(用户反馈)', async () => {
+  const root = join(home, 'api-pack')
+  // 把上一张扫进去的图改名:磁盘上新名字,索引里还是旧名字
+  renameSync(join(root, 'shy/face.png'), join(root, 'shy/face-renamed.png'))
+  const r = JSON.parse((await post({ op: 'scanPack' })).body)
+  assert.equal(r.ok, true, r.message)
+  assert.equal(r.added, 1, '改名后的新文件入库')
+  assert.equal(r.pruned, 1, '改名前的旧失效行被清理')
+  assert.match(r.message, /清理 1 条失效记录/)
+
+  const { MemesStore } = memesMod
+  const store = new MemesStore(root)
+  const paths = store.list().memes.map((m) => m.path)
+  store.close()
+  assert.ok(paths.includes('shy/face-renamed.png'), '新名字在索引里')
+  assert.ok(!paths.includes('shy/face.png'), '旧名字不再残留')
 })
 
 test('learn_meme:附件名 .gif 但字节已被压平 → 结果里告知并给保真路径', async () => {

@@ -113,6 +113,9 @@ window.__ModuleLoader__.load({
       fool: '傻瓜', givemoney: '给钱', color: '彩色', cpu: 'CPU',
     }
     const tagZh = (t) => TAG_ZH[t] || t
+    // 下拉框选项文案:标准情绪给「中文 (tag)」,自定义分类(扫描/用户新建)直接显示原名,
+    // 别出现「misc (misc)」这种废话
+    const tagLabel = (t) => (TAG_ZH[t] ? tagZh(t) + ' (' + t + ')' : t)
 
     // 归属 id:必须等于模块注册 id(loader entry 名 = dsh-meme),宿主按同一个 id 摘标签。
     const STYLE_OWNER_ID = 'dsh-meme'
@@ -1091,7 +1094,7 @@ window.__ModuleLoader__.load({
         onChange: (e) => { setTagFilter(e.target.value); load(q, e.target.value) },
       }, [
         h('option', { key: '', value: '' }, '全部分类'),
-        tags.map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+        tags.map((t) => h('option', { key: t, value: t }, tagLabel(t))),
       ])
 
       const fileInput = h('input', {
@@ -1315,7 +1318,7 @@ window.__ModuleLoader__.load({
               h('label', null, '分类'),
               h('div', { className: 'row', style: { width: '100%' } },
                 h('select', { value: edit.tag, onChange: (e) => setEdit({ ...edit, tag: e.target.value }), style: { flex: 1 } },
-                  (tags.includes(edit.tag) ? tags : [edit.tag, ...tags]).map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+                  (tags.includes(edit.tag) ? tags : [edit.tag, ...tags]).map((t) => h('option', { key: t, value: t }, tagLabel(t))),
                   h('option', { value: '__new__' }, '+ 新建分类'),
                 ),
                 h('button', { onClick: () => onDeleteTag(edit.tag), disabled: !edit.tag || edit.tag === '__new__', title: '删除该分类及其中所有表情包' }, '删除分类'),
@@ -1371,7 +1374,7 @@ window.__ModuleLoader__.load({
                   h('option', { value: '' }, '选择分类'),
                   // 现有分类在前,标准情绪补在后:空库/新包也能直接选常用分类,
                   // 不必先「新建分类」再猜名字
-                  [...new Set([...tags, ...Object.keys(TAG_ZH)])].map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+                  [...new Set([...tags, ...Object.keys(TAG_ZH)])].map((t) => h('option', { key: t, value: t }, tagLabel(t))),
                   h('option', { value: '__new__' }, '+ 新建分类'),
                 ),
                 h('button', { onClick: onDeleteTag, disabled: !upTag || upTag === '__new__', title: '删除该分类及其中所有表情包' }, '删除分类'),
