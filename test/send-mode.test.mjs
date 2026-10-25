@@ -117,13 +117,19 @@ test('默认 auto:Web 给 [表情: 描述] 标记,IM 给路径并点名 dsh_im_r
   assert.match(web.message, /\[表情:/, 'Web 候选仍是标记')
   assert.doesNotMatch(web.message, /dsh_im_return_file/)
   assert.ok(web.hits.length > 0)
-  assert.ok(web.hits.every((h) => !('path' in h)), 'Web 候选不带路径')
+  // 出处信息(issue #53):path/library 进模型可见的 hits JSON(用户问「这图哪来的」
+  // 答得上),但用户可见的候选行仍然只有 [表情: 描述],模型没机会把路径抄进回复。
+  assert.ok(web.hits.every((h) => typeof h.path === 'string' && h.path.length > 0), 'Web 候选带 path 出处(#53)')
+  assert.ok(web.hits.every((h) => 'library' in h), 'Web 候选带所属图库(#53)')
+  assert.doesNotMatch(web.message, /path=/, '用户可见的候选行不含路径')
+  assert.match(web.message, /出处信息/, '说明里讲清 path/library 只是出处,发图仍写标记')
 
   const im = await runTool(imSession())
   assert.equal(im.ok, true)
   assert.match(im.message, /dsh_im_return_file/)
   assert.match(im.message, /path=/)
   assert.ok(im.hits.every((h) => typeof h.path === 'string' && h.path.length > 0))
+  assert.ok(im.hits.every((h) => 'library' in h), 'IM 候选也带所属图库(#53)')
 
   const webPrompt = await promptOf(webSession())
   assert.match(webPrompt, /\[表情:/, 'Web 系统提示保持原斗图规则')
@@ -167,7 +173,8 @@ test('图片:强调必须真发出去,Web 标记与 IM 路径都在', async () =
   assert.equal(web.ok, true)
   assert.match(web.message, /\[表情:/)
   assert.match(web.message, /必须真的发出去/, '图片模式要提醒不能只描述')
-  assert.ok(web.hits.every((h) => !('path' in h)))
+  assert.ok(web.hits.every((h) => typeof h.path === 'string'), 'Web 候选带 path 出处(#53)')
+  assert.doesNotMatch(web.message, /path=/, '用户可见的候选行仍不含路径')
 
   const im = await runTool(imSession())
   assert.equal(im.ok, true)

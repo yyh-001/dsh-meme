@@ -20,10 +20,11 @@ import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
 import {
-  MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir,
+  MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir, bundledPacksDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
   searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
   SEND_MODES, normalizeSendMode, LAYOUT_MODES, normalizeLayoutMode, openIndexWriter,
+  scanRowFor, walkPackImages, ensurePackAt, movePackEntries, isInsidePluginPackage,
 } from './memes.js'
 import { ANIM_DEFAULT_FRAMES, detectAnimation, buildAnimationFilmstrip, animationModelNote } from './anim.js'
 
@@ -665,6 +666,17 @@ export function apply(ctx, config) {
     return s.packId || (packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || ''
   }
   const enabledIds = () => enabledPackIds(readSettings(), packRows(), activePackId())
+  // 给单库快路径的行补上图库标注(跨库合并路径在下面就地标):候选带 library,
+  // 模型答得出「这图哪个库的」(issue #53)。不改 path,只加字段。
+  const annotatePack = (rows, pack) => rows.map((row) => ({ ...row, packId: pack.id, packName: pack.name }))
+  // 临时打开某图库跑一句查询,完事即关(包内图库不能常驻连接,issue #43);失败返回 null
+  const withStore = (path, fn) => {
+    let store = null
+    try {
+      store = new MemesStore(path)
+      return fn(store)
+    } catch { return null } finally { if (store) store.close() }
+  }
   const sampler = {
     get root() { return memes.root },
     list: (...a) => memes.list(...a),
@@ -675,8 +687,17 @@ export function apply(ctx, config) {
         const { memes: rows, tags } = memes.list()
         return { mood: resolveMoodName(tag, query, tags), memes: [], tags, reason: '当前没有打开任何图库，去设置页把要用的图库开关打开' }
       }
-      if (ids.length === 1 && ids[0] === activePackId()) return memes.sampleMood(tag, query, n)
       const packs = packRows()
+      if (ids.length === 1) {
+        const hit = packs.find((p) => p.id === ids[0]) || null
+        const r = hit
+          ? (hit.id === activePackId()
+              ? memes.sampleMood(tag, query, n)
+              : withStore(hit.path, (store) => store.sampleMood(tag, query, n)))
+          : null
+        if (r) return { ...r, memes: annotatePack(r.memes, hit) }
+        return memes.sampleMood(tag, query, n)
+      }
       const per = Math.max(1, Math.ceil(n / ids.length))
       const merged = []
       let mood = ''
@@ -691,8 +712,11 @@ export function apply(ctx, config) {
           mood = mood || one.mood
           tags = one.tags.length ? one.tags : tags
           for (const row of one.memes) {
-            // 非当前图库的路径带上包前缀,QQ 通道发图时按前缀找对图库
-            merged.push(id === activePackId() ? row : { ...row, path: id + '/' + row.path })
+            // 非当前图库的路径带上包前缀,QQ 通道发图时按前缀找对图库;
+            // 所有行都带上图库标注(候选出处信息,issue #53)
+            merged.push(id === activePackId()
+              ? { ...row, packId: hit.id, packName: hit.name }
+              : { ...row, path: id + '/' + row.path, packId: hit.id, packName: hit.name })
           }
         } catch { /* 坏包跳过,不影响其他图库 */ } finally { if (store) store.close() }
       }
@@ -708,9 +732,21 @@ export function apply(ctx, config) {
         const { tags } = memes.list()
         return { query: String(query || '').trim().toLowerCase(), memes: [], tags, reason: '当前没有打开任何图库，去设置页把要用的图库开关打开' }
       }
-      if (ids.length === 1 && ids[0] === activePackId()) return memes.search(query, n, tag)
       const packs = packRows()
       const active = activePackId()
+      if (ids.length === 1) {
+        const hit = packs.find((p) => p.id === ids[0]) || null
+        if (hit) {
+          const base = hit.id === active
+            ? memes.search(query, n, tag)
+            : withStore(hit.path, (store) => {
+                const all = store.list(tag)
+                return { ...searchRows(annotatePack(all.memes, hit), query, n), tags: all.tags }
+              })
+          if (base) return base
+        }
+        return memes.search(query, n, tag)
+      }
       const merged = []
       let tags = []
       for (const id of ids) {
@@ -723,11 +759,26 @@ export function apply(ctx, config) {
           tags = one.tags.length ? one.tags : tags
           for (const row of one.memes) {
             // 非当前图库的路径带上包前缀,QQ 通道发图时按前缀找对图库
-            merged.push(id === active ? row : { ...row, path: id + '/' + row.path })
+            merged.push(id === active
+              ? { ...row, packId: hit.id, packName: hit.name }
+              : { ...row, path: id + '/' + row.path, packId: hit.id, packName: hit.name })
           }
         } catch { /* 坏包跳过,不影响其他图库 */ } finally { if (store) store.close() }
       }
       return { ...searchRows(merged, query, n), tags }
+    },
+    // 跨启用图库的分类统计(张数降序):send_meme 没命中时给模型真实的换词建议(issue #53)
+    tagStats() {
+      const out = new Map()
+      for (const p of packRows()) {
+        if (!enabledIds().includes(p.id)) continue
+        let store = null
+        try {
+          store = new MemesStore(p.path)
+          for (const m of store.list().memes) out.set(m.tag, (out.get(m.tag) || 0) + 1)
+        } catch { /* 坏包跳过 */ } finally { if (store) store.close() }
+      }
+      return [...out.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count)
     },
     resolveStored(stored) {
       const raw = String(stored || '')
@@ -760,6 +811,8 @@ export function apply(ctx, config) {
     imChannelOf: (session) => (hasImDelivery() ? imChannelOfSession(session) : null),
     imReady: hasImDelivery(),
     sendMode: sendModeOf,
+    // 跨启用图库的真实分类统计:send_meme 没命中时给模型有用的换词建议(issue #53)
+    tagStats: () => sampler.tagStats(),
   })
   const qq = ctx.get('companionQq')
   const sendImage = qq !== undefined && typeof qq.sendImage === 'function'
@@ -800,6 +853,62 @@ export function apply(ctx, config) {
       packs.unshift(meta)
     }
     return packs
+  }
+  // ---- 用户收藏的稳定落点(修复:插件升级清空收藏) ----
+  // 内置图库随插件包分发,包目录在 npm/pnpm 更新时会被整个替换——写进内置库的收藏
+  // (上传/AI 学图/手动拷贝)一起消失。收藏一律落 packsDir 下的「我的收藏」图库
+  // (默认在 ~/.dsh 下,包外,升级不动),并自动启用:send_meme 跨启用图库取图,
+  // 不切换当前图库也能发。内置库从此只读。
+  const USER_PACK_ID = 'dsh-meme-user'
+  const USER_PACK_NAME = '我的收藏(升级不丢)'
+  const userPackPath = () => join(packsDirNow(), USER_PACK_ID)
+  const isVolatileRoot = (root) => isInsidePluginPackage(root)
+  const ensureUserPack = () => {
+    const dir = userPackPath()
+    ensurePackAt(dir, { id: USER_PACK_ID, name: USER_PACK_NAME, description: '上传与 AI 学图的默认落点;内置图库随插件升级会被清空,收藏统一存这里' })
+    try {
+      const packs = listAllPacks()
+      const enabled = enabledPackIds(readSettings(), packs, activePackId())
+      if (packs.some((p) => p.id === USER_PACK_ID) && !enabled.includes(USER_PACK_ID)) {
+        writeSettings({ enabledPacks: [...enabled, USER_PACK_ID] })
+      }
+    } catch (e) { /* 自动启用失败不阻塞写入 */ }
+    return dir
+  }
+  /** 收藏写入目标:当前图库在插件包内(升级会被清空)时改写「我的收藏」,否则原样 */
+  const writeTarget = () => (isVolatileRoot(memes.root) ? ensureUserPack() : memes.root)
+  const packPaths = (path) => {
+    let store = null
+    try {
+      store = new MemesStore(path)
+      return store.list().memes.map((m) => m.path)
+    } catch { return [] }
+    finally { if (store) store.close() }
+  }
+  // 启动迁移:内置库里「不在出厂基线里」的文件 = 用户后来加的,搬去「我的收藏」。
+  // 基线按插件版本记在稳定设置(bundledBaseline):版本没变就按旧基线比对搬运;
+  // 版本变了说明插件刚更新过、包目录已是出厂态(旧基线比对搬不出东西),重记基线;
+  // 首次运行(没有基线)只记基线不搬——那时目录里只剩出厂文件。搬完留在原地也行,
+  // 但下次更新就没了,所以搬到包外才安心。
+  try {
+    const bundledRoot = join(bundledPacksDir(), 'dafeiyu-001')
+    if (existsSync(join(bundledRoot, 'index.db'))) {
+      const baseline = readSettings().bundledBaseline
+      let current = null
+      if (baseline && Array.isArray(baseline.paths)) {
+        current = packPaths(bundledRoot)
+        const added = current.filter((p) => !baseline.paths.includes(p))
+        if (added.length) {
+          const r = movePackEntries(bundledRoot, ensureUserPack(), added)
+          if (r.moved.length) console.log(`[dsh-expression] 内置图库里有 ${r.moved.length} 张后加的收藏,已搬到「${USER_PACK_NAME}」(插件目录升级会被清空)`)
+        }
+      }
+      if (!baseline || baseline.version !== pluginVersion) {
+        writeSettings({ bundledBaseline: { version: pluginVersion, paths: current || packPaths(bundledRoot) } })
+      }
+    }
+  } catch (error) {
+    console.log('[dsh-expression] 内置图库收藏迁移失败(不影响其它功能):', error instanceof Error ? error.message : String(error))
   }
   if (webServer) {
     // 可写连接。插件包内的图库(默认内置包)不常驻:每次写临时开、写完就关,
@@ -917,6 +1026,7 @@ export function apply(ctx, config) {
           let mime
           let fileName
           let ext
+          let refName = '' // 附件原始文件名:附件是 .gif 而字节不是 GIF = 聊天通道压平了动图
           if (!imageUrl) {
             const refs = userImageRefs(exec)
             const ref = attachmentId
@@ -938,6 +1048,7 @@ export function apply(ctx, config) {
               ext = IMAGE_EXTS.includes(named) ? named : '.jpg'
             }
             fileName = stored.ref.name || 'meme' + ext
+            refName = String(stored.ref.name || '')
           } else {
             if (!/^https?:\/\//i.test(imageUrl)) return { ok: false, message: 'imageUrl 必须是 http(s) 链接' }
             const res = await fetch(imageUrl, { signal: AbortSignal.timeout(15000), redirect: 'follow' })
@@ -968,17 +1079,151 @@ export function apply(ctx, config) {
             if (!keywords) keywords = r.keywords
           }
           if (!tag || !validTagRe.test(tag)) return { ok: false, message: '分类无效(tag 只能小写字母/数字/-/_),请手动指定 tag' }
+          // 落点:当前图库在插件包内(升级会被清空)时改写「我的收藏」。附件是 GIF
+          // 但字节已不是 GIF → 宿主聊天通道把它压成了单帧,结果里要给用户保真路径。
+          const targetRoot = writeTarget()
+          const redirected = resolve(targetRoot) !== resolve(memes.root)
+          const gifFlattened = !imageUrl && /\.gif$/i.test(refName) && mime !== 'image/gif'
           const name = Date.now() + '_' + Math.floor(Math.random() * 1000) + ext
           const rel = 'memes/' + tag + '/' + name
-          mkdirSync(join(memes.root, 'memes', tag), { recursive: true })
-          writeFileSync(join(memes.root, rel), buf)
-          adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-            .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+          mkdirSync(join(targetRoot, 'memes', tag), { recursive: true })
+          writeFileSync(join(targetRoot, rel), buf)
+          if (redirected) {
+            const w = openIndexWriter(targetRoot)
+            try {
+              w.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+            } finally { try { w.close() } catch { /* 已关闭 */ } }
+          } else {
+            adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+              .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+          }
           memes.refresh()
-          return { ok: true, path: rel, tag, url: ROUTE + '/' + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别' + (animInfo ? ',动图 ' + animInfo.frameCount + ' 帧' + (animInfo.filmstrip ? ',已抽帧给模型' : '') : '') + ')' : '') + ' → ' + rel }
+          return { ok: true, path: rel, tag, url: ROUTE + '/' + (redirected ? USER_PACK_ID + '/' : '') + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别' + (animInfo ? ',动图 ' + animInfo.frameCount + ' 帧' + (animInfo.filmstrip ? ',已抽帧给模型' : '') : '') + ')' : '') + ' → ' + rel
+            + (redirected ? ';已存入「我的收藏」(内置图库随插件升级会被清空)' : '')
+            + (gifFlattened ? ';注意:这张 GIF 在聊天上传时已被压成单帧,想保留动画请用设置面板上传,或把 GIF 文件放进图库目录后点「扫描新增」' : '') }
         } catch (error) {
           return { ok: false, message: '收录失败: ' + (error instanceof Error ? error.message : String(error)) }
         }
+      },
+    })))
+
+    // ---- 图库维护工具(issue #53):agent 侧此前只有「加」(learn_meme),没有看/改 ----
+    // meme_list 只读清单(找重复、核对分类);meme_update 改元数据(分类/描述/关键词),
+    // 文件不动只改索引。删除不给 agent——误删成本高,留在管理面板。
+    // 把 meme_list/send_meme 候选里的 path(可能带包前缀、可能是当前库相对路径、
+    // 也可能是 IM 模式给的绝对路径)定位到 { pack, rel }。
+    const locateMemePath = (input) => {
+      const raw = String(input || '').trim()
+      if (!raw) return null
+      const packs = packRows()
+      const abs = resolve(raw)
+      for (const p of packs) {
+        const root = resolve(p.path)
+        if (abs === root || abs.startsWith(root + sep)) {
+          return { pack: p, rel: abs.slice(root.length + 1).replace(/\\/g, '/') }
+        }
+      }
+      const slash = raw.indexOf('/')
+      const first = slash > 0 ? raw.slice(0, slash) : ''
+      if (first) {
+        const hit = packs.find((p) => p.id === first)
+        if (hit) return { pack: hit, rel: raw.slice(slash + 1) }
+      }
+      const active = packs.find((p) => p.id === activePackId())
+      return active ? { pack: active, rel: raw } : null
+    }
+    registerToolWhenReady(ctx, 'meme_list', () => ctx.tools.register(defineTool({
+      name: 'meme_list',
+      description: '列出图库里的表情包清单(只读,维护用):按关键词/分类/图库筛选,每张带 所属图库、分类、描述、关键词、path。找重复图、核对错分类、整理描述时用;发给用户看图请用 send_meme。改元数据用 meme_update。',
+      parameters: {
+        q: { type: 'string', description: '关键词(可选,空格分隔多个全命中):按 描述/关键词/文件名 子串筛' },
+        tag: { type: 'string', description: '分类(可选,如 happy)' },
+        packId: { type: 'string', description: '只看某个图库(可选,图库 id;不填 = 所有启用中的图库)' },
+        limit: { type: 'number', description: '最多返回几张(默认 20,最大 100;清单长就分批看)' },
+      },
+      output: {
+        schema: { type: 'json' },
+        render: (_args, value) => [{ type: 'text', text: value.message }],
+      },
+      execute(args) {
+        const q = typeof args.q === 'string' ? args.q.trim().toLowerCase() : ''
+        const tag = typeof args.tag === 'string' ? args.tag.trim().toLowerCase() : ''
+        const packId = typeof args.packId === 'string' ? args.packId.trim() : ''
+        const limit = Math.max(1, Math.min(100, Math.floor(Number(args.limit) || 20)))
+        const packs = packRows().filter((p) => (packId ? p.id === packId : enabledIds().includes(p.id)))
+        if (packId && packs.length === 0) return { ok: false, message: '图库不存在: ' + packId }
+        const active = activePackId()
+        const matched = []
+        let total = 0
+        for (const p of packs) {
+          const listed = withStore(p.path, (store) => store.list(tag || undefined))
+          if (!listed) continue
+          for (const m of listed.memes) {
+            total++
+            if (!q) { matched.push({ pack: p, m }); continue }
+            const hay = ((m.caption || '') + ' ' + (m.keywords || '') + ' ' + (m.file_name || '')).toLowerCase()
+            if (q.split(/\s+/).filter(Boolean).every((t) => hay.includes(t))) matched.push({ pack: p, m })
+          }
+        }
+        const rows = matched.slice(0, limit).map(({ pack: p, m }) => ({
+          library: p.name + '(' + p.id + ')',
+          tag: m.tag,
+          caption: m.caption || m.file_name,
+          keywords: m.keywords || '',
+          // 与 send_meme 候选同款约定:当前激活库不带前缀,其它库带包前缀
+          path: (p.id === active ? '' : p.id + '/') + m.path,
+        }))
+        const lines = rows.map((r, i) => (i + 1) + '. [' + r.tag + '] ' + r.caption + ' | 库=' + r.library + ' | path=' + r.path)
+        return {
+          ok: true,
+          total,
+          shown: rows.length,
+          rows,
+          message: (packId ? '图库 ' + packId : '启用中的图库') + ' 共 ' + total + ' 张' +
+            (q || tag ? ',筛中 ' + matched.length : '') +
+            (matched.length > rows.length ? ',本次列出前 ' + rows.length + ' 张(要全量就加 limit 或换更细的筛)' : '') +
+            '。改描述/分类用 meme_update。\n' + (lines.length ? lines.join('\n') : '(没有匹配的图)'),
+        }
+      },
+    })))
+    registerToolWhenReady(ctx, 'meme_update', () => ctx.tools.register(defineTool({
+      name: 'meme_update',
+      description: '修改图库里一张表情包的元数据:分类/描述/关键词任选,至少给一项。只改索引不改图片文件。path 用 meme_list 或 send_meme 候选里的原样。',
+      parameters: {
+        path: { type: 'string', description: '要改的那张图的 path(meme_list/send_meme 候选里的原样)' },
+        tag: { type: 'string', description: '新分类(可选,小写字母/数字/-/_)' },
+        caption: { type: 'string', description: '新描述(可选,一句话中文)' },
+        keywords: { type: 'string', description: '新关键词(可选,空格分隔)' },
+      },
+      output: {
+        schema: { type: 'json' },
+        render: (_args, value) => [{ type: 'text', text: value.message }],
+      },
+      execute(args) {
+        const path = String(args.path || '').trim()
+        const tag = args.tag != null ? String(args.tag).trim().toLowerCase() : null
+        const caption = args.caption != null ? String(args.caption).trim().slice(0, 200) : null
+        const keywords = args.keywords != null ? String(args.keywords).trim().slice(0, 200) : null
+        if (!path) return { ok: false, message: '缺少 path——先用 meme_list 找到那张图' }
+        if (tag == null && caption == null && keywords == null) {
+          return { ok: false, message: '至少给一项要改的字段(tag/caption/keywords)' }
+        }
+        if (tag != null && !validTagRe.test(tag)) return { ok: false, message: 'tag 只能是小写字母/数字/-/_' }
+        const located = locateMemePath(path)
+        if (!located) return { ok: false, message: '找不到这张图: ' + path + '(path 用 meme_list/send_meme 候选里的原样)' }
+        const row = withStore(located.pack.path, (store) => store.list().memes.find((m) => m.path === located.rel))
+        if (!row) return { ok: false, message: '索引里没有这张图: ' + path }
+        const nextTag = tag ?? row.tag
+        const nextCaption = caption ?? (row.caption || '')
+        const nextKeywords = keywords ?? (row.keywords || '')
+        const w = openIndexWriter(located.pack.path)
+        try {
+          w.prepare('UPDATE memes SET tag = ?, caption = ?, keywords = ? WHERE path = ?')
+            .run(nextTag, nextCaption, nextKeywords, located.rel)
+        } finally { try { w.close() } catch { /* 已关闭 */ } }
+        if (resolve(located.pack.path) === resolve(memes.root)) memes.refresh()
+        return { ok: true, path, tag: nextTag, caption: nextCaption, keywords: nextKeywords, message: '已更新: [' + nextTag + '] ' + nextCaption + (nextKeywords ? '(关键词: ' + nextKeywords + ')' : '') }
       },
     })))
 
@@ -1834,14 +2079,66 @@ export function apply(ctx, config) {
             const ext = fileName.includes('.') ? '.' + fileName.split('.').pop().toLowerCase() : ''
             if (!IMAGE_EXTS.includes(ext)) throw new Error('仅支持 jpg/png/gif/webp')
             if (!data) throw new Error('缺少图片数据')
+            // 落点:当前图库在插件包内(升级会被清空)时改写「我的收藏」,原始字节
+            // 原样落盘——动图 GIF 从这里上传可保动画,聊天附件通道才会压成单帧。
+            const targetRoot = writeTarget()
+            const redirected = resolve(targetRoot) !== resolve(memes.root)
             const name = Date.now() + '_' + Math.floor(Math.random() * 1000) + ext
             const rel = 'memes/' + tag + '/' + name
-            mkdirSync(join(memes.root, 'memes', tag), { recursive: true })
-            writeFileSync(join(memes.root, rel), Buffer.from(data, 'base64'))
-            adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-              .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+            mkdirSync(join(targetRoot, 'memes', tag), { recursive: true })
+            writeFileSync(join(targetRoot, rel), Buffer.from(data, 'base64'))
+            if (redirected) {
+              const w = openIndexWriter(targetRoot)
+              try {
+                w.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                  .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+              } finally { try { w.close() } catch { /* 已关闭 */ } }
+            } else {
+              adminDb.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
+            }
             memes.refresh()
-            json(res, { ok: true, meme: { path: rel, tag, file_name: name, caption, keywords, url: ROUTE + '/' + rel } })
+            json(res, {
+              ok: true,
+              meme: { path: rel, tag, file_name: name, caption, keywords, url: ROUTE + '/' + (redirected ? USER_PACK_ID + '/' : '') + rel },
+              // 重定向时带完整 payload:客户端要拿到「我的收藏」出现在图库列表且已启用
+              ...(redirected ? packPayload() : {}),
+              message: redirected ? '已上传到「' + USER_PACK_NAME + '」图库:内置图库随插件升级会被清空,收藏统一存包外' : '',
+            })
+          } else if (op === 'scanPack') {
+            // 扫描图库目录:把手动拷进去、还没进索引的图片收进来。动图 GIF 走这条路
+            // 保真——磁盘文件原始字节入库。扫描内置图库时新收的文件顺手搬去
+            // 「我的收藏」(内置图库随插件升级会被清空)。
+            const wanted = String(body.packId || '').trim()
+            const packs = listAllPacks()
+            const pack = packs.find((p) => p.id === (wanted || packPayload().packId))
+            if (!pack) throw new Error('图库不存在: ' + (wanted || '(当前)'))
+            const known = new Set(packPaths(pack.path))
+            const fresh = walkPackImages(pack.path).filter((relPath) => !known.has(relPath))
+            let relocated = 0
+            if (fresh.length) {
+              const w = openIndexWriter(pack.path)
+              try {
+                const insert = w.prepare('INSERT OR IGNORE INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+                for (const relPath of fresh) {
+                  const row = scanRowFor(relPath)
+                  let mtime = Date.now()
+                  try { mtime = statSync(join(pack.path, relPath)).mtimeMs } catch { /* 用当前时间 */ }
+                  insert.run(row.path, row.tag, row.file_name, row.caption, '', mtime, null)
+                }
+              } finally { try { w.close() } catch { /* 已关闭 */ } }
+              if (isVolatileRoot(pack.path)) {
+                const moved = movePackEntries(pack.path, ensureUserPack(), fresh)
+                relocated = moved.moved.length
+              }
+            }
+            if (resolve(pack.path) === resolve(memes.root)) memes.refresh()
+            json(res, {
+              ok: true, added: fresh.length, relocated, ...packPayload(),
+              message: fresh.length
+                ? '扫描到 ' + fresh.length + ' 张新图' + (relocated ? ',已搬入「我的收藏」(内置图库随插件升级会被清空)' : '') + ';描述默认取文件名,可到图库里编辑'
+                : '没有新图:目录里的图片都已入索引',
+            })
           } else if (op === 'update') {
             const path = String(body.path || '')
             const row = memes.list().memes.find((m) => m.path === path)
@@ -1865,7 +2162,7 @@ export function apply(ctx, config) {
             if (!tag || !validTagRe.test(tag)) throw new Error('tag 只能是小写字母/数字/-/_')
             const n = adminDb.prepare('DELETE FROM memes WHERE tag = ?').run(tag).changes
             memes.refresh()
-            rmSync(join(memes.root, 'memes', tag), { recursive: true, force: true })
+            rmSync(join(memes.root, 'memes', tag), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
             json(res, { ok: true, deleted: n })
           } else if (op === 'importMemePack') {
             const data = String(body.dataBase64 || '')
@@ -2007,6 +2304,19 @@ export function apply(ctx, config) {
             const text = String(body.text || '').trim()
             writeSettings({ companionPrompt: text })
             json(res, { ok: true, ...packPayload(), message: text ? '已保存,下一条消息生效' : '已恢复默认提示词' })
+          } else if (op === 'getAgentsMd') {
+            // 面向 agent 的 AGENTS.md(插件包根目录):session 开局自动进上下文,
+            // 设置页可查看/编辑(issue #53 附件诉求)
+            const file = join(dirname(fileURLToPath(import.meta.url)), 'AGENTS.md')
+            let content = ''
+            try { content = readFileSync(file, 'utf8') } catch { /* 还没有这份文件 */ }
+            json(res, { ok: true, content, path: file, exists: content !== '' })
+          } else if (op === 'setAgentsMd') {
+            const content = String(body.content == null ? '' : body.content)
+            if (content.length > 1024 * 1024) throw new Error('内容超过 1MB 上限')
+            const file = join(dirname(fileURLToPath(import.meta.url)), 'AGENTS.md')
+            writeFileSync(file, content)
+            json(res, { ok: true, path: file, message: 'AGENTS.md 已保存,新开的会话生效(进行中的会话不会热刷新)' })
           } else if (op === 'setPromptEnabled') {
             const enabled = body.enabled !== false
             writeSettings({ promptEnabled: enabled })
@@ -2063,7 +2373,9 @@ export function apply(ctx, config) {
             if (Array.isArray(settingsNow.enabledPacks)) {
               writeSettings({ enabledPacks: settingsNow.enabledPacks.filter((id) => id !== target) })
             }
-            rmSync(dir, { recursive: true, force: true })
+            // 重试:Windows 上刚写过的 index.db 常被杀软/索引器瞬时锁住,EPERM/EBUSY
+            // 是一阵子的;带重试的删除比直接把整个图库删除搞成半删状态强。
+            rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
             json(res, {
               ok: true, ...packPayload(),
               message: '已删除图库「' + (hit.name || target) + '」'

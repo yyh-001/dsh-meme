@@ -66,7 +66,9 @@
     <input type="text" id="upTag" placeholder="新图分类(如 happy)" style="width: 150px">
     <button class="primary" id="uploadBtn">上传表情包</button>
     <input type="file" id="fileInput" accept="image/*" style="display:none">
+    <button id="scanBtn" title="把图库目录里手动拷入、还没入索引的图片收进来;动图 GIF 走这条路保留动画">扫描新增</button>
   </div>
+  <div class="api" style="margin:0 0 6px">支持 jpg/png/gif/webp;动图 GIF 从这里上传或扫描入库保留动画,从聊天发给 AI 学图会被压成单帧。</div>
   <div id="notice"></div>
   <div class="grid" id="grid"></div>
   <div class="api">数据与 selfloom 图库同源(index.db + memes/ 目录);API: GET/POST /dsh-memes-api</div>
@@ -187,6 +189,19 @@ $('fileInput').onchange = async (e) => {
   }
   reader.onerror = () => { $('uploadBtn').disabled = false; notice('读取文件失败', 'err') }
   reader.readAsDataURL(file)
+}
+
+$('scanBtn').onclick = async () => {
+  $('scanBtn').disabled = true
+  try {
+    const res = await apiPost({ op: 'scanPack' })
+    notice(res.ok ? (res.message || '扫描完成') : '扫描失败: ' + (res.error || ''), res.ok ? 'ok' : 'err')
+    if (res.ok) load()
+  } catch (e) {
+    notice('扫描失败: ' + (e && e.message ? e.message : e), 'err')
+  } finally {
+    $('scanBtn').disabled = false
+  }
 }
 
 load()

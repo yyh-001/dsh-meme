@@ -6,10 +6,10 @@
  * 情绪里筛关键词。候选都带 caption,模型看描述觉得贴再发。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { basename, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 /** 内置图库根目录：插件包内 memes/<id>/（随包分发的只有 dafeiyu-001）。 */
@@ -650,6 +650,116 @@ export function normalizeLayoutMode(value) {
   return LAYOUT_MODES.includes(value) ? value : 'inline'
 }
 
+// ---- 用户收藏的稳定落点与图库目录扫描 ----
+
+/** 扫描/收录认可的图片扩展(与上传、AI 学图一致) */
+export const SCAN_IMAGE_EXTS = ['.jpg', '.jpeg', '.png', '.gif', '.webp']
+
+const SCAN_TAG_RE = /^[a-z0-9_-]+$/
+
+/**
+ * 手动放进图库目录的图片 → 索引行(扫描入库用,纯函数便于单测)。
+ * 分类取路径首段目录名(memes/<tag>/x.jpg → <tag>,<tag>/x.jpg → <tag>);
+ * 首段不是合法 tag、或图片散在根目录 → misc。path 保持磁盘上的真实相对路径
+ * (图片路由按索引 path 找文件,不能为了格式好看改写)。描述兜底用文件名去扩展名。
+ */
+export function scanRowFor(rel) {
+  const posix = String(rel || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  const body = posix.startsWith('memes/') ? posix.slice('memes/'.length) : posix
+  const segs = body.split('/').filter(Boolean)
+  const file = segs[segs.length - 1] || ''
+  const tag = segs.length >= 2 && SCAN_TAG_RE.test(segs[0]) ? segs[0] : 'misc'
+  const dot = file.lastIndexOf('.')
+  const stem = dot > 0 ? file.slice(0, dot) : file
+  return { path: posix, tag, file_name: file, caption: stem.slice(0, 200) }
+}
+
+/**
+ * 递归列出图库目录下的图片文件(相对 root 的 posix 路径),跳过 index.db、
+ * manifest.json 与隐藏目录。用户「自己塞进文件夹」的图从这里入库:原始字节
+ * 原样保留——聊天附件通道会把 GIF 压成单帧,磁盘文件不会。
+ */
+export function walkPackImages(root) {
+  const out = []
+  const walk = (dir, prefix) => {
+    let entries = []
+    try { entries = readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.name === 'manifest.json' || e.name.startsWith('index.db')) continue
+      const abs = join(dir, e.name)
+      const rel = prefix ? prefix + '/' + e.name : e.name
+      if (e.isDirectory()) { walk(abs, rel); continue }
+      if (!e.isFile()) continue
+      const dot = e.name.lastIndexOf('.')
+      const ext = dot >= 0 ? e.name.slice(dot).toLowerCase() : ''
+      if (SCAN_IMAGE_EXTS.includes(ext)) out.push(rel)
+    }
+  }
+  walk(resolve(root), '')
+  return out.sort()
+}
+
+/**
+ * 确保一个最小图库存在于 dir(manifest.json + 空 index.db),已存在则不动。
+ * 给「我的收藏」这类程序化创建的稳定图库用。
+ */
+export function ensurePackAt(dir, meta) {
+  mkdirSync(dir, { recursive: true })
+  const indexPath = join(dir, 'index.db')
+  if (!existsSync(indexPath)) {
+    const db = new DatabaseSync(indexPath)
+    db.exec('CREATE TABLE IF NOT EXISTS memes (path TEXT PRIMARY KEY, tag TEXT, file_name TEXT, caption TEXT, keywords TEXT, mtime REAL, captioned_at REAL)')
+    db.close()
+  }
+  const manifestPath = join(dir, 'manifest.json')
+  if (!existsSync(manifestPath)) {
+    writeFileSync(manifestPath, JSON.stringify({ id: meta.id, name: meta.name, description: String(meta.description || ''), version: '1.0.0' }, null, 2))
+  }
+  return dir
+}
+
+/**
+ * 把 src 图库里的指定条目(索引行 + 文件)搬到 dst 图库的 memes/<tag>/ 下,保持分类。
+ * 用于把内置图库里用户后加的收藏搬去包外的稳定图库——插件升级会整个替换包目录,
+ * 留在里面的用户文件会被清掉。目标撞名时加时间缀;rename 跨盘失败回落 copy+unlink。
+ * 返回 { moved: [{from,to}], missing: [...] }(missing = 索引行或文件已不存在)。
+ */
+export function movePackEntries(srcRoot, dstRoot, paths) {
+  const moved = []
+  const missing = []
+  const src = openIndexWriter(srcRoot)
+  const dst = openIndexWriter(dstRoot)
+  try {
+    for (const rel of paths || []) {
+      const row = src.prepare('SELECT tag, file_name, caption, keywords FROM memes WHERE path = ?').get(String(rel))
+      const from = join(resolve(srcRoot), String(rel))
+      if (!row || !existsSync(from)) { missing.push(String(rel)); continue }
+      const tag = SCAN_TAG_RE.test(String(row.tag || '')) ? row.tag : 'misc'
+      let name = basename(String(rel))
+      let toRel = 'memes/' + tag + '/' + name
+      if (existsSync(join(resolve(dstRoot), toRel))) {
+        const dot = name.lastIndexOf('.')
+        name = (dot > 0 ? name.slice(0, dot) : name) + '_' + Date.now() + (dot > 0 ? name.slice(dot) : '')
+        toRel = 'memes/' + tag + '/' + name
+      }
+      const to = join(resolve(dstRoot), toRel)
+      mkdirSync(dirname(to), { recursive: true })
+      try { renameSync(from, to) } catch {
+        copyFileSync(from, to)
+        unlinkSync(from)
+      }
+      dst.prepare('INSERT OR REPLACE INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+        .run(toRel, tag, name, row.caption || '', row.keywords || '', Date.now(), Date.now())
+      src.prepare('DELETE FROM memes WHERE path = ?').run(String(rel))
+      moved.push({ from: String(rel), to: toRel })
+    }
+  } finally {
+    try { src.close() } catch { /* 已关闭 */ }
+    try { dst.close() } catch { /* 已关闭 */ }
+  }
+  return { moved, missing }
+}
+
 /**
  * 注册 send_meme 工具。
  *
@@ -672,6 +782,9 @@ export function normalizeLayoutMode(value) {
  *   判断某个会话本轮来自哪个 IM 渠道(dsh-im 可用时由 index.js 传入;返回 null = 非 IM 或能力缺失)
  * @param {boolean} [options.imReady] 注册时 dsh-im 是否已在进程内(只影响工具描述措辞)
  * @param {() => string} [options.sendMode] 运行时读发送方式设置(auto/text/image)
+ * @param {() => Array<{tag: string, count: number}> | null} [options.tagStats]
+ *   跨启用图库的分类统计(按张数降序)。搜索没命中时用它给模型真实的换词建议,
+ *   而不是只甩一串静态情绪字典(issue #53)。
  */
 function clampLimit(n) {
   const x = typeof n === 'number' ? n : Number(n)
@@ -686,6 +799,19 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
   const imReady = options.imReady === true
   /** 运行时的发送方式设置(auto/text/image):每次执行读一次,设置改了下一条消息就生效 */
   const sendModeOf = typeof options.sendMode === 'function' ? options.sendMode : () => 'auto'
+  /** 跨启用图库的分类统计(张数降序);没有就退回静态情绪字典 */
+  const tagStatsOf = typeof options.tagStats === 'function' ? options.tagStats : () => null
+  /** 没命中时给模型的换词建议:真实分类统计优先,拉不到才用静态情绪字典(issue #53) */
+  const tagHint = () => {
+    try {
+      const stats = tagStatsOf()
+      if (Array.isArray(stats) && stats.length > 0) {
+        const top = stats.slice(0, 15).map((s) => s.tag + '(' + s.count + ')').join(' / ')
+        return '当前启用图库里的分类(按张数): ' + top
+      }
+    } catch { /* 统计失败退回字典 */ }
+    return '情绪字典: ' + MOOD_DICT
+  }
 
   const parameters = {
     tag: {
@@ -778,6 +904,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           return String(m.path || '')
         }
       }
+      /** 候选所属图库:跨库合并时 sampler 会给每行标 packName/packId(issue #53) */
+      const libraryOf = (m) => String(m.packName || m.packId || '')
 
       const lines = (rows) => rows.map((m, i) => {
         const caption = captionOf(m)
@@ -791,11 +919,14 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
       })
       const hits = (rows) => {
-        if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m) }))
-        if (imMode) return rows.map((m) => ({ path: absolutePathOf(m), tag: m.tag, caption: captionOf(m) }))
+        // 出处元信息(issue #53):path/library 进模型可见的 JSON(用户问「这图哪来的」
+        // 模型答得上),不进用户可见的行文本——Web 模式行里仍只有 [表情: 描述],
+        // 模型不会顺手把路径抄进回复。纯文字模式维持只给描述(路径会诱导投递工具)。
+        if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
+        if (imMode) return rows.map((m) => ({ path: absolutePathOf(m), tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         return webMode
-          ? rows.map((m) => ({ caption: captionOf(m) }))
-          : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption }))
+          ? rows.map((m) => ({ caption: captionOf(m), path: m.path, library: libraryOf(m) }))
+          : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
       const howToSend = textMode
         ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
@@ -804,7 +935,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
             ? '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)——它会作为 ' + imLabel +
               ' 原生图片消息发出;不用等用户要求,现在就能主动发。回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
             : webMode
-              ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。'
+              ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。'
               : '用 send + path 发出。')
 
       // 关键词优先:有关键词就先精确搜(caption/关键词/图名),命中了直接给候选。
@@ -833,14 +964,15 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       if (!mood) {
         return {
           ok: false,
-          message: reason || (keywordMiss + ' 要么换个更常见的词,要么给个情绪 tag。字典: ' + MOOD_DICT),
+          // 换词建议给真实的分类统计(按张数),比静态情绪字典有用得多(issue #53)
+          message: reason || (keywordMiss + ' 要么换个更常见的词,要么给个情绪 tag。' + tagHint()),
         }
       }
       if (candidates.length === 0) {
         return {
           ok: false,
           // 没有可用图库时 sampler 会给 reason,直说比「情绪下没有图」清楚
-          message: reason || (keywordMiss + '情绪「' + mood + '」下也没有图。换一个: ' + MOOD_DICT),
+          message: reason || (keywordMiss + '情绪「' + mood + '」下也没有图。换一个: ' + tagHint()),
         }
       }
       return {

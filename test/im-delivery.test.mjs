@@ -152,7 +152,7 @@ test('send_meme 在 IM 会话里给候选加绝对路径,并让模型调用 dsh_
   assert.match(byKeyword.message, /dsh_im_return_file/)
 })
 
-test('send_meme 在 Web 会话里保持 [表情: 描述] 标记,候选不带路径', async () => {
+test('send_meme 在 Web 会话里保持 [表情: 描述] 标记,行文本不带路径', async () => {
   const result = await sendMeme.execute(
     { tag: 'happy', limit: 3 },
     { agent: { session: webSession() } },
@@ -161,7 +161,10 @@ test('send_meme 在 Web 会话里保持 [表情: 描述] 标记,候选不带路�
   assert.match(result.message, /\[表情:/)
   assert.doesNotMatch(result.message, /dsh_im_return_file/)
   assert.ok(result.hits.length > 0)
-  assert.ok(result.hits.every((h) => !('path' in h)), 'Web 候选只给 caption')
+  // 出处元信息(issue #53):path/library 进模型可见 JSON,用户可见的行仍只有标记
+  assert.ok(result.hits.every((h) => typeof h.path === 'string' && h.path.length > 0), 'Web 候选带 path 出处(#53)')
+  assert.ok(result.hits.every((h) => 'library' in h), 'Web 候选带所属图库(#53)')
+  assert.doesNotMatch(result.message, /path=/, '用户可见的候选行不含路径')
 })
 
 test('系统提示:IM 会话追加原生发图规则,Web 会话保持原提示词', async () => {

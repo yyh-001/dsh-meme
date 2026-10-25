@@ -256,7 +256,7 @@ window.__ModuleLoader__.load({
     const completedRemoteJobs = new Set()
     const memeMutationOps = new Set([
       'importMemePack', 'createMemePack', 'deleteMemePack', 'setPack', 'setMemeRoot',
-      'setPacksDir', 'setPackEnabled', 'upload', 'update', 'delete', 'deleteTag',
+      'setPacksDir', 'setPackEnabled', 'upload', 'update', 'delete', 'deleteTag', 'scanPack',
     ])
     const invalidateMemeLibrary = () => {
       memeLibraryRevision++
@@ -312,6 +312,10 @@ window.__ModuleLoader__.load({
       const [defaultPrompt, setDefaultPrompt] = React.useState('') // 内置默认提示词
       const [promptOpen, setPromptOpen] = React.useState(false)
       const [promptDraft, setPromptDraft] = React.useState('') // 弹窗内草稿
+      // Agent 说明(AGENTS.md)的查看/编辑:session 开局自动进上下文,给在插件目录里干活的 agent 看
+      const [agentsOpen, setAgentsOpen] = React.useState(false)
+      const [agentsDraft, setAgentsDraft] = React.useState('')
+      const [agentsSaving, setAgentsSaving] = React.useState(false)
       const [remoteSubs, setRemoteSubs] = React.useState([])
       const [remoteDir, setRemoteDir] = React.useState(null) // 服务端代拉的图库目录(null=暂不可用)
       // 目录元信息:source=这次成功的源 URL,cached=来自磁盘缓存,error=全失败时的最后一条错误
@@ -491,6 +495,34 @@ window.__ModuleLoader__.load({
           }
         } catch (e) {
           setRootNotice('保存失败')
+        }
+      }
+      // AGENTS.md:打开时拉当前内容进编辑框,保存写回插件包根目录
+      const openAgentsMd = async () => {
+        try {
+          const res = await apiPost({ op: 'getAgentsMd' })
+          if (!res || !res.ok) { setRootNotice('读取失败: ' + ((res && res.error) || '')); return }
+          setAgentsDraft(res.content || '')
+          setAgentsOpen(true)
+        } catch (e) {
+          setRootNotice('读取失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      const onSaveAgentsMd = async () => {
+        if (agentsSaving) return
+        setAgentsSaving(true)
+        try {
+          const res = await apiPost({ op: 'setAgentsMd', content: agentsDraft })
+          if (res && res.ok) {
+            setAgentsOpen(false)
+            setRootNotice(res.message || 'AGENTS.md 已保存')
+          } else {
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        } finally {
+          setAgentsSaving(false)
         }
       }
       React.useEffect(() => {
@@ -722,6 +754,25 @@ window.__ModuleLoader__.load({
         } catch (e) {
           setLayoutMode(prev)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // 扫描图库目录:把手动拷进去、还没进索引的图片收进来。动图 GIF 走这条路保真
+      // (聊天附件通道会把 GIF 压成单帧);内置图库里扫到的会由 host 搬进「我的收藏」。
+      const [scanning, setScanning] = React.useState(false)
+      const onScanPack = async () => {
+        if (!packView || scanning) return
+        setScanning(true)
+        try {
+          const res = await apiPost({ op: 'scanPack', packId: packView })
+          setRootNotice(res && res.ok ? (res.message || '扫描完成') : '扫描失败: ' + ((res && res.error) || ''))
+          if (res && res.ok) {
+            if (Array.isArray(res.packs)) applyRoot(res)
+            await load('', '')
+          }
+        } catch (e) {
+          setRootNotice('扫描失败: ' + (e && e.message ? e.message : String(e)))
+        } finally {
+          setScanning(false)
         }
       }
       const [packDialog, setPackDialog] = React.useState('')
@@ -968,7 +1019,9 @@ window.__ModuleLoader__.load({
               fileName: file.name,
               dataBase64: data,
             })
-            setNotice(res && res.ok && res.meme ? '已上传: ' + res.meme.path : '上传失败: ' + (res && res.error || ''))
+            setNotice(res && res.ok && res.meme
+              ? '已上传: ' + res.meme.path + (res.message ? '(' + res.message + ')' : '')
+              : '上传失败: ' + (res && res.error || ''))
             if (res && res.ok) {
               setUploadOpen(false)
               setUpFile(null)
@@ -1215,6 +1268,11 @@ window.__ModuleLoader__.load({
               h('button', { className: 'btn-primary', onClick: () => setUploadOpen(true) }, '上传表情包'),
               tagSelect,
               h('button', { onClick: () => load(q, tagFilter), disabled: busy }, '搜索'),
+              h('button', {
+                onClick: onScanPack,
+                disabled: scanning,
+                title: '把图库目录里手动拷入、还没入索引的图片收进图库。动图 GIF 建议走这条路,原始动画保留',
+              }, scanning ? '扫描中…' : '扫描新增'),
             ),
             notice ? h('div', { className: 'notice' }, notice) : null,
             memes.length === 0 && !busy
@@ -1292,7 +1350,11 @@ window.__ModuleLoader__.load({
               })
               : h('div', { className: 'empty', style: { padding: '24px', border: '1px dashed var(--dsw-alias-border-l1)', borderRadius: 8 } },
                   h('button', { onClick: () => fileRef.current && fileRef.current.click() }, '选择图片'),
-                ),
+              ),
+            // 格式与动图说明:GIF 想保动画只能走这里或「扫描新增」——聊天附件通道
+            // 会把动图压成单帧,这是宿主行为,插件侧无法还原。
+            h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+              '支持 jpg/png/gif/webp;动图 GIF 从这里上传保留动画,从聊天发给 AI 学图会被压成单帧'),
 
             h('div', { className: 'field' },
               h('label', null, upFile ? '已选: ' + upFile.name + ' (点击更换)' : '文件'),
@@ -1307,7 +1369,9 @@ window.__ModuleLoader__.load({
               h('div', { className: 'row', style: { width: '100%' } },
                 h('select', { value: upTag, onChange: (e) => setUpTag(e.target.value), style: { flex: 1 } },
                   h('option', { value: '' }, '选择分类'),
-                  tags.map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
+                  // 现有分类在前,标准情绪补在后:空库/新包也能直接选常用分类,
+                  // 不必先「新建分类」再猜名字
+                  [...new Set([...tags, ...Object.keys(TAG_ZH)])].map((t) => h('option', { key: t, value: t }, tagZh(t) + ' (' + t + ')')),
                   h('option', { value: '__new__' }, '+ 新建分类'),
                 ),
                 h('button', { onClick: onDeleteTag, disabled: !upTag || upTag === '__new__', title: '删除该分类及其中所有表情包' }, '删除分类'),
@@ -1385,6 +1449,24 @@ window.__ModuleLoader__.load({
               h('button', { onClick: () => { setPromptDraft(defaultPrompt); setRootNotice('已重置为默认,点击保存生效') } }, '恢复默认'),
               h('button', { onClick: () => setPromptOpen(false) }, '取消'),
               h('button', { className: 'btn-primary', onClick: onSaveCompanionPrompt }, '保存'),
+            ),
+          ),
+        ) : null,
+        agentsOpen ? h('div', { className: 'meme-modal-mask', onClick: () => setAgentsOpen(false) },
+          h('div', { className: 'meme-modal', style: { width: 520 }, onClick: (e) => e.stopPropagation() },
+            h('h3', null, 'Agent 说明(AGENTS.md)'),
+            h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
+              '工作目录在插件里的 agent 新开会话时自动读到;进行中的会话不会热刷新。市场更新插件会覆盖此文件。'),
+            h('textarea', {
+              value: agentsDraft,
+              onChange: (e) => setAgentsDraft(e.target.value),
+              rows: 16,
+              spellCheck: false,
+              style: { boxSizing: 'border-box', width: '100%', minHeight: 320, fontFamily: 'ui-monospace, Consolas, monospace', fontSize: 12, lineHeight: 1.6, background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 8, padding: 8, whiteSpace: 'pre', overflowWrap: 'normal', overflowX: 'auto' },
+            }),
+            h('div', { className: 'modal-acts' },
+              h('button', { onClick: () => setAgentsOpen(false) }, '取消'),
+              h('button', { className: 'btn-primary', onClick: onSaveAgentsMd, disabled: agentsSaving }, agentsSaving ? '保存中…' : '保存'),
             ),
           ),
         ) : null,
@@ -1470,12 +1552,22 @@ window.__ModuleLoader__.load({
           h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
             companionPrompt ? '已自定义' : '使用默认'),
         ),
+        // Agent 说明:与陪伴提示词是两回事——这份给「在插件目录里干活的 agent」看,
+        // session 开局自动进上下文;陪伴提示词才是每次聊天注入的斗图规则
+        h('div', { className: 'section-title' }, 'Agent 说明(AGENTS.md)'),
+        h('div', { className: 'row' },
+          h('button', { onClick: openAgentsMd }, '查看 / 编辑'),
+          h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } },
+            '给维护插件/整理图库的 agent 看的操作说明,新开会话自动带上。市场更新插件会覆盖此文件;要长期生效的约定放 ~/.dsh/AGENTS.md(全局)'),
+        ),
 
         ) : null,
         rootNotice ? h('div', { className: 'notice' }, rootNotice) : null,
         marketResult ? h('a', { href: marketResult, target: '_blank', rel: 'noopener noreferrer' }, '打开 GitHub 投稿页') : null,
-        // 页脚:求 star + 反馈入口
+        // 页脚:版本号 + 求 star + 反馈入口
         h('div', { className: 'meme-footer' },
+          pluginVersion ? h('span', { title: '当前运行的 dsh-meme 版本(读自插件包 package.json)' }, 'v' + pluginVersion) : null,
+          pluginVersion ? h('span', null, '·') : null,
           h('span', null, '觉得好用？'),
           h('a', { href: 'https://github.com/yyh-001/dsh-meme', target: '_blank', rel: 'noopener noreferrer' }, '⭐ 去 GitHub 点个 Star'),
           h('span', null, '·'),
