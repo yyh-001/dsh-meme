@@ -353,6 +353,8 @@ window.__ModuleLoader__.load({
       const [sendMode, setSendMode] = React.useState('auto')
       // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
       const [layoutMode, setLayoutMode] = React.useState('inline')
+      // 局域网访问图库(issue #54):默认仅本机;打开后手机/平板经局域网 IP 才能加载表情包
+      const [allowLan, setAllowLan] = React.useState(false)
       const [pluginVersion, setPluginVersion] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -365,6 +367,7 @@ window.__ModuleLoader__.load({
         // 让气泡装饰即时翻新(issue #50)
         setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
         setMemeLayoutMode(res.layoutMode)
+        setAllowLan(res.allowLanAccess === true)
         setPluginVersion(res.pluginVersion || '')
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
@@ -777,6 +780,20 @@ window.__ModuleLoader__.load({
         } finally {
           setScanning(false)
         }
+      }
+      // 局域网访问开关(issue #54):手机/平板经电脑局域网 IP 打开 DSH Web 时,
+      // 图库四条路由默认只认回环 Host,打开这个才能加载表情包;失败回滚
+      const onToggleAllowLan = async (next) => {
+        try {
+          const res = await apiPost({ op: 'setAllowLanAccess', enabled: next })
+          if (res && res.ok) {
+            applyRoot(res)
+            setAllowLan(next)
+            setRootNotice(res.message || (next ? '已允许局域网访问图库' : '已关闭局域网访问图库'))
+          } else {
+            setRootNotice('操作失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) { setRootNotice('操作失败') }
       }
       const [packDialog, setPackDialog] = React.useState('')
       const [packDraft, setPackDraft] = React.useState({ id: '', name: '', description: '' })
@@ -1543,6 +1560,18 @@ window.__ModuleLoader__.load({
           layoutMode === 'stacked'
             ? '表情图独占一行在上,正文按正常宽度铺开在下'
             : '表情图与正文并排,短消息更紧凑'),
+        // 局域网访问(issue #54):手机/平板经电脑局域网 IP 打开 DSH Web 时加载表情包
+        h('div', { className: 'section-title' }, '局域网访问图库'),
+        h('div', { className: 'row' },
+          h('span', {
+            className: 'switch' + (allowLan ? ' on' : ''),
+            title: allowLan ? '点击关闭:图库路由恢复只接受本机请求' : '点击开启:允许手机/平板经局域网 IP 加载表情包',
+            onClick: () => onToggleAllowLan(!allowLan),
+          }),
+          h('span', { style: { fontSize: 12 } }, allowLan ? '已允许' : '仅本机'),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          '手机/平板用电脑的局域网 IP 打开 DSH Web 时,打开它才能加载表情包;只放行 IP 字面量(域名始终拒绝),需同一 Wi-Fi 且系统防火墙放行该端口'),
         h('div', { className: 'section-title' }, '陪伴提示词'),
         h('div', { className: 'row' },
           h('span', {

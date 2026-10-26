@@ -143,6 +143,6 @@ learn_meme
 
 自建图库目录或市场源见 [远程图库规范](./docs/remote-pack-spec.md)。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接入 QQ 发图。
 
-插件 HTTP 接口仅支持本机回环地址（`localhost` / `127.0.0.1` / `[::1]`），通过局域网地址或自定义域名访问会被拒绝。
+插件 HTTP 接口默认只接受本机回环地址（`localhost` / `127.0.0.1` / `[::1]`）。手机/平板通过电脑的局域网 IP 访问 DSH Web 时，在插件设置页打开 **「局域网访问图库」**（默认关）即可加载表情包——只放行 IP 字面量（回环/私有网段/链路本地），域名形式的 Host 始终拒绝（防 DNS rebinding）；记得系统防火墙放行该端口。
 
 代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。

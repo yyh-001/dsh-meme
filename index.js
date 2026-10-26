@@ -55,6 +55,15 @@ function crc32(buf) {
 // 这个头由浏览器按**实际连接目标**写,rebinding 时它就是攻击者的域名,直接落选。
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
+/** 私有网段 IPv4(10/8、172.16/12、192.168/16、169.254/16) */
+const isPrivateV4 = (ip) => {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip)
+  if (!m) return false
+  const [a, b] = [Number(m[1]), Number(m[2])]
+  if (m.some((_, i) => i > 0 && Number(m[i]) > 255)) return false
+  return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || a === 127
+}
+
 /**
  * 请求是不是从本机回环地址来的。
  * 没有 Host 头时返回 true:HTTP/1.0 与本机 socket 直连都可能不带这个头,那种请求
@@ -67,10 +76,34 @@ export function hostIsLoopback(req) {
   return LOOPBACK_HOSTS.has(name.toLowerCase())
 }
 
-/** 不是回环来源就自己回 403 并返回 true,调用方直接 return */
-export function denyNonLoopback(req, res) {
+/**
+ * 请求的 Host 是不是本机/局域网 IP 字面量(issue #54:手机通过局域网 IP 访问 DSH Web)。
+ * 只认 IP 字面量 + localhost,**不认域名**——DNS rebinding 时 Host 是攻击者的域名,
+ * 这条判据照样落选。允许 range:回环、RFC1918 私有网段、链路本地、IPv6 的 ::1/fe80/fc00。
+ */
+export function hostIsLocalLan(req) {
+  const raw = String((req && req.headers && req.headers.host) || '')
+  if (!raw) return true
+  const name = (raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.split(':')[0]).toLowerCase()
+  if (LOOPBACK_HOSTS.has(name)) return true
+  if (name.startsWith('[')) {
+    // [::1] / [fe80::x%eth0] / [fd..] / [fc..]
+    const v6 = name.slice(1, -1)
+    return v6 === '::1' || /^fe[89ab]/i.test(v6) || /^f[cd]/i.test(v6)
+  }
+  return isPrivateV4(name)
+}
+
+/**
+ * 不是允许的来源就自己回 403 并返回 true,调用方直接 return。
+ * allowLan = 设置页「允许局域网访问图库」开关(默认关):打开后本机/局域网 IP
+ * 字面量的 Host 也放行,手机、平板才能看到表情包(issue #54);关闭时行为与旧版一致。
+ * 域名形式的 Host 在两种情况下都拒绝(DNS rebinding 防线)。
+ */
+export function denyNonLoopback(req, res, allowLan = false) {
   if (hostIsLoopback(req)) return false
-  const body = JSON.stringify({ ok: false, error: '拒绝: 只接受本机(回环地址)请求' })
+  if (allowLan && hostIsLocalLan(req)) return false
+  const body = JSON.stringify({ ok: false, error: '拒绝: 只接受本机(回环地址)请求。手机/局域网访问请在设置页打开「允许局域网访问图库」' })
   res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(body)
   return true
@@ -535,6 +568,8 @@ export function apply(ctx, config) {
    * 渲染成图片的逻辑。auto = 按渠道自动(默认);text = 纯文字不发图;image = 总是发图。
    */
   const sendModeOf = () => normalizeSendMode(readSettings().sendMode)
+  /** 设置页「允许局域网访问图库」(issue #54):默认关,打开后局域网 IP 字面量的 Host 也放行 */
+  const allowLanAccess = () => readSettings().allowLanAccess === true
   /** 纯文字模式:默认提示词里教模型写 [表情:] 标记的规则要压掉,否则前端仍会配图 */
   const TEXT_MODE_RULE = '发送方式设置为「纯文字」:不要发图片。不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file,也不要把图片路径贴进回复;想斗图就用文字接梗、吐槽、卖萌。可以用 send_meme 查候选拿描述,但不要真的把图发出去。'
   /** 图片模式:在自动行为上强调「必须真发图」,不允许只描述 */
@@ -574,12 +609,13 @@ export function apply(ctx, config) {
 
   // ---- Web 通道:图片 HTTP 路由(白名单,只放行索引内路径) ----
   // 容错:同一进程内路由可能已被动态版插件注册(全局共享),冲突则复用。
-  // urlPrefix 用绝对 URL:前端 markdown 渲染器不显示相对路径图片。
+  // urlPrefix 用**相对路径**:前端按 window.location.origin 补全(issue #54)。
+  // 以前拼成 http://127.0.0.1:<port>,桌面端没问题,手机/平板通过局域网 IP
+  // 访问时 127.0.0.1 指向手机自己,图片全空白。工具侧只把它当「有 Web 通道」的
+  // 标志,不消费具体值。
   let urlPrefix = null
   const webServer = ctx.webServer ?? ctx.get('webServer')
   if (webServer) {
-    const host = webServer.host === '0.0.0.0' ? '127.0.0.1' : webServer.host
-    const base = 'http://' + host + ':' + webServer.port
     try {
       // 路由注册挂到 ctx.effect:插件被关开关/热重载时由宿主跑 disposer 摘掉路由,
       // 否则同一进程里再次 apply 会撞 duplicate route(issue #20)。
@@ -587,7 +623,7 @@ export function apply(ctx, config) {
         kind: 'prefix',
         path: ROUTE,
         handler(req, res) {
-          if (denyNonLoopback(req, res)) return
+          if (denyNonLoopback(req, res, allowLanAccess())) return
           const rawUrl = String(req.url || '').split('?')[0]
           // 浏览器对路径里的非 ASCII 一律百分号编码,而下面的白名单来自 index.db 里的
           // 原始路径(中文目录/文件名是未编码的),不先解码的话含非 ASCII 路径的图库
@@ -659,7 +695,7 @@ export function apply(ctx, config) {
     } catch (error) {
       console.log('[dsh-expression] 路由已存在,复用:', error && error.message)
     }
-    urlPrefix = base + ROUTE
+    urlPrefix = ROUTE
   }
 
   // ---- 模型可用的图库:设置页每张卡片一个开关,可以同时开多个 ----
@@ -945,6 +981,8 @@ export function apply(ctx, config) {
         sendMode: normalizeSendMode(s.sendMode),
         // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
         layoutMode: normalizeLayoutMode(s.layoutMode),
+        // 局域网访问图库(issue #54):默认关;打开后手机/平板经局域网 IP 才能看到表情包
+        allowLanAccess: s.allowLanAccess === true,
         pluginVersion,
         remoteSubs: remoteSubs(),
         remoteDirUrl: remoteDirUrlList(),
@@ -1956,7 +1994,7 @@ export function apply(ctx, config) {
       kind: 'exact',
       path: '/dsh-memes-api',
       async handler(req, res) {
-        if (denyNonLoopback(req, res)) return
+        if (denyNonLoopback(req, res, allowLanAccess())) return
         if (req.method === 'GET') {
           const u = new URL(req.url || '/', 'http://localhost')
           if (u.searchParams.has('remoteDir')) {
@@ -2403,6 +2441,17 @@ export function apply(ctx, config) {
             writeSettings({ layoutMode: mode })
             const label = mode === 'stacked' ? '独占一行' : '并排'
             json(res, { ok: true, ...packPayload(), message: '表情排布已改为「' + label + '」' })
+          } else if (op === 'setAllowLanAccess') {
+            // 局域网访问图库(issue #54):默认关。打开后本机/局域网 IP 字面量 Host 的
+            // 请求放行(图片/索引/导出/面板四条路由);域名形式 Host 始终拒绝(rebinding 防线)。
+            const enabled = body.enabled === true
+            writeSettings({ allowLanAccess: enabled })
+            json(res, {
+              ok: true, ...packPayload(),
+              message: enabled
+                ? '已允许局域网访问:手机/平板用电脑的局域网 IP 打开 DSH Web 即可看到表情包(同一 Wi-Fi;防火墙需放行该端口)'
+                : '已关闭局域网访问:图库路由恢复只接受本机回环请求',
+            })
           } else if (op === 'setPackEnabled') {
             // 每张卡片一个开关,可同时开多个;没设置过时以当前图库为初始值
             const target = String(body.packId || '').trim()
@@ -2479,7 +2528,7 @@ export function apply(ctx, config) {
       kind: 'exact',
       path: '/dsh-memes-export',
       handler(req, res) {
-        if (denyNonLoopback(req, res)) return
+        if (denyNonLoopback(req, res, allowLanAccess())) return
         if (req.method !== 'GET') {
           res.writeHead(405, { allow: 'GET' })
           res.end()
@@ -2531,7 +2580,7 @@ export function apply(ctx, config) {
       kind: 'exact',
       path: '/memes-panel',
       handler(req, res) {
-        if (denyNonLoopback(req, res)) return
+        if (denyNonLoopback(req, res, allowLanAccess())) return
         try {
           const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'panel.html'))
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
