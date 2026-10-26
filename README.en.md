@@ -22,8 +22,11 @@
 
 - **Click to send**: open 😊 beside the composer, search or filter by pack and mood, then pick an image.
 - **Chat with memes**: the AI searches by mood or keyword. Web chats render a text marker as an image (no image-input support needed); QQ / WeChat and other IM chats switch to native image delivery through dsh-im.
-- **Learn new images**: upload an image and ask to save it; the AI identifies its category and caption.
+- **Learn new images**: upload an image and ask to save it; the AI identifies its category and caption. You can also drop image files into a pack folder and click “扫描新增 (Scan)” — the original bytes (including animated GIFs) are kept, and renamed/deleted files have their stale index rows cleaned up.
+- **Organize packs**: ask the AI to “list my memes”, “find duplicates” or “recategorize this one” — the `meme_list` / `meme_update` tools handle it (deleting stays in the panel to avoid accidents).
 - **Manage and share**: enable multiple packs, upload and edit images, import/export ZIPs, and install or update marketplace packs.
+- **Collections survive updates**: uploads and learned images go to the “我的收藏 (My Favorites)” pack under `~/.dsh/meme-packs`, outside the plugin package that updates replace.
+- **Phones and tablets**: open DSH Web over your computer's LAN IP and turn on “Allow LAN access” in settings (off by default).
 - **Ready to use**: includes Big Fat Fish (24 images), with no third-party runtime dependencies; uses Node's built-in SQLite.
 
 ## Install
@@ -65,7 +68,9 @@ If updating still fails on 0.1.59 or later, the lock comes from outside the plug
 | Send a meme yourself | Click 😊 beside the composer and pick an image; search, multi-select filters and hover previews are available |
 | Ask the AI to send one | Say “send a happy meme” or “find a cat making a heart” |
 | Save a new image | Upload it and say “save this image to my meme pack”; automatic recognition requires an image-capable model |
-| Save an animated meme | Upload a GIF; automatic recognition samples frames across the timeline so the AI reads the motion, not just the first frame |
+| Save an animated meme | Upload a GIF from the panel, or drop it into a pack folder and click “Scan” — the animation is preserved. Chatting a GIF to the AI flattens it to a single frame (host attachment service behaviour), so don't use that path for animated memes |
+| Organize a pack | Ask the AI to “list my memes”, “find duplicates” or “recategorize this one”; deleting stays in the panel |
+| Phone / tablet | Turn on “Allow LAN access” in settings and open DSH Web via your computer's LAN IP (same Wi-Fi) |
 | View a larger image | Click a meme in chat; scroll to zoom, double-click to reset, and press Esc or click the background to close |
 
 In chat: send a meme, and the AI replies with one.
@@ -80,13 +85,15 @@ In chat: send a meme, and the AI replies with one.
 
 Open **设置 (Settings) → 表情包 (Memes)**:
 
-- **图库 (Packs)**: click a card to manage images. Each switch controls whether the AI can use that pack; several can be enabled. Create, import, export, submit or delete packs; “Update” appears when a newer version is available.
+- **图库 (Packs)**: click a card to manage images. The category dropdown lists the pack's **real categories** (sorted by count, exact-match filtering); “扫描新增 (Scan)” indexes images you copied into the pack folder (category from subfolder, caption from filename) and removes stale rows for renamed/deleted files. Each switch controls whether the AI can use that pack; several can be enabled. Create, import (any standard compression; a plain folder of images zipped up also works — categories come from folder names), export, submit or delete packs; “Update” appears when a newer version is available.
 - **发现 (Discover)**: preview marketplace packs and install them directly; Release ZIP installations verify SHA-256.
-- **设置 (Settings)**: change the scan directory, toggle proactive memes, edit the prompt, and choose how the AI sends memes (automatic / text-only / image).
+- **设置 (Settings)**: change the scan directory, toggle proactive memes, edit the prompt, choose how the AI sends memes (automatic / text-only / image) and the layout (side-by-side / full-width row), toggle LAN access, and view/edit `AGENTS.md` (agent instructions).
 
 ![Installed packs with independent enable switches](./docs/panel-library.png)
 
 The default scan directory is `~/.dsh/meme-packs`. Settings are saved in `~/.dsh/dsh-expression.json` and survive upgrades. Install more packs from Discover or import a shared ZIP.
+
+**Send mode** only controls how the AI sends memes; the frontend still renders `[表情: caption]` as an image: **automatic** (default) follows the channel (Web writes the marker, IM sends native images), **text-only** never sends images, and **image** requires the AI to actually send a picture every time. Changes apply from the next message. **Layout** decides how an image and text share a message: **side-by-side** (default, compact) or **full-width row** (image on top, text across the full width); it takes effect immediately and only affects rendering.
 
 ## Behind a restrictive network?
 
@@ -109,22 +116,28 @@ curl -o /dev/null -w '%{http_code}\n' https://cdn.jsdmirror.com/gh/yyh-001/dsh-m
 2. Click **导出 (Export)** to get a ZIP. Friends can install it with **导入图库 (Import pack)**.
 3. To join the marketplace, click **投稿 (Submit)**. The plugin exports the ZIP and opens a prefilled GitHub form; sign in, attach the ZIP, add image sources and license details, then submit for review.
 
-Use the plugin's exported ZIP. GitHub's “Download ZIP” is a source archive, not a pack export. Exporting still requires a separate GitHub submission; listing follows approval.
+Use the plugin's exported ZIP for marketplace submissions. GitHub's “Download ZIP” is a source archive, not a pack export. The importer itself is more forgiving: any standard ZIP compression works, and a plain folder of images zipped up installs directly (categories come from folder names). Exporting still requires a separate GitHub submission; listing follows approval.
 
 ## Tools and extensions
 
 | Tool | Usage |
 | --- | --- |
-| `send_meme` | `tag` samples a mood bucket; `query` searches captions, keywords or file names across all enabled packs |
-| `learn_meme` | Saves the most recent user image by default; also accepts `attachmentId` or `imageUrl` |
+| `send_meme` | `tag` samples a mood bucket; `query` searches captions, keywords or file names across all enabled packs. Candidates carry `path` / `library` provenance; a miss returns the packs' real category counts to guide a retry |
+| `learn_meme` | Saves the most recent user image by default; also accepts `attachmentId` or `imageUrl`. Warns when the host flattened an attached GIF to a single frame |
+| `meme_list` | Read-only listing across enabled packs, filtered by keyword/category/pack, with pack, category, caption, keywords and path; use it to spot duplicates and wrong categories |
+| `meme_update` | Change one image's category/caption/keywords (index only, at least one field); pass the path exactly as returned by `meme_list` / `send_meme` |
 
 ```text
 send_meme tag=happy
 send_meme query="猫 比心"
 learn_meme
+meme_list tag=work
+meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 ```
 
 Mood buckets: `happy` / `angry` / `sad` / `shy` / `confused` / `daily`. The model should copy a candidate's `[表情: caption]` marker verbatim; the frontend renders it only in chat content. If no candidate fits, try other keywords or reply with text.
+
+**Agent docs**: `AGENTS.md` in the package documents how sending is decided per channel, the path-prefix convention and the GIF-flattening caveat (agents working inside the plugin directory read it automatically at session start); the full pack-maintenance workflow (duplicates, bulk recategorizing, scan-and-index) lives in the project-level skill `.dsh/skills/dsh-meme-maintenance`, loaded on demand. The settings page can view/edit `AGENTS.md`.
 
 **Animated GIFs are actually read**: `learn_meme` and the upload dialog's AI recognition sample a GIF along its timeline, tile the frames into a labelled filmstrip and send that to the model, so captions can describe the motion (for example “a cat shaking its head wildly”) instead of only the first frame. The original GIF is still what gets saved and it keeps animating in chat. Animated WebP / APNG currently contribute metadata only (frame count, duration) and are still recognized from their first frame; the prompt says so. The decoder is plain JavaScript with no third-party dependencies.
 
@@ -132,6 +145,6 @@ When the conversation comes from QQ / WeChat / Feishu / WeCom or another IM chan
 
 For custom catalogs and pack formats, see the [remote pack specification](./docs/remote-pack-spec.md). [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ image delivery.
 
-Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`); LAN addresses and custom domains are rejected.
+Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`) by default. To view memes from a phone or tablet over the LAN, turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default) — only IP literals are allowed (loopback, RFC1918 private ranges, link-local); hostname Hosts are always rejected (DNS-rebinding defence). Remember to open the port in your firewall.
 
 Code is licensed under [MIT](./LICENSE). Check each pack separately for image provenance and usage rights.
