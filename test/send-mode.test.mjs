@@ -13,7 +13,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import { tmpdir } from 'node:os'
 
 const home = mkdtempSync(join(tmpdir(), 'dsh-meme-sendmode-'))
@@ -165,6 +165,19 @@ test('纯文字:候选只给描述、不给路径,也不提投递工具和方括
   const imPrompt = await promptOf(imSession())
   assert.match(imPrompt, /纯文字/)
   assert.doesNotMatch(imPrompt, /交给 dsh_im_return_file/, '纯文字模式不追加 IM 投递规则')
+})
+
+test('Web 候选带 absPath,说明指引 QQ 官方机器人(qqbot_send_file)投递', async () => {
+  setSettings({})
+  const web = await runTool(webSession())
+  assert.equal(web.ok, true)
+  assert.ok(web.hits.every((h) => typeof h.absPath === 'string' && isAbsolute(h.absPath)), 'absPath 必须是绝对路径(白名单/qqbot_send_file 要的是磁盘路径)')
+  assert.match(web.message, /qqbot_send_file/, '说明里点名 QQ 官方机器人的投递工具')
+  assert.match(web.message, /file_path/, '参数名要对上(file_path)')
+  assert.match(web.message, /sendFile\.extraRoots/, '被路径白名单拒绝时指向配置项')
+  assert.match(web.message, /\[表情: \.\.\.\]|\[表情: 描述\]/, 'Web 聊天的默认路径仍是标记')
+  const webPrompt = await promptOf(webSession())
+  assert.match(webPrompt, /qqbot_send_file/, '主动斗图提示词同样带 qqbot 分支')
 })
 
 test('图片:强调必须真发出去,Web 标记与 IM 路径都在', async () => {

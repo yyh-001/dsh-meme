@@ -930,20 +930,23 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         // 出处元信息(issue #53):path/library 进模型可见的 JSON(用户问「这图哪来的」
         // 模型答得上),不进用户可见的行文本——Web 模式行里仍只有 [表情: 描述],
         // 模型不会顺手把路径抄进回复。纯文字模式维持只给描述(路径会诱导投递工具)。
+        // absPath:绝对路径,给 QQ 官方机器人(dsh-qqbot 的 qqbot_send_file(file_path))
+        // 用——它的路径白名单要求绝对路径;Web 聊天里模型不会用到这个字段。
         if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         if (imMode) return rows.map((m) => ({ path: absolutePathOf(m), tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         return webMode
-          ? rows.map((m) => ({ caption: captionOf(m), path: m.path, library: libraryOf(m) }))
-          : rows.map((m) => ({ path: m.path, tag: m.tag, caption: m.caption, library: libraryOf(m) }))
+          ? rows.map((m) => ({ caption: captionOf(m), path: m.path, absPath: absolutePathOf(m), library: libraryOf(m) }))
+          : rows.map((m) => ({ path: m.path, absPath: absolutePathOf(m), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
       const howToSend = textMode
-        ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
+        ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file 或 qqbot_send_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
         : (imageMode ? '当前发送方式是「图片」:挑好图就必须真的发出去,不能只写文字描述。' : '') +
           (imMode
             ? '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)——它会作为 ' + imLabel +
               ' 原生图片消息发出;不用等用户要求,现在就能主动发。回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
             : webMode
-              ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。'
+              ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。' +
+                '如果本会话的工具表里有 qqbot_send_file(QQ 官方机器人的 dsh-qqbot 插件),说明当前是 QQ 机器人会话:此时不要写 [表情: ...] 标记,把挑中候选的 absPath(绝对路径)原样传给 qqbot_send_file 的 file_path 参数发出,正文只写普通文字、不要贴路径;若它返回路径白名单拒绝,提示用户在 dsh-qqbot 配置的 sendFile.extraRoots 里加上图库目录(通常是 ~/.dsh/meme-packs)。'
               : '用 send + path 发出。')
 
       // 关键词优先:有关键词就先精确搜(caption/关键词/图名),命中了直接给候选。

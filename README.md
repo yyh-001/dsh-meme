@@ -153,6 +153,20 @@ meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 
 自建图库目录或市场源见 [远程图库规范](./docs/remote-pack-spec.md)。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接入 QQ 发图。
 
+**QQ 官方机器人（[dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot)）**：安装该插件后，`send_meme` 候选会带 `absPath`（绝对路径），投递说明会让模型把挑中候的 `absPath` 交给 `qqbot_send_file` 的 `file_path`（不再写 `[表情: 描述]` 标记）。dsh-qqbot 默认启用**路径白名单**（仅 media 目录 + agent 工作目录 + `sendFile.extraRoots`），所以要把图库目录加进去，否则发送会被拒绝：
+
+```yaml
+# qqbot profile 的 cordis.patch.yml（或用「设置 → QQ 机器人」的配置编辑）
+- id: im-qqbot
+  config:
+    sendFile:
+      extraRoots:
+        - C:\Users\<你>\.dsh\meme-packs        # 「我的收藏」与用户图库
+        - C:\Users\<你>\.dsh\profiles\<profile>\node_modules\dsh-meme\memes  # 内置大肥鱼图库
+```
+
+`C:\Users\<你>` 在 Linux/macOS 上换成 `~`。图库放哪就把哪个目录加进去；`send_meme` 可以跨所有启用的图库取图，所以内置图库的路径也要加。
+
 插件 HTTP 接口默认只接受本机回环地址（`localhost` / `127.0.0.1` / `[::1]`）。手机/平板通过电脑的局域网 IP 访问 DSH Web 时，在插件设置页打开 **「局域网访问图库」**（默认关）即可加载表情包——只放行 IP 字面量（回环/私有网段/链路本地），域名形式的 Host 始终拒绝（防 DNS rebinding）；记得系统防火墙放行该端口。
 
 代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。

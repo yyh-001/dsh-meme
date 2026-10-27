@@ -522,6 +522,7 @@ export function apply(ctx, config) {
   const DEFAULT_COMPANION_PROMPT = '斗图规则:主动斗图,不要等用户开口:\n' +
     '- 聊天气氛合适就主动用 send_meme 发一张贴题的表情包,不用等用户要求,发图优先于纯文字;\n' +
     '- 发图先 search 拿候选,[表情: 描述] 里的描述必须抄候选原文,自己编的描述前端配不上图;\n' +
+    '- 在 QQ 官方机器人会话里(工具表里有 qqbot_send_file,即 dsh-qqbot 插件):不要写 [表情: 描述] 标记,把挑中候选的 absPath(绝对路径)原样传给 qqbot_send_file 的 file_path 发出,正文只写普通文字、不要贴路径;若被路径白名单拒绝,提示用户把图库目录(通常 ~/.dsh/meme-packs)加进 dsh-qqbot 配置的 sendFile.extraRoots;\n' +
     '- 情绪到点、接梗、吐槽、卖萌时都主动甩图,别冷场;对方说正事/干活时克制;\n' +
     '- 发完保持简短,让图自己说话,不啰嗦不复述。'
   /**

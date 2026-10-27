@@ -145,6 +145,20 @@ When the conversation comes from QQ / WeChat / Feishu / WeCom or another IM chan
 
 For custom catalogs and pack formats, see the [remote pack specification](./docs/remote-pack-spec.md). [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ image delivery.
 
+**Official QQ bot ([dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot))**: with that plugin installed, `send_meme` candidates include `absPath` (absolute path) and the delivery note tells the model to pass it to `qqbot_send_file`'s `file_path` (no `[表情: caption]` marker). dsh-qqbot enables a **path allowlist** by default (media dir + agent cwd + `sendFile.extraRoots`), so add your meme directories — otherwise sends are rejected:
+
+```yaml
+# the qqbot profile's cordis.patch.yml (or the config editor under Settings → QQ bot)
+- id: im-qqbot
+  config:
+    sendFile:
+      extraRoots:
+        - C:\Users\<you>\.dsh\meme-packs        # "My Favorites" and user packs
+        - C:\Users\<you>\.dsh\profiles\<profile>\node_modules\dsh-meme\memes  # bundled Big Fat Fish pack
+```
+
+Replace `C:\Users\<you>` with `~` on Linux/macOS. Add whichever directories hold your packs; `send_meme` picks from every enabled pack, so include the bundled pack's path too.
+
 Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`) by default. To view memes from a phone or tablet over the LAN, turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default) — only IP literals are allowed (loopback, RFC1918 private ranges, link-local); hostname Hosts are always rejected (DNS-rebinding defence). Remember to open the port in your firewall.
 
 Code is licensed under [MIT](./LICENSE). Check each pack separately for image provenance and usage rights.
