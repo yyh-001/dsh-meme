@@ -805,6 +805,11 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
   const imChannelOf = typeof options.imChannelOf === 'function' ? options.imChannelOf : null
   /** 注册时 dsh-im 是否已在进程内——只决定工具描述要不要提 IM 的发送方式 */
   const imReady = options.imReady === true
+  /**
+   * 发送前路径预处理(QQ 缩图):index.js 注入的异步回调,返回真正要投递的
+   * 绝对路径。没配置/失败时调用方按原图路径兜底。
+   */
+  const prepareSendPath = typeof options.prepareSendPath === 'function' ? options.prepareSendPath : null
   /** 运行时的发送方式设置(auto/text/image):每次执行读一次,设置改了下一条消息就生效 */
   const sendModeOf = typeof options.sendMode === 'function' ? options.sendMode : () => 'auto'
   /** 跨启用图库的分类统计(张数降序);没有就退回静态情绪字典 */
@@ -861,7 +866,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       schema: { type: 'json' },
       render: (_args, value) => [{ type: 'text', text: value.message }],
     },
-    execute(args, exec) {
+    async execute(args, exec) {
       const action = webMode ? 'search' : (args.action === 'send' ? 'send' : 'search')
       const query = typeof args.query === 'string' ? args.query.trim() : ''
       const tag = typeof args.tag === 'string' ? args.tag.trim().toLowerCase() : ''
@@ -883,6 +888,12 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           absolute = memes.resolveStored(path)
         } catch (error) {
           return { ok: false, message: '未知路径: ' + path + ' —— 用 search 的候选 path' }
+        }
+        if (prepareSendPath) {
+          try {
+            const prepared = await prepareSendPath(absolute, { mode: 'direct' })
+            if (typeof prepared === 'string' && prepared) absolute = prepared
+          } catch { /* 缩图失败按原图发送 */ }
         }
         if (sendImage) {
           try {
@@ -915,28 +926,42 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       /** 候选所属图库:跨库合并时 sampler 会给每行标 packName/packId(issue #53) */
       const libraryOf = (m) => String(m.packName || m.packId || '')
 
-      const lines = (rows) => rows.map((m, i) => {
+      /** 发送前预处理候选路径(QQ 缩图);纯文字模式不需要路径,直接跳过。 */
+      const preparePaths = async (rows, mode, channel) => {
+        if (!prepareSendPath || textMode) return rows.map(absolutePathOf)
+        return Promise.all(rows.map(async (m) => {
+          const abs = absolutePathOf(m)
+          try {
+            const prepared = await prepareSendPath(abs, { mode, channel: channel || '' })
+            return typeof prepared === 'string' && prepared ? prepared : abs
+          } catch { return abs }
+        }))
+      }
+      const lines = (rows, paths) => rows.map((m, i) => {
         const caption = captionOf(m)
+        const sendable = paths[i] || absolutePathOf(m)
         // 纯文字模式:只给描述,不给 [表情: …] 标记也不给路径——标记在前端仍会配成图
         if (textMode) return (i + 1) + '. 描述=' + caption + ' | 分类=' + m.tag
         // IM 模式不要用 "[tag] caption" 的方括号样式:模型会照着把方括号抄进回复,
         // 而 IM 客户端只把方括号里的文字显示出来(用户看到的是 [无语死鱼脸] 之类)。
-        if (imMode) return (i + 1) + '. path=' + absolutePathOf(m) + ' | 分类=' + m.tag + ' | 描述=' + caption
+        if (imMode) return (i + 1) + '. path=' + sendable + ' | 分类=' + m.tag + ' | 描述=' + caption
         return webMode
           ? (i + 1) + '. [表情: ' + caption + ']'
           : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
       })
-      const hits = (rows) => {
+      const hits = (rows, paths) => {
         // 出处元信息(issue #53):path/library 进模型可见的 JSON(用户问「这图哪来的」
         // 模型答得上),不进用户可见的行文本——Web 模式行里仍只有 [表情: 描述],
         // 模型不会顺手把路径抄进回复。纯文字模式维持只给描述(路径会诱导投递工具)。
         // absPath:绝对路径,给 QQ 官方机器人(dsh-qqbot 的 qqbot_send_file(file_path))
         // 用——它的路径白名单要求绝对路径;Web 聊天里模型不会用到这个字段。
+        // 开了 QQ 缩图时,IM 的 path 和 Web 的 absPath 都是缩好的发送副本。
+        const sendable = (i) => paths[i] || absolutePathOf(rows[i])
         if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
-        if (imMode) return rows.map((m) => ({ path: absolutePathOf(m), tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
+        if (imMode) return rows.map((m, i) => ({ path: sendable(i), tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         return webMode
-          ? rows.map((m) => ({ caption: captionOf(m), path: m.path, absPath: absolutePathOf(m), library: libraryOf(m) }))
-          : rows.map((m) => ({ path: m.path, absPath: absolutePathOf(m), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
+          ? rows.map((m, i) => ({ caption: captionOf(m), path: m.path, absPath: sendable(i), library: libraryOf(m) }))
+          : rows.map((m, i) => ({ path: m.path, absPath: sendable(i), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
       const howToSend = textMode
         ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file 或 qqbot_send_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
@@ -955,16 +980,17 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       if (query) {
         const found = memes.search(query, limit, tag)
         if (found.memes.length > 0) {
+          const paths = await preparePaths(found.memes, imMode ? 'im' : (webMode ? 'web' : 'direct'), imChannel)
           return {
             ok: true,
             mode: 'keyword',
             query: found.query,
-            hits: hits(found.memes),
+            hits: hits(found.memes, paths),
             tags: found.tags,
             message: '关键词「' + found.query + '」命中 ' + found.memes.length + ' 张' +
               (tag ? '(限在情绪 ' + tag + ' 里)' : '') +
               '。看 caption 贴就发;不满意再 search(换词或加大 limit)。' +
-              howToSend + '\n' + lines(found.memes).join('\n'),
+              howToSend + '\n' + lines(found.memes, paths).join('\n'),
           }
         }
         if (found.reason) return { ok: false, message: found.reason }
@@ -986,15 +1012,16 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           message: reason || (keywordMiss + '情绪「' + mood + '」下也没有图。换一个: ' + tagHint()),
         }
       }
+      const paths = await preparePaths(candidates, imMode ? 'im' : (webMode ? 'web' : 'direct'), imChannel)
       return {
         ok: true,
         mode: 'mood',
         mood,
-        hits: hits(candidates),
+        hits: hits(candidates, paths),
         tags,
         message: (keywordMiss ? keywordMiss + '下面按情绪抽:' : '') +
           '情绪 ' + mood + ' 随机 ' + candidates.length + ' 张。看 caption 贴就发;不满意再 search 同一 tag 换一批(可加大 limit)。' +
-          howToSend + '\n' + lines(candidates).join('\n'),
+          howToSend + '\n' + lines(candidates, paths).join('\n'),
       }
     },
   }))

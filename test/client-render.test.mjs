@@ -74,6 +74,9 @@ const packPayload = () => ({
   defaultCompanionPrompt: '内置默认提示词',
   promptEnabled: true,
   sendMode: 'auto',
+  qqSendResize: false,
+  qqSendEdge: 300,
+  qqSendResizeSupported: true,
   pluginVersion: '9.9.9',
   remoteSubs: [],
   remoteDirUrl: [],
@@ -248,6 +251,29 @@ test('面板三个标签页 + 图库详情页都能渲染出内容(含数据路�
   const saved = apiHit.filter((h) => h.url.includes('/dsh-memes-api') && h.body && JSON.parse(h.body).op === 'setSendMode')
   assert.equal(saved.length, 1, '选发送方式应 POST setSendMode: ' + JSON.stringify(apiHit.slice(-3)))
   assert.equal(JSON.parse(saved[0].body).sendMode, 'text')
+
+  // QQ 发图尺寸:开关 + 长边下拉,均立即保存
+  assert.ok(text.includes('QQ 发图尺寸') && text.includes('300 px'), '设置页应有 QQ 发图尺寸: ' + text.slice(0, 300))
+  let qqSwitch = null
+  walk(settings, (n) => {
+    if (qqSwitch || !n.props || typeof n.props.onClick !== 'function') return
+    if (String(n.props.className || '').includes('switch') && String(n.props.title || '').includes('QQ')) qqSwitch = n
+  })
+  assert.ok(qqSwitch, '设置页应有 QQ 发图尺寸开关')
+  qqSwitch.props.onClick()
+  await flush()
+  const qqSaved = apiHit.filter((h) => h.url.includes('/dsh-memes-api') && h.body && JSON.parse(h.body).op === 'setQqSendResize')
+  assert.equal(qqSaved.length, 1, '点开关应 POST setQqSendResize')
+  assert.equal(JSON.parse(qqSaved[0].body).enabled, true)
+  assert.equal(JSON.parse(qqSaved[0].body).edge, 300)
+
+  const qqSelect = findSelect(settings, '300 px')
+  assert.ok(qqSelect, '设置页应有 QQ 长边下拉框')
+  qqSelect.props.onChange({ target: { value: '400' } })
+  await flush()
+  const edgeSaved = apiHit.filter((h) => h.url.includes('/dsh-memes-api') && h.body && JSON.parse(h.body).op === 'setQqSendResize')
+  assert.equal(edgeSaved.length, 2, '改长边应再 POST setQqSendResize')
+  assert.equal(JSON.parse(edgeSaved[1].body).edge, 400)
 
   // 详情页:点「编辑」进去,这条路径以前因为 TDZ 整页空白
   findButton(settings, '图库').props.onClick()

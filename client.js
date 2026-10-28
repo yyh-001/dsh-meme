@@ -351,6 +351,10 @@ window.__ModuleLoader__.load({
       const [promptOn, setPromptOn] = React.useState(true)
       // AI 发送方式:auto=按渠道自动 / text=纯文字不发图 / image=总是发图
       const [sendMode, setSendMode] = React.useState('auto')
+      // QQ 发图尺寸:打开后 IM/QQ 发送前缩到 200-450px 长边(Web 仍用原图)
+      const [qqSendResize, setQqSendResize] = React.useState(false)
+      const [qqSendEdge, setQqSendEdge] = React.useState(300)
+      const [qqSendResizeSupported, setQqSendResizeSupported] = React.useState(true)
       // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
       const [layoutMode, setLayoutMode] = React.useState('inline')
       // 局域网访问图库(issue #54):默认仅本机;打开后手机/平板经局域网 IP 才能加载表情包
@@ -363,6 +367,10 @@ window.__ModuleLoader__.load({
         setPacks(Array.isArray(res.packs) ? res.packs : [])
         setPromptOn(res.promptEnabled !== false)
         setSendMode(res.sendMode === 'text' || res.sendMode === 'image' ? res.sendMode : 'auto')
+        setQqSendResize(res.qqSendResize === true)
+        setQqSendEdge([200, 300, 400, 450].includes(Number(res.qqSendEdge)) ? Number(res.qqSendEdge) : 300)
+        if (res.qqSendResizeSupported === false) setQqSendResizeSupported(false)
+        else if (res.qqSendResizeSupported === true) setQqSendResizeSupported(true)
         // 排布设置(old host 不带该字段,按默认并排处理),同时回写模块级状态
         // 让气泡装饰即时翻新(issue #50)
         setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
@@ -741,6 +749,41 @@ window.__ModuleLoader__.load({
           }
         } catch (e) {
           setSendMode(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // QQ 发图尺寸开关:立即保存,失败回滚。只影响 QQ/IM 的发送副本,Web 仍用原图。
+      const onToggleQqSendResize = async (next) => {
+        const prev = qqSendResize
+        setQqSendResize(next)
+        try {
+          const res = await apiPost({ op: 'setQqSendResize', enabled: next, edge: qqSendEdge })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || '已更新 QQ 发图尺寸')
+          } else {
+            setQqSendResize(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setQqSendResize(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      const onPickQqSendEdge = async (edge) => {
+        const prev = qqSendEdge
+        setQqSendEdge(edge)
+        try {
+          const res = await apiPost({ op: 'setQqSendResize', enabled: qqSendResize, edge })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || '已更新 QQ 发图尺寸')
+          } else {
+            setQqSendEdge(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setQqSendEdge(prev)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
@@ -1543,6 +1586,31 @@ window.__ModuleLoader__.load({
             : sendMode === 'image'
               ? 'AI 每次斗图都必须把图片发出来:Web 显示图片,IM 发原生图片'
               : 'Web 聊天显示图片;QQ/微信等 IM 聊天发原生图片'),
+        // QQ 发图尺寸:QQ 官方机器人没有表情类型,只能靠缩小让客户端按表情渲染
+        h('div', { className: 'section-title' }, 'QQ 发图尺寸'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('span', {
+            className: 'switch' + (qqSendResize ? ' on' : ''),
+            title: qqSendResize ? '点击关闭:QQ/IM 按原图发送' : '点击开启:QQ/IM 发送前缩到表情尺寸(Web 仍用原图)',
+            onClick: () => onToggleQqSendResize(!qqSendResize),
+          }),
+          h('span', { style: { fontSize: 12 } }, qqSendResize ? '缩到表情尺寸' : '原图发送'),
+          h('select', {
+            value: qqSendEdge,
+            onChange: (e) => onPickQqSendEdge(Number(e.target.value)),
+            disabled: !qqSendResize,
+            title: '发送长边(px);QQ 经验区间 200-450,300 比较稳',
+            style: { width: 110, marginLeft: 8 },
+          },
+            [200, 300, 400, 450].map((n) => h('option', { key: n, value: n }, n + ' px')),
+          ),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          qqSendResizeSupported === false
+            ? '当前环境没有可用的图片缩放组件(装 dsh-im 或 sharp 后生效),发送仍按原图'
+            : qqSendResize
+              ? 'QQ/IM 发图前把长边缩到 ' + qqSendEdge + 'px,Web 聊天仍用原图;GIF 保留动画。QQ 更容易按表情渲染,平板端不会拉伸满屏'
+              : '保持原图发送。QQ 官方机器人没有表情类型,大图会被当图片消息;打开后缩到 200-450px 更容易被识别成表情'),
         // 表情排布:图文同条时怎么排,只影响前端渲染,默认并排不改已有观感(issue #50)
         h('div', { className: 'section-title' }, '表情排布'),
         h('div', { className: 'row', style: { width: '100%' } },

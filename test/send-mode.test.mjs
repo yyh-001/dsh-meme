@@ -224,6 +224,28 @@ test('setSendMode:写进设置并回完整 payload;非法值 400', async () => {
   assert.equal(payload.promptEnabled, true, '原有设置字段不受影响')
 })
 
+test('setQqSendResize:开关/长边写进设置并回完整 payload,越界值夹紧', async () => {
+  setSettings({})
+  const initial = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  assert.equal(initial.qqSendResize, false, '默认关闭')
+  assert.equal(initial.qqSendEdge, 300, '默认长边 300')
+
+  const on = JSON.parse((await post({ op: 'setQqSendResize', enabled: true, edge: 400 })).body)
+  assert.equal(on.ok, true)
+  assert.equal(on.qqSendResize, true)
+  assert.equal(on.qqSendEdge, 400)
+  assert.match(on.message, /400px/)
+
+  const clamp = JSON.parse((await post({ op: 'setQqSendResize', enabled: true, edge: 999 })).body)
+  assert.equal(clamp.qqSendEdge, 450, '超过 450 夹到 450')
+
+  const off = JSON.parse((await post({ op: 'setQqSendResize', enabled: false, edge: 200 })).body)
+  assert.equal(off.qqSendResize, false)
+  assert.equal(off.qqSendEdge, 200)
+  assert.match(off.message, /原图/)
+  setSettings({})
+})
+
 test('QQ 两步模式:纯文字拒绝 send,自动模式照常发', async () => {
   const qqHost = createHost({ companionQq: { sendImage() {} } })
   mod.apply(qqHost.ctx, {})

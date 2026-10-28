@@ -1,6 +1,6 @@
 {
   "name": "dsh-meme",
-  "version": "0.1.66",
+  "version": "0.1.67",
   "description": "DeepSeek Harness 表情包插件：输入框一键发图（图库/情绪多选筛选、悬浮大图预览）、多图库开关、情绪与关键词搜图、AI 学图，图库可从市场一键安装或导入/导出 ZIP。",
   "icon": "icon.jpg",
   "repository": {
@@ -22,6 +22,7 @@
     "index.js",
     "locale/",
     "memes.js",
+    "qq-resize.js",
     "memes/",
     "panel.html",
     "AGENTS.md",
@@ -48,6 +49,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/dsh-tools": "*"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.35.5"
   },
   "keywords": [
     "dsh-plugin",

@@ -21,11 +21,11 @@
 
 - **Click to send**: open 😊 beside the composer, search or filter by pack and mood, then pick an image.
 - **Proactive memes**: the AI picks a meme that fits the conversation's mood without waiting to be asked; toggle “Proactive memes” or edit the prompt in settings.
-- **IM / mobile**: through dsh-im, QQ / WeChat / Feishu and other IM chats send memes as native images with no text marker; on a phone or tablet, open DSH Web over your computer's LAN IP and turn on “Allow LAN access” (off by default).
+- **IM / mobile**: through dsh-im, QQ / WeChat / Feishu and other IM chats send memes as native images with no text marker; on a phone or tablet, open DSH Web over your computer's LAN IP and turn on “Allow LAN access” (off by default). QQ tends to render large images as photos (stretched full-screen on tablets); turn on “QQ send size” in settings to send a 200–450 px copy while Web keeps the original.
 - **Learn new images**: upload an image and ask to save it; the AI identifies its category and caption. You can also drop image files into a pack folder and click “扫描新增 (Scan)” — the original bytes (including animated GIFs) are kept, and renamed/deleted files have their stale index rows cleaned up.
 - **Organize packs**: ask the AI to “list my memes”, “find duplicates” or “recategorize this one” — the `meme_list` / `meme_update` tools handle it (deleting stays in the panel to avoid accidents).
 - **Manage and share**: enable multiple packs, upload and edit images, import/export ZIPs, and install or update marketplace packs.
-- **Ready to use**: includes Big Fat Fish (24 images), with no third-party runtime dependencies; uses Node's built-in SQLite.
+- **Ready to use**: includes Big Fat Fish (24 images); the core has no third-party runtime dependencies and uses Node's built-in SQLite. QQ resizing is optional and uses sharp (already bundled with dsh-im; falls back to the original image when unavailable).
 
 ## Promo video
 
@@ -65,13 +65,13 @@ Open **设置 (Settings) → 表情包 (Memes)**:
 
 - **图库 (Packs)**: click a card to manage images; the category dropdown filters by real categories; “扫描新增 (Scan)” indexes images you copied into the folder and cleans up stale rows. Each switch controls whether the AI can use that pack; several can be enabled. Create, import/export ZIPs, submit, delete and update.
 - **发现 (Discover)**: preview marketplace packs and install them (Release ZIPs verify SHA-256).
-- **设置 (Settings)**: scan directory, proactive memes, prompt, send mode (automatic / text-only / image), layout (side-by-side / full-width row), LAN access, `AGENTS.md`.
+- **设置 (Settings)**: scan directory, proactive memes, prompt, send mode (automatic / text-only / image), QQ send size (toggle + 200/300/400/450 px long edge), layout (side-by-side / full-width row), LAN access, `AGENTS.md`.
 
 ![Installed packs with independent enable switches](./docs/panel-library.png)
 
 The default scan directory is `~/.dsh/meme-packs`; settings live in `~/.dsh/dsh-expression.json` and survive upgrades. ZIP imports accept standard compression and plain image folders.
 
-**Send mode** only affects the AI: automatic follows the channel (Web marker, IM native image), text-only never sends images, image requires a real send every time. **Layout** only affects rendering: side-by-side (default) or a full-width image row.
+**Send mode** only affects the AI: automatic follows the channel (Web marker, IM native image), text-only never sends images, image requires a real send every time. **QQ send size** is off by default; when enabled, QQ/IM sends a copy scaled to the selected long edge (300 px default), Web keeps the original, and GIF frames are preserved — the official QQ bot has no sticker message type, and smaller images are more likely to render as stickers instead of being stretched full-screen on tablets. **Layout** only affects rendering: side-by-side (default) or a full-width image row.
 
 ## Troubleshooting
 

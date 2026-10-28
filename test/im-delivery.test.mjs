@@ -18,6 +18,7 @@ process.env.HOME = home
 
 const mod = await import('../index.js')
 const { imChannelOfSession } = await import('../memes.js')
+const { loadSharp } = await import('../qq-resize.js')
 
 const UUID = '0f8fad5b-d9cb-469f-a165-70867728950e'
 const SESSION_ID = 'session-11111111-2222-4333-8444-555555555555'
@@ -150,6 +151,52 @@ test('send_meme 在 IM 会话里给候选加绝对路径,并让模型调用 dsh_
   assert.equal(byKeyword.ok, true)
   assert.ok(byKeyword.hits.every((h) => existsSync(h.path)))
   assert.match(byKeyword.message, /dsh_im_return_file/)
+})
+
+test('send_meme 在 QQ IM 会话里按设置返回缩好的发送副本,Web/其它 IM 不受影响', async (t) => {
+  const sharp = await loadSharp()
+  if (!sharp) return t.skip('sharp 不可用')
+  const settingsFile = join(home, '.dsh', 'dsh-expression.json')
+  mkdirSync(join(home, '.dsh'), { recursive: true })
+  writeFileSync(settingsFile, JSON.stringify({ qqSendResize: true, qqSendEdge: 300 }))
+  try {
+    const qq = await sendMeme.execute(
+      { tag: 'happy', limit: 3 },
+      { agent: { session: imSession('qq') } },
+    )
+    assert.equal(qq.ok, true)
+    assert.ok(qq.hits.length > 0)
+    for (const hit of qq.hits) {
+      assert.match(hit.path, /\.send-cache[\\/]/, 'QQ IM 应拿到缩好的发送副本')
+      assert.ok(existsSync(hit.path), '发送副本必须真实存在: ' + hit.path)
+      const meta = await sharp(hit.path).metadata()
+      assert.ok(Math.max(meta.width, meta.height) <= 300, '长边应缩到 300px: ' + hit.path)
+    }
+
+    const wx = await sendMeme.execute(
+      { tag: 'happy', limit: 2 },
+      { agent: { session: imSession('weixin') } },
+    )
+    for (const hit of wx.hits) assert.doesNotMatch(hit.path, /\.send-cache[\\/]/, '微信 IM 保持原图')
+
+    const web = await sendMeme.execute(
+      { tag: 'happy', limit: 2 },
+      { agent: { session: webSession() } },
+    )
+    for (const hit of web.hits) {
+      assert.doesNotMatch(hit.path, /\.send-cache[\\/]/, 'Web 候选的 path 仍是图库原图')
+      assert.match(hit.absPath, /\.send-cache[\\/]/, 'Web 的 absPath(qqbot_send_file 用)是缩好的副本')
+    }
+
+    writeFileSync(settingsFile, JSON.stringify({}))
+    const off = await sendMeme.execute(
+      { tag: 'happy', limit: 2 },
+      { agent: { session: imSession('qq') } },
+    )
+    for (const hit of off.hits) assert.doesNotMatch(hit.path, /\.send-cache[\\/]/, '关掉开关后按原图发送')
+  } finally {
+    writeFileSync(settingsFile, JSON.stringify({}))
+  }
 })
 
 test('send_meme 在 Web 会话里保持 [表情: 描述] 标记,行文本不带路径', async () => {

@@ -29,6 +29,7 @@ import {
   scanRowFor, walkPackImages, ensurePackAt, movePackEntries, isInsidePluginPackage, SCAN_IMAGE_EXTS,
 } from './memes.js'
 import { ANIM_DEFAULT_FRAMES, detectAnimation, buildAnimationFilmstrip, animationModelNote } from './anim.js'
+import { normalizeQqSendEdge, resizeForQq, loadSharp, sharpStatus } from './qq-resize.js'
 
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
 const CRC_TABLE = (() => {
@@ -613,6 +614,11 @@ export function apply(ctx, config) {
    * 渲染成图片的逻辑。auto = 按渠道自动(默认);text = 纯文字不发图;image = 总是发图。
    */
   const sendModeOf = () => normalizeSendMode(readSettings().sendMode)
+  /** QQ 发图尺寸:默认关;打开后 IM/QQ 发送前把长边缩到 200-450px(设置页开关)。 */
+  const qqSendResizeOf = () => readSettings().qqSendResize === true
+  const qqSendEdgeOf = () => normalizeQqSendEdge(readSettings().qqSendEdge)
+  // 启动时探测一次 sharp(dsh-im 自带);不可用时开关仍可保存,但发送按原图。
+  void loadSharp()
   /** 设置页「允许局域网访问图库」(issue #54):默认关,打开后局域网 IP 字面量的 Host 也放行 */
   const allowLanAccess = () => readSettings().allowLanAccess === true
   /** 纯文字模式:默认提示词里教模型写 [表情:] 标记的规则要压掉,否则前端仍会配图 */
@@ -997,10 +1003,29 @@ export function apply(ctx, config) {
   // ---- 发送通道:QQ 优先,Web 兜底;Web 里再按会话来源分流到 IM 原生图片 ----
   // dsh-im 只在进程内时提供 dsh_im_return_file;这里传的是「运行时判断」而不是
   // apply 时的快照——插件装载顺序不定,dsh-im 可能比 dsh-meme 晚就绪。
+  /**
+   * 发送前把图缩成 QQ 更容易识别成表情的尺寸。只在开关打开时生效;
+   * IM 渠道只处理 QQ(其它渠道保持原图),Web 的 absPath 也给缩好的副本
+   * 供 qqbot_send_file 使用。缩图失败/没 sharp 时返回原路径。
+   */
+  const prepareSendPath = async (absPath, { channel = '', mode = '' } = {}) => {
+    if (!qqSendResizeOf()) return absPath
+    if (mode === 'im' && channel !== 'qq') return absPath
+    try {
+      return await resizeForQq(absPath, {
+        edge: qqSendEdgeOf(),
+        cacheDir: join(packsDirNow(), '.send-cache'),
+      })
+    } catch (error) {
+      console.log('[dsh-expression] QQ 缩图失败,按原图发送:', error instanceof Error ? error.message : String(error))
+      return absPath
+    }
+  }
   const imToolOptions = () => ({
     imChannelOf: (session) => (hasImDelivery() ? imChannelOfSession(session) : null),
     imReady: hasImDelivery(),
     sendMode: sendModeOf,
+    prepareSendPath,
     // 跨启用图库的真实分类统计:send_meme 没命中时给模型有用的换词建议(issue #53)
     tagStats: () => sampler.tagStats(),
   })
@@ -1125,6 +1150,11 @@ export function apply(ctx, config) {
         promptEnabled: readSettings().promptEnabled !== false,
         // AI 发送方式设置:auto(默认)/ text(纯文字)/ image(总是发图)
         sendMode: normalizeSendMode(s.sendMode),
+        // QQ 发图尺寸:默认关;打开后 IM/QQ 发送前缩到 200-450px 长边
+        qqSendResize: s.qqSendResize === true,
+        qqSendEdge: normalizeQqSendEdge(s.qqSendEdge),
+        // undefined = 还在探测 sharp;false = 当前环境没有缩放组件
+        qqSendResizeSupported: sharpStatus(),
         // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
         layoutMode: normalizeLayoutMode(s.layoutMode),
         // 局域网访问图库(issue #54):默认关;打开后手机/平板经局域网 IP 才能看到表情包
@@ -2580,6 +2610,23 @@ export function apply(ctx, config) {
             writeSettings({ sendMode: mode })
             const label = mode === 'text' ? '纯文字' : mode === 'image' ? '图片' : '自动(按渠道)'
             json(res, { ok: true, ...packPayload(), message: '发送方式已改为「' + label + '」,下一条消息生效' })
+          } else if (op === 'setQqSendResize') {
+            // QQ 发图尺寸:默认关;打开后 IM/QQ 发送前把长边缩到 200-450px。
+            // Web 聊天仍用原图;没 sharp 时按原图发送并在提示里说明。
+            const enabled = body.enabled === true
+            const edge = normalizeQqSendEdge(body.edge)
+            const prev = readSettings()
+            writeSettings({ qqSendResize: enabled, qqSendEdge: edge })
+            const supported = sharpStatus()
+            const changedEdge = normalizeQqSendEdge(prev.qqSendEdge) !== edge
+            const message = enabled
+              ? (supported === false
+                  ? '已保存,但当前环境没有可用的图片缩放组件(装 dsh-im 或 sharp 后生效),实际仍按原图发送'
+                  : '已开启 QQ 表情尺寸缩放:QQ/IM 发图前缩到 ' + edge + 'px,Web 仍用原图')
+              : (prev.qqSendResize === true
+                  ? '已关闭 QQ 表情尺寸缩放:按原图发送'
+                  : changedEdge ? 'QQ 发图长边已设为 ' + edge + 'px' : 'QQ 表情尺寸缩放保持关闭')
+            json(res, { ok: true, ...packPayload(), message })
           } else if (op === 'setLayoutMode') {
             // 表情排布:inline = 图与正文并排(默认);stacked = 图独占一行、正文铺开(issue #50)
             const mode = String(body.layoutMode == null ? '' : body.layoutMode).trim()
