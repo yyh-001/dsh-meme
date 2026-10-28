@@ -168,6 +168,18 @@ meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 
 `C:\Users\<你>` 在 Linux/macOS 上换成 `~`。图库放哪就把哪个目录加进去；`send_meme` 可以跨所有启用的图库取图，所以内置图库的路径也要加。
 
+### 给其它插件的只读取图服务
+
+同一 DSH 进程内的其它插件（以及跑在里面的 agent 工具）可以直接 `ctx.get('dshMeme')` 拿到本插件的原生检索能力，不用自己读图库索引、也不会读到脏数据：
+
+| 方法 | 返回 |
+| --- | --- |
+| `packs()` | 已启用的图库 `{ id, name, count, path }[]` |
+| `search({ query, tag, limit })` | `{ ok, query, memes: [{ path, tag, caption, keywords, pack, packName }] }` |
+| `pick({ query, tag })` | 成功 `{ ok: true, path, tag, caption, keywords, pack, packName }`；没命中 `{ ok: false, reason, tags, tagStats }`（**不会瞎塞一张**） |
+
+`query` 按关键词/文件名搜（跨所有启用的图库），`tag` 是情绪桶（`happy/angry/sad/shy/confused/daily`）。没命中时 `tags` 是六个情绪桶，`tagStats` 是启用图库里的真实分类分布（`{ tag, count }[]`，按张数降序），方便调用方让模型换词。服务只读、幂等、不发送任何消息；返回的 `path` 一定是磁盘绝对路径且文件存在。B站评论区配图就是接的这个服务。
+
 插件 HTTP 接口默认只接受本机回环地址（`localhost` / `127.0.0.1` / `[::1]`）。手机/平板通过电脑的局域网 IP 访问 DSH Web 时，在插件设置页打开 **「局域网访问图库」**（默认关）即可加载表情包——只放行 IP 字面量（回环/私有网段/链路本地）；记得系统防火墙放行该端口。
 
 **反向代理部署**（浏览器 → `https://你的域名` → nginx/frp → `127.0.0.1:2233`）时 Host 是你的域名，需要显式声明可信域名（issue #56；默认空名单，行为完全不变）：
