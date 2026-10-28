@@ -11,12 +11,12 @@
 </p>
 
 <p align="center">
-  <a href="./README.md">中文</a> · <strong>English</strong><br />
   <a href="https://yyh-001.github.io/dsh-meme/">Pack showcase</a> ·
   <a href="https://github.com/yyh-001/dsh-meme-packs">Pack marketplace</a> ·
   <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">Report an issue</a> ·
   <a href="https://qm.qq.com/q/7AD2g70HqS">Community &amp; feedback group 1 (full)</a> ·
-  <a href="https://qm.qq.com/q/HCtId2UY4q">Community group 2</a>
+  <a href="https://qm.qq.com/q/HCtId2UY4q">Community group 2</a> ·
+  <a href="./README.md">中文</a> · <strong>English</strong>
 </p>
 
 ## Features
