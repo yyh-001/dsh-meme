@@ -121,6 +121,8 @@ const slots = {
 globalThis.__dshMeme.apply({ get: (name) => (name === 'slots' ? slots : undefined), effect: () => {} })
 const panel = slots.registered.find((r) => r.meta.name === 'settings.section' && r.meta.id === 'memes')
 assert.ok(panel, '应注册 settings.section')
+const bundleConfig = slots.registered.find((r) => r.meta.name === 'plugins.bundle.config' && r.meta.key === 'dsh-meme')
+assert.ok(bundleConfig, '插件详情页也应注册表情包面板(plugins.bundle.config)')
 
 // 注册出去的是 () => createElement(MemePanel, {ctx});真 React 会去调这个函数组件,
 // 这里照做,好让组件的函数体真的被执行(TDZ 之类的崩溃就发生在那里面)

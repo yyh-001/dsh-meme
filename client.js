@@ -3164,6 +3164,13 @@ window.__ModuleLoader__.load({
         { name: 'settings.section', id: 'memes', order: 25, label: '表情包' },
         () => React.createElement(MemePanel, { ctx }),
       ))
+      // 插件详情页(插件 → 表情包)挂同一份管理面板:plugins.bundle.config 按
+      // bundle 包名匹配,渲染在详情页描述与组件列表之间。设置页保留入口,两处
+      // 共用同一套 HTTP API,改动即时互见。宿主未声明该槽时 inject 不会触发。
+      slots.inject('plugins.bundle.config', () => slots.register(
+        { name: 'plugins.bundle.config', key: 'dsh-meme' },
+        () => React.createElement(MemePanel, { ctx }),
+      ))
 
       // 输入框快捷发图(QQ 式)。
       const store = makeMemeStore()

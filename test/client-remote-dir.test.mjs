@@ -247,6 +247,8 @@ async function loadPanel(sceneObj) {
   globalThis.__dshMeme.apply({ get: (n) => (n === 'slots' ? slots : undefined), effect: () => {} })
   const panel = slots.registered.find((r) => r.meta.name === 'settings.section' && r.meta.id === 'memes')
   assert.ok(panel, '应注册 settings.section')
+  const bundleConfig = slots.registered.find((r) => r.meta.name === 'plugins.bundle.config' && r.meta.key === 'dsh-meme')
+  assert.ok(bundleConfig, '插件详情页也应注册表情包面板(plugins.bundle.config)')
   const render = () => {
     hookStack = []
     return evalTree(panel.render({ ctx: {} }), 'root')
