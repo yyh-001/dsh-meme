@@ -51,26 +51,6 @@ dsh plugin --profile web add dsh-meme
 
 Requires **Node.js ≥ 22.13.0**. The old package name `dsh-expression` is deprecated; its internal plugin ID is retained for compatibility.
 
-## Update failed / plugin disappeared?
-
-The marketplace updates a plugin by having pnpm rename and replace the whole `node_modules/dsh-meme` directory. **On Windows, a directory cannot be renamed while any file inside it is still open**, so pnpm fails with `exit 1` (`ERR_PNPM_EPERM ... rename '..._tmp_...' -> '...dsh-meme'`); the marketplace often shows only a truncated one-line error.
-
-**Fixed in 0.1.59 (issue [#43](https://github.com/yyh-001/dsh-meme/issues/43))**: older versions kept a SQLite connection open on the bundled pack index (`memes/dafeiyu-001/index.db`) for the whole session — that file lives inside the plugin package, so the update rename was bound to fail whenever the built-in pack was active (it usually worked with a user pack under `~/.dsh/meme-packs`). The store now loads its index into memory once at startup and opens the database only briefly when writing, so the plugin no longer holds any file in its own package directory.
-
-If you are updating from a version **before 0.1.59** and the update already failed:
-
-1. **Quit DSH completely** (tray → quit; confirm no `dsh` / Electron process is running), then retry the update.
-2. If it still fails or the plugin vanished: with DSH closed, update manually in the profile directory (`~/.dsh/profiles/desktop` for the desktop app; `web` is common for Web/CLI):
-
-   ```bash
-   cd ~/.dsh/profiles/web
-   pnpm add dsh-meme@latest
-   ```
-
-3. Packs and settings live in `~/.dsh` (`dsh-expression.json` etc.) and survive updates/reinstalls.
-
-If updating still fails on 0.1.59 or later, the lock comes from outside the plugin, so please report the profile directory and the full `exit 1` context to the DSH marketplace. The regression test `test/update-lock.test.mjs` simulates the pnpm rename to keep this fixed.
-
 ## Screenshots
 
 You send one, the AI replies with one.
@@ -85,47 +65,34 @@ You send one, the AI replies with one.
 
 Open **设置 (Settings) → 表情包 (Memes)**:
 
-- **图库 (Packs)**: click a card to manage images. The category dropdown lists the pack's **real categories** (sorted by count, exact-match filtering); “扫描新增 (Scan)” indexes images you copied into the pack folder (category from subfolder, caption from filename) and removes stale rows for renamed/deleted files. Each switch controls whether the AI can use that pack; several can be enabled. Create, import (any standard compression; a plain folder of images zipped up also works — categories come from folder names), export, submit or delete packs; “Update” appears when a newer version is available.
-- **发现 (Discover)**: preview marketplace packs and install them directly; Release ZIP installations verify SHA-256.
-- **设置 (Settings)**: change the scan directory, toggle proactive memes, edit the prompt, choose how the AI sends memes (automatic / text-only / image) and the layout (side-by-side / full-width row), toggle LAN access, and view/edit `AGENTS.md` (agent instructions).
+- **图库 (Packs)**: click a card to manage images; the category dropdown filters by real categories; “扫描新增 (Scan)” indexes images you copied into the folder and cleans up stale rows. Each switch controls whether the AI can use that pack; several can be enabled. Create, import/export ZIPs, submit, delete and update.
+- **发现 (Discover)**: preview marketplace packs and install them (Release ZIPs verify SHA-256).
+- **设置 (Settings)**: scan directory, proactive memes, prompt, send mode (automatic / text-only / image), layout (side-by-side / full-width row), LAN access, `AGENTS.md`.
 
 ![Installed packs with independent enable switches](./docs/panel-library.png)
 
-The default scan directory is `~/.dsh/meme-packs`. Settings are saved in `~/.dsh/dsh-expression.json` and survive upgrades. Install more packs from Discover or import a shared ZIP.
+The default scan directory is `~/.dsh/meme-packs`; settings live in `~/.dsh/dsh-expression.json` and survive upgrades. ZIP imports accept standard compression and plain image folders.
 
-**Send mode** only controls how the AI sends memes; the frontend still renders `[表情: caption]` as an image: **automatic** (default) follows the channel (Web writes the marker, IM sends native images), **text-only** never sends images, and **image** requires the AI to actually send a picture every time. Changes apply from the next message. **Layout** decides how an image and text share a message: **side-by-side** (default, compact) or **full-width row** (image on top, text across the full width); it takes effect immediately and only affects rendering.
+**Send mode** only affects the AI: automatic follows the channel (Web marker, IM native image), text-only never sends images, image requires a real send every time. **Layout** only affects rendering: side-by-side (default) or a full-width image row.
 
-## Behind a restrictive network?
+## Troubleshooting
 
-The catalog and preview images live on GitHub, so `raw.githubusercontent.com` / `cdn.jsdelivr.net` often time out in mainland China and Discover reports that the catalog is unavailable. Mirrors are tried automatically:
-
-- **Racing mirrors**: catalog, manifest JSON, release ZIPs and images try the original URL plus `ghfast.top`, `gh-proxy.com`, `ghproxy.net`, `cdn.jsdmirror.com` and `fastly.jsdelivr.net`; the first response wins, and images fall back one candidate at a time.
-- **Disk cache**: the last good catalog is stored in `~/.dsh/dsh-meme-catalog-cache.json` and used, with a local-cache note, while the network is down.
-- **SHA-256 still enforced**: a mirror only changes the transport; a ZIP that fails its hash is discarded and the next mirror is tried.
-
-Still failing? Click **重试 (Retry)** on Discover, check the current source under **图库目录源 (Catalog source)** in Settings → Memes, or use the dropdown there: **自动 (Automatic)**, **官方源 (Official GitHub)**, **镜像源 (Mirrors, best for mainland China)** or **自定义地址 (Custom URL)**. The same values can be written to `"remoteDirUrl"` in `~/.dsh/dsh-expression.json` (`""`/`auto`, `official`, `mirror`, or a `catalog.json` URL) and take effect immediately. To test a mirror:
-
-```bash
-curl -I https://ghfast.top/https://raw.githubusercontent.com/yyh-001/dsh-meme-packs/main/catalog.json
-curl -o /dev/null -w '%{http_code}\n' https://cdn.jsdmirror.com/gh/yyh-001/dsh-meme-packs@main/catalog.json
-```
+- **Update failed / plugin disappeared**: click **Retry** in the marketplace; if it still fails, quit DSH completely and update again. On older versions, or if it keeps failing, run `pnpm add dsh-meme@latest` in the profile directory with DSH closed. Packs and settings live in `~/.dsh` and survive reinstalls. See the [troubleshooting guide](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.en.md).
+- **Restrictive network / marketplace unavailable**: mirrors are raced and the catalog is cached automatically; click **Retry**, then switch **Catalog source** to **Mirrors**. See the [troubleshooting guide](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.en.md).
+- **Phone / LAN / reverse proxy**: turn on **Allow LAN access** for LAN IPs; a reverse-proxy domain needs an explicit trusted host (`DSH_MEME_TRUSTED_HOSTS` or `allowedHosts`). See the [troubleshooting guide](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.en.md).
 
 ## Share your own pack
 
-1. Create a pack in Packs and add images.
-2. Click **导出 (Export)** to get a ZIP. Friends can install it with **导入图库 (Import pack)**.
-3. To join the marketplace, click **投稿 (Submit)**. The plugin exports the ZIP and opens a prefilled GitHub form; sign in, attach the ZIP, add image sources and license details, then submit for review.
-
-Use the plugin's exported ZIP for marketplace submissions. GitHub's “Download ZIP” is a source archive, not a pack export. The importer itself is more forgiving: any standard ZIP compression works, and a plain folder of images zipped up installs directly (categories come from folder names). Exporting still requires a separate GitHub submission; listing follows approval.
+Create a pack, add images, click **导出 (Export)** and send the ZIP; friends install it with **导入图库 (Import pack)**. To join the marketplace, click **投稿 (Submit)** and attach the ZIP with image sources and licence details in the prefilled GitHub form. Use the plugin's exported ZIP — GitHub's “Download ZIP” is a source archive, not a pack.
 
 ## Tools and extensions
 
 | Tool | Usage |
 | --- | --- |
-| `send_meme` | `tag` samples a mood bucket; `query` searches captions, keywords or file names across all enabled packs. Candidates carry `path` / `library` provenance; a miss returns the packs' real category counts to guide a retry |
-| `learn_meme` | Saves the most recent user image by default; also accepts `attachmentId` or `imageUrl`. Warns when the host flattened an attached GIF to a single frame |
-| `meme_list` | Read-only listing across enabled packs, filtered by keyword/category/pack, with pack, category, caption, keywords and path; use it to spot duplicates and wrong categories |
-| `meme_update` | Change one image's category/caption/keywords (index only, at least one field); pass the path exactly as returned by `meme_list` / `send_meme` |
+| `send_meme` | `tag` samples a mood bucket, `query` searches captions/keywords/file names across enabled packs; candidates carry `path` / `library`, a miss returns real category counts |
+| `learn_meme` | Saves the latest user image by default; also accepts `attachmentId` / `imageUrl`; warns when an attached GIF was flattened |
+| `meme_list` | Read-only listing across enabled packs by keyword/category/pack, with pack, category, caption, keywords and path |
+| `meme_update` | Change one image's category/caption/keywords (index only); pass the path exactly as returned by `meme_list` / `send_meme` |
 
 ```text
 send_meme tag=happy
@@ -135,60 +102,41 @@ meme_list tag=work
 meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 ```
 
-Mood buckets: `happy` / `angry` / `sad` / `shy` / `confused` / `daily`. The model should copy a candidate's `[表情: caption]` marker verbatim; the frontend renders it only in chat content. If no candidate fits, try other keywords or reply with text.
+Mood buckets: `happy` / `angry` / `sad` / `shy` / `confused` / `daily`. The model should copy a candidate's `[表情: caption]` verbatim; if nothing fits, retry with other words or reply with text.
 
-**Agent docs**: `AGENTS.md` in the package documents how sending is decided per channel, the path-prefix convention and the GIF-flattening caveat (agents working inside the plugin directory read it automatically at session start); the full pack-maintenance workflow (duplicates, bulk recategorizing, scan-and-index) lives in the project-level skill `.dsh/skills/dsh-meme-maintenance`, loaded on demand. The settings page can view/edit `AGENTS.md`.
+**Agent docs**: `AGENTS.md` documents per-channel sending, path prefixes and the GIF-flattening caveat; pack maintenance lives in the skill `.dsh/skills/dsh-meme-maintenance`. The settings page can view/edit it.
 
-**Animated GIFs are actually read**: `learn_meme` and the upload dialog's AI recognition sample a GIF along its timeline, tile the frames into a labelled filmstrip and send that to the model, so captions can describe the motion (for example “a cat shaking its head wildly”) instead of only the first frame. The original GIF is still what gets saved and it keeps animating in chat. Animated WebP / APNG currently contribute metadata only (frame count, duration) and are still recognized from their first frame; the prompt says so. The decoder is plain JavaScript with no third-party dependencies.
+**Animated GIFs**: `learn_meme` and upload recognition sample GIF frames into a filmstrip, so captions describe motion; the original keeps animating. WebP / APNG contribute metadata only and are recognized from the first frame.
 
-When the conversation comes from QQ / WeChat / Feishu / WeCom or another IM channel through [dsh-im](https://github.com/xmanrui/dsh-im), the sticker is sent as a native image message: the plugin detects the IM source, `send_meme` returns each candidate's **absolute path**, and the model passes it to dsh-im's `dsh_im_return_file`. IM chats never render `[表情: caption]`, so no marker is written. This delivery rule is injected together with the proactive-meme prompt — **no prior user instruction such as “you may send memes on QQ/WeChat” is needed**. Web chats keep the `[表情: caption]` rendering, and both kinds of conversation can coexist in one profile.
+**IM delivery**: through [dsh-im](https://github.com/xmanrui/dsh-im), `send_meme` candidates carry absolute paths and the model calls `dsh_im_return_file`; Web chats keep `[表情: caption]`. [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ delivery.
 
-For custom catalogs and pack formats, see the [remote pack specification](./docs/remote-pack-spec.md). [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ image delivery.
-
-**Official QQ bot ([dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot))**: with that plugin installed, `send_meme` candidates include `absPath` (absolute path) and the delivery note tells the model to pass it to `qqbot_send_file`'s `file_path` (no `[表情: caption]` marker). dsh-qqbot enables a **path allowlist** by default (media dir + agent cwd + `sendFile.extraRoots`), so add your meme directories — otherwise sends are rejected:
+**Official QQ bot ([dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot))**: candidates carry `absPath` for `qqbot_send_file`'s `file_path`. dsh-qqbot's path allowlist needs your pack directories in `sendFile.extraRoots`:
 
 ```yaml
-# the qqbot profile's cordis.patch.yml (or the config editor under Settings → QQ bot)
+# the qqbot profile's cordis.patch.yml (or Settings → QQ bot)
 - id: im-qqbot
   config:
     sendFile:
       extraRoots:
-        - C:\Users\<you>\.dsh\meme-packs        # "My Favorites" and user packs
-        - C:\Users\<you>\.dsh\profiles\<profile>\node_modules\dsh-meme\memes  # bundled Big Fat Fish pack
+        - C:\Users\<you>\.dsh\meme-packs
+        - C:\Users\<you>\.dsh\profiles\<profile>\node_modules\dsh-meme\memes
 ```
 
-Replace `C:\Users\<you>` with `~` on Linux/macOS. Add whichever directories hold your packs; `send_meme` picks from every enabled pack, so include the bundled pack's path too.
+Replace `C:\Users\<you>` with `~` on Linux/macOS; include the bundled pack's path too.
 
 ### Read-only meme service for other plugins
 
-Other plugins in the same DSH process (and agent tools running inside them) can call `ctx.get('dshMeme')` to reuse this plugin's native search instead of reading pack indexes themselves:
+Other plugins in the same process can call `ctx.get('dshMeme')` (read-only):
 
 | Method | Returns |
 | --- | --- |
 | `packs()` | Enabled packs `{ id, name, count, path }[]` |
 | `search({ query, tag, limit })` | `{ ok, query, memes: [{ path, tag, caption, keywords, pack, packName }] }` |
-| `pick({ query, tag })` | On a hit `{ ok: true, path, tag, caption, keywords, pack, packName }`; otherwise `{ ok: false, reason, tags, tagStats }` (it never forces a random image) |
+| `pick({ query, tag })` | On a hit `{ ok: true, path, tag, caption, keywords, pack, packName }`; otherwise `{ ok: false, reason, tags, tagStats }` |
 
-`query` matches captions/keywords/file names across every enabled pack, and `tag` is a mood bucket (`happy/angry/sad/shy/confused/daily`). On a miss, `tags` lists the mood buckets and `tagStats` gives the real per-tag distribution (`{ tag, count }[]`, descending) so the caller can retry with better words. The service is read-only, idempotent, sends nothing, and every returned `path` is an absolute path that exists on disk. The Bilibili comment-image plugin is built on it.
+`tag` is a mood bucket; `tagStats` gives the real category distribution on a miss. Every returned `path` is absolute and exists. For custom catalogs see the [remote pack specification](./docs/remote-pack-spec.md).
 
-Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`) by default. To view memes from a phone or tablet over the LAN, turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default) — only IP literals are allowed (loopback, RFC1918 private ranges, link-local). Remember to open the port in your firewall.
-
-Behind a **reverse proxy** (browser → `https://your.domain` → nginx/frp → `127.0.0.1:2233`) the Host is your own domain, so declare it explicitly (issue #56; the list is empty by default and behaviour is unchanged):
-
-```bash
-# Environment variable: no profile edits needed for containers/reverse proxies
-DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
-```
-
-```yaml
-# Or in the profile's cordis.patch.yml
-- id: dsh-expression
-  config:
-    allowedHosts:
-      - feiyu.example.com
-```
-
-Matching is exact (case/port/trailing dot insensitive, no wildcards); hosts not on the list are still rejected, so the DNS-rebinding defence is unchanged. The plugin has no authentication of its own — put login/access control in front of the proxy domain.
+Plugin HTTP routes accept loopback hosts by default; LAN and reverse-proxy setup is in the [troubleshooting guide](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.en.md).
 
 ## Community & feedback
 
