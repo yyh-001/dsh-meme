@@ -14,8 +14,6 @@
   <a href="https://yyh-001.github.io/dsh-meme/">Pack showcase</a> ·
   <a href="https://github.com/yyh-001/dsh-meme-packs">Pack marketplace</a> ·
   <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">Report an issue</a> ·
-  <a href="https://qm.qq.com/q/7AD2g70HqS">Community &amp; feedback group 1 (full)</a> ·
-  <a href="https://qm.qq.com/q/HCtId2UY4q">Community group 2</a> ·
   <a href="./README.md">中文</a> · <strong>English</strong>
 </p>
 
@@ -200,5 +198,9 @@ DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
 ```
 
 Matching is exact (case/port/trailing dot insensitive, no wildcards); hosts not on the list are still rejected, so the DNS-rebinding defence is unchanged. The plugin has no authentication of its own — put login/access control in front of the proxy domain.
+
+## Community & feedback
+
+[QQ group 1 (full)](https://qm.qq.com/q/7AD2g70HqS) · [QQ group 2](https://qm.qq.com/q/HCtId2UY4q)
 
 Code is licensed under [MIT](./LICENSE). Check each pack separately for image provenance and usage rights.

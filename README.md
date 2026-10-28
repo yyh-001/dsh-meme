@@ -14,8 +14,6 @@
   <a href="https://yyh-001.github.io/dsh-meme/">预览表情包</a> ·
   <a href="https://github.com/yyh-001/dsh-meme-packs">图库市场</a> ·
   <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">反馈问题</a> ·
-  <a href="https://qm.qq.com/q/7AD2g70HqS">交流反馈1群（已满）</a> ·
-  <a href="https://qm.qq.com/q/HCtId2UY4q">dsh插件2群</a> ·
   <strong>中文</strong> · <a href="./README.en.md">English</a>
 </p>
 
@@ -208,5 +206,9 @@ DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
 ```
 
 只做精确主机名匹配（大小写、端口、末尾点不敏感，不支持通配符）；没写进名单的域名仍然拒绝，DNS rebinding 防线不变。插件本身没有鉴权，反代域名务必由代理层做登录/访问控制。
+
+## 交流反馈
+
+[QQ 1 群（已满）](https://qm.qq.com/q/7AD2g70HqS) · [dsh 插件 2 群](https://qm.qq.com/q/HCtId2UY4q)
 
 代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。
