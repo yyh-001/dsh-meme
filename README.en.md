@@ -20,14 +20,11 @@
 ## Features
 
 - **Click to send**: open 😊 beside the composer, search or filter by pack and mood, then pick an image.
-- **View a larger image**: click a meme in chat; scroll to zoom, double-click to reset, and press Esc or click the background to close.
-- **Chat with memes**: say “send a happy meme” or “find a cat making a heart”, or search by mood/keyword. Web chats render a text marker as an image (no image-input support needed).
 - **Proactive memes**: the AI picks a meme that fits the conversation's mood without waiting to be asked; toggle “Proactive memes” or edit the prompt in settings.
 - **IM / mobile**: through dsh-im, QQ / WeChat / Feishu and other IM chats send memes as native images with no text marker; on a phone or tablet, open DSH Web over your computer's LAN IP and turn on “Allow LAN access” (off by default).
 - **Learn new images**: upload an image and ask to save it; the AI identifies its category and caption. You can also drop image files into a pack folder and click “扫描新增 (Scan)” — the original bytes (including animated GIFs) are kept, and renamed/deleted files have their stale index rows cleaned up.
 - **Organize packs**: ask the AI to “list my memes”, “find duplicates” or “recategorize this one” — the `meme_list` / `meme_update` tools handle it (deleting stays in the panel to avoid accidents).
 - **Manage and share**: enable multiple packs, upload and edit images, import/export ZIPs, and install or update marketplace packs.
-- **Collections survive updates**: uploads and learned images go to the “我的收藏 (My Favorites)” pack under `~/.dsh/meme-packs`, outside the plugin package that updates replace.
 - **Ready to use**: includes Big Fat Fish (24 images), with no third-party runtime dependencies; uses Node's built-in SQLite.
 
 ## Promo video
