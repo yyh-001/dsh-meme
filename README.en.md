@@ -20,7 +20,8 @@
 ## Features
 
 - **Click to send**: open 😊 beside the composer, search or filter by pack and mood, then pick an image.
-- **Chat with memes**: the AI searches by mood or keyword. Web chats render a text marker as an image (no image-input support needed); QQ / WeChat and other IM chats switch to native image delivery through dsh-im.
+- **View a larger image**: click a meme in chat; scroll to zoom, double-click to reset, and press Esc or click the background to close.
+- **Chat with memes**: say “send a happy meme” or “find a cat making a heart”, or search by mood/keyword. Web chats render a text marker as an image (no image-input support needed); QQ / WeChat and other IM chats switch to native image delivery through dsh-im.
 - **Learn new images**: upload an image and ask to save it; the AI identifies its category and caption. You can also drop image files into a pack folder and click “扫描新增 (Scan)” — the original bytes (including animated GIFs) are kept, and renamed/deleted files have their stale index rows cleaned up.
 - **Organize packs**: ask the AI to “list my memes”, “find duplicates” or “recategorize this one” — the `meme_list` / `meme_update` tools handle it (deleting stays in the panel to avoid accidents).
 - **Manage and share**: enable multiple packs, upload and edit images, import/export ZIPs, and install or update marketplace packs.
@@ -70,19 +71,9 @@ If you are updating from a version **before 0.1.59** and the update already fail
 
 If updating still fails on 0.1.59 or later, the lock comes from outside the plugin, so please report the profile directory and the full `exit 1` context to the DSH marketplace. The regression test `test/update-lock.test.mjs` simulates the pnpm rename to keep this fixed.
 
-## Get started
+## Screenshots
 
-| Goal | Action |
-| --- | --- |
-| Send a meme yourself | Click 😊 beside the composer and pick an image; search, multi-select filters and hover previews are available |
-| Ask the AI to send one | Say “send a happy meme” or “find a cat making a heart” |
-| Save a new image | Upload it and say “save this image to my meme pack”; automatic recognition requires an image-capable model |
-| Save an animated meme | Upload a GIF from the panel, or drop it into a pack folder and click “Scan” — the animation is preserved. Chatting a GIF to the AI flattens it to a single frame (host attachment service behaviour), so don't use that path for animated memes |
-| Organize a pack | Ask the AI to “list my memes”, “find duplicates” or “recategorize this one”; deleting stays in the panel |
-| Phone / tablet | Turn on “Allow LAN access” in settings and open DSH Web via your computer's LAN IP (same Wi-Fi) |
-| View a larger image | Click a meme in chat; scroll to zoom, double-click to reset, and press Esc or click the background to close |
-
-In chat: send a meme, and the AI replies with one.
+You send one, the AI replies with one.
 
 <p align="center">
   <img src="./docs/chat-example.png" alt="Meme exchange: the user teases Big Fat Fish, and the AI replies with a meme" width="80%" />
