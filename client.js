@@ -2126,6 +2126,70 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 悬浮预览的视口钳制(issue #55):fixed 浮层的屏幕坐标不一定等于写进去的 left/top ——
+     * 祖先带 transform / zoom / filter / contain 时,fixed 改为相对那一层定位,整体产生偏移,
+     * 而且越靠窗口右边累积越多(「最右两列出问题、左边没事」就是这条);另外换内容那一帧量到
+     * 的尺寸也未必是最新的,按它算 maxTop 会偏大。
+     *
+     * 所以不拿「算出来的位置」判断越界:写下去之后量真实矩形(视口坐标),把越出视口的部分
+     * 算成修正量,由调用方加到 left/top 上、迭代几轮收敛。量到的就是真实屏幕位置,不需要知道
+     * 外面有没有 transform。返回 { dx, dy, done },done 为真表示已经在视口内。
+     */
+    function previewClampOffset(rect, viewport, margin) {
+      const vw = Number(viewport && viewport.width) || 0
+      const vh = Number(viewport && viewport.height) || 0
+      const gap = Number.isFinite(Number(margin)) ? Math.max(0, Number(margin)) : 8
+      const out = { dx: 0, dy: 0, done: true }
+      if (!rect || (!vw && !vh)) return out
+      const left = Number(rect.left) || 0
+      const top = Number(rect.top) || 0
+      // 全 0 的矩形 = 还没进布局(挂载那一帧):别拿它当「贴着左上角」去挪,等下一帧再量
+      const rw = (Number(rect.right) || 0) - left
+      const rh = (Number(rect.bottom) || 0) - top
+      if (!(rw > 0) && !(rh > 0)) return out
+      if (vw) {
+        let dx = 0
+        const overR = (Number(rect.right) || 0) - (vw - gap)
+        if (overR > 0) dx = -overR
+        else if (gap - left > 0) dx = gap - left
+        // 比视口还宽:左缘贴边就够了,再往右推只会把右边挤出去
+        if (left + dx < gap) dx = gap - left
+        out.dx = Math.round(dx)
+      }
+      if (vh) {
+        let dy = 0
+        const overB = (Number(rect.bottom) || 0) - (vh - gap)
+        if (overB > 0) dy = -overB
+        else if (gap - top > 0) dy = gap - top
+        // 比视口还高:上缘贴边,优先保住大图那一头
+        if (top + dy < gap) dy = gap - top
+        out.dy = Math.round(dy)
+      }
+      out.done = !out.dx && !out.dy
+      return out
+    }
+
+    /**
+     * 把「量真实矩形 → 减掉越界量」迭代到收敛。写进去的 left/top 只是起点,最终位置完全由
+     * 实测矩形决定;返回收敛后的 left/top。
+     * 默认三轮:坐标系没被缩放时第一轮就 break;祖先带 zoom(写进去的值按比例放大/缩小)时,
+     * 每轮残差按比例缩一截,两轮还会剩几个像素,三轮基本归零。
+     * 单独抽出来是为了能直接回归测试:假 el 按「写进去的值 × 缩放 + 祖先偏移」算矩形,就能验证
+     * 「越靠右偏移越大」「换内容后变高」「zoom 缩放坐标系」三种情况都能收进视口(issue #55)。
+     */
+    function clampPreviewElement(el, viewport, rounds) {
+      const n = Number(rounds) > 0 ? Math.floor(Number(rounds)) : 3
+      const px = (v) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0 }
+      for (let k = 0; k < n; k++) {
+        const off = previewClampOffset(el.getBoundingClientRect(), viewport, 8)
+        if (off.done) break
+        if (off.dx) el.style.left = (px(el.style.left) + off.dx) + 'px'
+        if (off.dy) el.style.top = (px(el.style.top) + off.dy) + 'px'
+      }
+      return { left: px(el.style.left), top: px(el.style.top) }
+    }
+
+    /**
      * 指针是否还停在「当前格子 ∪ 预览框」里(4px 容差,避免贴边移动时抖动)。
      * 预览框也算停留区,否则从格子挪到大图上预览会闪掉。
      */
@@ -2256,10 +2320,15 @@ window.__ModuleLoader__.load({
         const el = previewRef.current
         if (!hover || !el || !hover.cellRect) { keepRef.current = null; return }
         try {
+          const vp = { width: viewport('w'), height: viewport('h') }
           const rect = el.getBoundingClientRect()
-          const pos = previewPosition(hover.cellRect, rect, { width: viewport('w'), height: viewport('h') })
+          const pos = previewPosition(hover.cellRect, rect, vp)
           el.style.left = pos.left + 'px'
           el.style.top = pos.top + 'px'
+          // 上面用的 rect 是上一帧的尺寸,而 fixed 浮层在带 transform/zoom 的祖先下坐标还会
+          // 整体偏移(issue #55,越靠窗口右边偏得越多)。所以不再用算出来的值判断越界:写下去
+          // 之后量真实矩形,把越出视口的那部分减回来,迭代收敛(坐标系没被缩放时第一轮就够)。
+          clampPreviewElement(el, vp, 3)
           keepRef.current = [hover.cellRect, el.getBoundingClientRect()]
         } catch (e) { keepRef.current = null }
       }
@@ -3127,7 +3196,7 @@ window.__ModuleLoader__.load({
       foldCaption, looseCaption, splitDescTokens, buildMemeIndex, buildMemeSearch, matchDesc, compareVersions,
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
-      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, inKeepZone, uniqueKeys,
+      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, previewClampOffset, clampPreviewElement, inKeepZone, uniqueKeys,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }

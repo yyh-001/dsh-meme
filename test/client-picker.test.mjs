@@ -91,7 +91,7 @@ globalThis.fetch = async (url) => {
 await import('../client.js')
 
 const {
-  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, inKeepZone, uniqueKeys,
+  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, previewClampOffset, clampPreviewElement, inKeepZone, uniqueKeys,
 } = globalThis.__dshMeme.__test
 
 // ---------- ① 多选筛选:范围 / 计数 / 交集 ----------
@@ -214,6 +214,97 @@ test('悬浮预览:垂直按实测高度钳制,最下面一排不被裁掉', () 
   assert.equal(previewPosition({ left: 10, top: 700, right: 86, bottom: 776 }, size, { width: 900, height: 800 }).top, 608)
   // 窗口特别矮也不能跑到负坐标
   assert.equal(previewPosition({ left: 10, top: 700, right: 86, bottom: 776 }, size, { width: 900, height: 200 }).top, 8)
+})
+
+test('悬浮预览:换内容后变高,按新的实测高度往上收', () => {
+  // 上一帧量到 184,这一帧实际 260(描述长了一截):仍要按 260 收
+  assert.equal(previewPosition({ left: 10, top: 700, right: 86, bottom: 776 }, { width: 176, height: 260 }, { width: 900, height: 800 }).top, 532)
+})
+
+// ---------- ②-1 issue #55:浮层按「写下去之后的真实矩形」钳制 ----------
+
+test('悬浮预览:算出来的位置越界 → 按真实矩形减回去', () => {
+  const vp = { width: 900, height: 800 }
+  // 已经放得下:一个像素都不动
+  assert.deepEqual(previewClampOffset({ left: 100, top: 100, right: 276, bottom: 284 }, vp), { dx: 0, dy: 0, done: true })
+  // 右缘 1000 越过 892(900 - 8):整体往左收 108
+  assert.deepEqual(previewClampOffset({ left: 824, top: 100, right: 1000, bottom: 284 }, vp), { dx: -108, dy: 0, done: false })
+  // 左缘跑到窗口外:往右推回 8
+  assert.deepEqual(previewClampOffset({ left: -40, top: 100, right: 136, bottom: 284 }, vp), { dx: 48, dy: 0, done: false })
+  // 下缘 900 越过 792:往上一块
+  assert.deepEqual(previewClampOffset({ left: 100, top: 716, right: 276, bottom: 900 }, vp), { dx: 0, dy: -108, done: false })
+  // 比视口还高的内容:上缘贴边,不再往下推(否则会跟下缘来回抖)
+  assert.deepEqual(previewClampOffset({ left: 100, top: 300, right: 276, bottom: 1500 }, vp), { dx: 0, dy: -292, done: false })
+  // 尺寸窗口都量不到:不动也不炸
+  assert.deepEqual(previewClampOffset(null, vp), { dx: 0, dy: 0, done: true })
+  assert.deepEqual(previewClampOffset({ left: 900, top: 900, right: 1000, bottom: 1000 }, { width: 0, height: 0 }), { dx: 0, dy: 0, done: true })
+  // 全 0 矩形 = 还没进布局,别当成「贴左上角」去挪
+  assert.deepEqual(previewClampOffset({ left: 0, top: 0, right: 0, bottom: 0 }, vp), { dx: 0, dy: 0, done: true })
+})
+
+// 假预览:真实矩形 = 写进去的 left/top × 祖先 zoom 的缩放 + 祖先 transform 造成的整体偏移。
+// 两种失真叠在一起,就是 issue #55 里「越靠右越飘出去」的现场。
+const fakePreview = ({ width = 176, height = 184, offsetX = 0, offsetY = 0, scale = 1 }) => {
+  const box = { left: 0, top: 0 }
+  return {
+    box,
+    style: {
+      get left() { return box.left + 'px' },
+      set left(v) { box.left = parseFloat(v) },
+      get top() { return box.top + 'px' },
+      set top(v) { box.top = parseFloat(v) },
+    },
+    getBoundingClientRect() {
+      const left = box.left * scale + offsetX
+      const top = box.top * scale + offsetY
+      return { left, top, right: left + width * scale, bottom: top + height * scale }
+    },
+  }
+}
+
+test('悬浮预览:最右一列被祖先 transform 推出窗口,迭代后收进视口', () => {
+  const vp = { width: 600, height: 700 }
+  // 算出来的 left=560(贴着右缘),祖先又整体往右推 320 → 实际右缘 1056,几乎全在窗口外
+  const el = fakePreview({ offsetX: 320 })
+  el.style.left = '560px'
+  el.style.top = '120px'
+  clampPreviewElement(el, vp, 3)
+  const r = el.getBoundingClientRect()
+  assert.ok(r.right <= 600 - 8, '右缘要收进视口,实际 ' + r.right)
+  assert.ok(r.left >= 8, '左缘不能跑出去,实际 ' + r.left)
+})
+
+test('悬浮预览:右下角那一格(又矮又靠右)上下左右都收进视口', () => {
+  const vp = { width: 600, height: 400 }
+  const el = fakePreview({ height: 260, offsetX: 40, offsetY: 30 })
+  el.style.left = '520px'
+  el.style.top = '330px'   // 算位置时按 184 高算的,实际换成 260 高的内容
+  clampPreviewElement(el, vp, 3)
+  const r = el.getBoundingClientRect()
+  assert.ok(r.right <= 600 - 8 && r.left >= 8, '水平方向收进视口:' + r.left + '~' + r.right)
+  assert.ok(r.bottom <= 400 - 8 && r.top >= 8, '垂直方向收进视口:' + r.top + '~' + r.bottom)
+})
+
+test('悬浮预览:祖先带 zoom 把坐标系放大,写进去的值和量到的位置不等价也能收进视口', () => {
+  const vp = { width: 600, height: 700 }
+  // zoom 1.25:left=560 在屏幕上变成 700(右缘 920),比视口还宽出去一大截
+  const el = fakePreview({ scale: 1.25 })
+  el.style.left = '560px'
+  el.style.top = '120px'
+  const before = el.getBoundingClientRect()
+  assert.ok(before.right > 600, '先确认这个坐标确实在窗口外')
+  clampPreviewElement(el, vp, 3)
+  const r = el.getBoundingClientRect()
+  assert.ok(r.right <= 600 - 8 && r.left >= 8, '缩放坐标系下也要收进视口:' + r.left + '~' + r.right)
+})
+
+test('悬浮预览:已经在视口内就不动(不引入抖动)', () => {
+  const vp = { width: 900, height: 800 }
+  const el = fakePreview({})
+  el.style.left = '186px'
+  el.style.top = '98px'
+  const out = clampPreviewElement(el, vp, 3)
+  assert.deepEqual(out, { left: 186, top: 98 })
 })
 
 test('停留区 = 当前格子 ∪ 预览框,带 4px 容差', () => {
