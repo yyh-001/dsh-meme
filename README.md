@@ -30,6 +30,16 @@
 - **手机也能看**：手机/平板经电脑局域网 IP 打开 DSH Web，设置页打开「局域网访问图库」即可加载表情包（默认关，见下文）。
 - **开箱即用**：内置大肥鱼图库（24 张），零第三方运行依赖，使用 Node 内置 SQLite。
 
+## 宣传视频
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1ZWnF6EEAa">
+    <img src="./docs/promo-video-cover.jpg" alt="dsh-meme 宣传视频（B 站）" width="720" />
+  </a>
+  <br />
+  <a href="https://www.bilibili.com/video/BV1ZWnF6EEAa">▶ 在 B 站观看（56 秒）</a>
+</p>
+
 ## 安装
 
 在 DSH 中打开 **插件 → 添加插件**，输入 `dsh-meme` 并安装。

@@ -30,6 +30,16 @@
 - **Phones and tablets**: open DSH Web over your computer's LAN IP and turn on “Allow LAN access” in settings (off by default).
 - **Ready to use**: includes Big Fat Fish (24 images), with no third-party runtime dependencies; uses Node's built-in SQLite.
 
+## Promo video
+
+<p align="center">
+  <a href="https://www.bilibili.com/video/BV1ZWnF6EEAa">
+    <img src="./docs/promo-video-cover.jpg" alt="dsh-meme promo video (Bilibili)" width="720" />
+  </a>
+  <br />
+  <a href="https://www.bilibili.com/video/BV1ZWnF6EEAa">▶ Watch on Bilibili (56s)</a>
+</p>
+
 ## Install
 
 In DSH, open **插件 (Plugins) → 添加插件 (Add plugin)**, enter `dsh-meme`, and install.
