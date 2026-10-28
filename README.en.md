@@ -160,6 +160,23 @@ For custom catalogs and pack formats, see the [remote pack specification](./docs
 
 Replace `C:\Users\<you>` with `~` on Linux/macOS. Add whichever directories hold your packs; `send_meme` picks from every enabled pack, so include the bundled pack's path too.
 
-Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`) by default. To view memes from a phone or tablet over the LAN, turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default) — only IP literals are allowed (loopback, RFC1918 private ranges, link-local); hostname Hosts are always rejected (DNS-rebinding defence). Remember to open the port in your firewall.
+Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1]`) by default. To view memes from a phone or tablet over the LAN, turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default) — only IP literals are allowed (loopback, RFC1918 private ranges, link-local). Remember to open the port in your firewall.
+
+Behind a **reverse proxy** (browser → `https://your.domain` → nginx/frp → `127.0.0.1:2233`) the Host is your own domain, so declare it explicitly (issue #56; the list is empty by default and behaviour is unchanged):
+
+```bash
+# Environment variable: no profile edits needed for containers/reverse proxies
+DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
+```
+
+```yaml
+# Or in the profile's cordis.patch.yml
+- id: dsh-expression
+  config:
+    allowedHosts:
+      - feiyu.example.com
+```
+
+Matching is exact (case/port/trailing dot insensitive, no wildcards); hosts not on the list are still rejected, so the DNS-rebinding defence is unchanged. The plugin has no authentication of its own — put login/access control in front of the proxy domain.
 
 Code is licensed under [MIT](./LICENSE). Check each pack separately for image provenance and usage rights.

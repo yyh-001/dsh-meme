@@ -55,6 +55,45 @@ function crc32(buf) {
 // 这个头由浏览器按**实际连接目标**写,rebinding 时它就是攻击者的域名,直接落选。
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 
+// 反向代理部署(issue #56):Host 是运维自己的域名,不是回环字面量。默认空 = 行为
+// 完全不变;只信任显式写死的域名/主机名。DNS rebinding 时 Host 一定是攻击者的
+// 域名,只要白名单里没有它,防线照样成立。
+const TRUSTED_HOSTS = new Set()
+
+/**
+ * 归一化 Host/白名单项:小写、去掉误写的 scheme 与路径、去掉端口、去掉末尾点。
+ * IPv6 字面量保留方括号(如 `[::1]`),裸 IPv6 请按 URL 习惯加括号。
+ */
+function hostNameOf(value) {
+  let text = String(value || '').trim().toLowerCase()
+  if (!text) return ''
+  text = text.replace(/^[a-z][a-z0-9+.-]*:\/\//, '')
+  const slash = text.indexOf('/')
+  if (slash >= 0) text = text.slice(0, slash)
+  const name = text.startsWith('[') ? text.slice(0, text.indexOf(']') + 1) : text.split(':')[0]
+  return name.endsWith('.') ? name.slice(0, -1) : name
+}
+
+/**
+ * 追加可信 Host(反代部署,issue #56)。value 支持逗号分隔字符串或数组;
+ * 端口/大小写/末尾点不敏感,只做精确主机名匹配(不支持通配符)。
+ */
+export function addTrustedHosts(value) {
+  const list = Array.isArray(value) ? value : String(value || '').split(',')
+  for (const item of list) {
+    const name = hostNameOf(item)
+    if (name) TRUSTED_HOSTS.add(name)
+  }
+  return TRUSTED_HOSTS
+}
+
+/** 请求的 Host 是否在显式可信名单里(默认空名单 → 永远 false)。 */
+export function hostIsTrusted(req) {
+  const raw = String((req && req.headers && req.headers.host) || '')
+  if (!raw) return false
+  return TRUSTED_HOSTS.has(hostNameOf(raw))
+}
+
 /** 私有网段 IPv4(10/8、172.16/12、192.168/16、169.254/16) */
 const isPrivateV4 = (ip) => {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip)
@@ -72,8 +111,7 @@ const isPrivateV4 = (ip) => {
 export function hostIsLoopback(req) {
   const raw = String((req && req.headers && req.headers.host) || '')
   if (!raw) return true
-  const name = raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.split(':')[0]
-  return LOOPBACK_HOSTS.has(name.toLowerCase())
+  return LOOPBACK_HOSTS.has(hostNameOf(raw))
 }
 
 /**
@@ -84,7 +122,7 @@ export function hostIsLoopback(req) {
 export function hostIsLocalLan(req) {
   const raw = String((req && req.headers && req.headers.host) || '')
   if (!raw) return true
-  const name = (raw.startsWith('[') ? raw.slice(0, raw.indexOf(']') + 1) : raw.split(':')[0]).toLowerCase()
+  const name = hostNameOf(raw)
   if (LOOPBACK_HOSTS.has(name)) return true
   if (name.startsWith('[')) {
     // [::1] / [fe80::x%eth0] / [fd..] / [fc..]
@@ -98,12 +136,14 @@ export function hostIsLocalLan(req) {
  * 不是允许的来源就自己回 403 并返回 true,调用方直接 return。
  * allowLan = 设置页「允许局域网访问图库」开关(默认关):打开后本机/局域网 IP
  * 字面量的 Host 也放行,手机、平板才能看到表情包(issue #54);关闭时行为与旧版一致。
- * 域名形式的 Host 在两种情况下都拒绝(DNS rebinding 防线)。
+ * 显式配置的可信域名(DSH_MEME_TRUSTED_HOSTS / config.allowedHosts)始终放行(issue #56),
+ * 用于反向代理部署;名单为空时域名形式的 Host 仍拒绝(DNS rebinding 防线)。
  */
 export function denyNonLoopback(req, res, allowLan = false) {
   if (hostIsLoopback(req)) return false
+  if (hostIsTrusted(req)) return false
   if (allowLan && hostIsLocalLan(req)) return false
-  const body = JSON.stringify({ ok: false, error: '拒绝: 只接受本机(回环地址)请求。手机/局域网访问请在设置页打开「允许局域网访问图库」' })
+  const body = JSON.stringify({ ok: false, error: '拒绝: 只接受本机(回环地址)请求。手机/局域网访问请在设置页打开「允许局域网访问图库」;反向代理域名请用 DSH_MEME_TRUSTED_HOSTS 或插件配置 allowedHosts 显式声明。' })
   res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(body)
   return true
@@ -499,6 +539,10 @@ export function registerToolWhenReady(ctx, label, register, options = {}) {
 }
 
 export function apply(ctx, config) {
+  // 反代部署(issue #56):可信 Host 来自环境变量与 patch 配置,默认空 = 行为不变。
+  // 环境变量适合容器/反代场景(不用改 profile),配置项适合写进 cordis.patch.yml。
+  addTrustedHosts(process.env.DSH_MEME_TRUSTED_HOSTS)
+  addTrustedHosts(config && config.allowedHosts)
   // 图库目录设置存 ~/.dsh(稳定,不受包升级/图库变化影响):
   // 优先级 用户设置(settings) > patch 配置(config.memeRoot) > 包内默认
   // 插件版本:反馈表单预填要用(从包内 package.json 读,不写死在代码里)

@@ -168,6 +168,23 @@ meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 
 `C:\Users\<你>` 在 Linux/macOS 上换成 `~`。图库放哪就把哪个目录加进去；`send_meme` 可以跨所有启用的图库取图，所以内置图库的路径也要加。
 
-插件 HTTP 接口默认只接受本机回环地址（`localhost` / `127.0.0.1` / `[::1]`）。手机/平板通过电脑的局域网 IP 访问 DSH Web 时，在插件设置页打开 **「局域网访问图库」**（默认关）即可加载表情包——只放行 IP 字面量（回环/私有网段/链路本地），域名形式的 Host 始终拒绝（防 DNS rebinding）；记得系统防火墙放行该端口。
+插件 HTTP 接口默认只接受本机回环地址（`localhost` / `127.0.0.1` / `[::1]`）。手机/平板通过电脑的局域网 IP 访问 DSH Web 时，在插件设置页打开 **「局域网访问图库」**（默认关）即可加载表情包——只放行 IP 字面量（回环/私有网段/链路本地）；记得系统防火墙放行该端口。
+
+**反向代理部署**（浏览器 → `https://你的域名` → nginx/frp → `127.0.0.1:2233`）时 Host 是你的域名，需要显式声明可信域名（issue #56；默认空名单，行为完全不变）：
+
+```bash
+# 环境变量：容器/反代场景不用改 profile
+DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
+```
+
+```yaml
+# 或 profile 的 cordis.patch.yml
+- id: dsh-expression
+  config:
+    allowedHosts:
+      - feiyu.example.com
+```
+
+只做精确主机名匹配（大小写、端口、末尾点不敏感，不支持通配符）；没写进名单的域名仍然拒绝，DNS rebinding 防线不变。插件本身没有鉴权，反代域名务必由代理层做登录/访问控制。
 
 代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。
