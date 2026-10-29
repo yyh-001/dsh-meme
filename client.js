@@ -368,6 +368,9 @@ window.__ModuleLoader__.load({
       const [qqSendResize, setQqSendResize] = React.useState(false)
       const [qqSendEdge, setQqSendEdge] = React.useState(300)
       const [qqSendResizeSupported, setQqSendResizeSupported] = React.useState(true)
+      // 发图概率:打开后每轮按概率决定是否主动发图(仅「自动」发送方式);默认关
+      const [sendChanceOn, setSendChanceOn] = React.useState(false)
+      const [sendChance, setSendChance] = React.useState(30)
       // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
       const [layoutMode, setLayoutMode] = React.useState('inline')
       // 局域网访问图库(issue #54):默认仅本机;打开后手机/平板经局域网 IP 才能加载表情包
@@ -384,6 +387,8 @@ window.__ModuleLoader__.load({
         setQqSendEdge([200, 300, 400, 450].includes(Number(res.qqSendEdge)) ? Number(res.qqSendEdge) : 300)
         if (res.qqSendResizeSupported === false) setQqSendResizeSupported(false)
         else if (res.qqSendResizeSupported === true) setQqSendResizeSupported(true)
+        setSendChanceOn(res.sendChanceEnabled === true)
+        setSendChance(Number.isFinite(Number(res.sendChance)) ? Math.max(0, Math.min(100, Math.round(Number(res.sendChance)))) : 30)
         // 排布设置(old host 不带该字段,按默认并排处理),同时回写模块级状态
         // 让气泡装饰即时翻新(issue #50)
         setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
@@ -797,6 +802,41 @@ window.__ModuleLoader__.load({
           }
         } catch (e) {
           setQqSendEdge(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // 发图概率:开关/概率立即保存(不需要「保存」按钮),失败回滚
+      const onToggleSendChance = async (next) => {
+        const prev = sendChanceOn
+        setSendChanceOn(next)
+        try {
+          const res = await apiPost({ op: 'setSendChance', enabled: next, chance: sendChance })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || (next ? '已开启发图概率' : '已关闭发图概率'))
+          } else {
+            setSendChanceOn(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setSendChanceOn(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      const onPickSendChance = async (chance) => {
+        const prev = sendChance
+        setSendChance(chance)
+        try {
+          const res = await apiPost({ op: 'setSendChance', enabled: sendChanceOn, chance })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || '已更新发图概率')
+          } else {
+            setSendChance(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setSendChance(prev)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
@@ -1624,6 +1664,34 @@ window.__ModuleLoader__.load({
             : qqSendResize
               ? 'QQ/IM 发图前把长边缩到 ' + qqSendEdge + 'px,Web 聊天仍用原图;GIF 保留动画。QQ 更容易按表情渲染,平板端不会拉伸满屏'
               : '保持原图发送。QQ 官方机器人没有表情类型,大图会被当图片消息;打开后缩到 200-450px 更容易被识别成表情'),
+        // 发图概率:每轮(一条用户消息)由插件抽签,命中才允许 AI 主动发图;
+        // 默认关 = 维持原来的「按提示词自由发挥」,用户明确要图时不受概率限制
+        h('div', { className: 'section-title' }, '发图概率'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('span', {
+            className: 'switch' + (sendChanceOn ? ' on' : ''),
+            title: sendChanceOn ? '点击关闭:恢复按提示词自由发图' : '点击开启:每轮按概率决定是否主动发图',
+            onClick: () => onToggleSendChance(!sendChanceOn),
+          }),
+          h('span', { style: { fontSize: 12 } }, sendChanceOn ? '按概率发图' : '不限概率'),
+          h('select', {
+            value: sendChance,
+            onChange: (e) => onPickSendChance(Number(e.target.value)),
+            disabled: !sendChanceOn,
+            title: '每轮主动发图的概率;用户明确要图时不受限制',
+            style: { width: 110, marginLeft: 8 },
+          },
+            // 选项与 memes.js 的 SEND_CHANCE_OPTIONS 一致;手改设置里的非预设值也回显出来
+            [...new Set([0, 10, 20, 30, 50, 70, 100, sendChance])].sort((a, b) => a - b)
+              .map((n) => h('option', { key: n, value: n }, n + '%')),
+          ),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          !sendChanceOn
+            ? '默认不限制:AI 按提示词自己决定发不发图'
+            : sendChance === 0
+              ? '每轮都不主动发图,只在你明确要图时才发'
+              : '每轮按 ' + sendChance + '% 概率决定是否主动发图;你明确要图时不受概率限制。仅在「发送方式 = 自动」且开启陪伴提示词时生效'),
         // 表情排布:图文同条时怎么排,只影响前端渲染,默认并排不改已有观感(issue #50)
         h('div', { className: 'section-title' }, '表情排布'),
         h('div', { className: 'row', style: { width: '100%' } },

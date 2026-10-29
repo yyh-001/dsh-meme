@@ -648,6 +648,20 @@ export function normalizeSendMode(value) {
 }
 
 /**
+ * 发图概率(设置页「发图概率」):0-100 的整数百分比,默认 30%。
+ * 只在「发送方式 = 自动」且开启陪伴提示词时生效——每轮(一条用户消息)由插件
+ * 掷一次骰子,命中才允许 AI 主动发图;用户明确要图时不受概率限制。
+ */
+export const DEFAULT_SEND_CHANCE = 30
+export const SEND_CHANCE_OPTIONS = [0, 10, 20, 30, 50, 70, 100]
+export function normalizeSendChance(value) {
+  if (value == null || value === '') return DEFAULT_SEND_CHANCE
+  const n = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(n)) return DEFAULT_SEND_CHANCE
+  return Math.max(0, Math.min(100, Math.round(n)))
+}
+
+/**
  * 表情排布方式(设置页「表情排布」下拉框,issue #50):
  * - inline(默认):图与正文并排——图提到消息行行首,正文在右,短消息紧凑;
  * - stacked:图独占一行在上,正文按正常宽度铺开在下,阅读宽度完整。
@@ -790,6 +804,9 @@ export function movePackEntries(srcRoot, dstRoot, paths) {
  *   判断某个会话本轮来自哪个 IM 渠道(dsh-im 可用时由 index.js 传入;返回 null = 非 IM 或能力缺失)
  * @param {boolean} [options.imReady] 注册时 dsh-im 是否已在进程内(只影响工具描述措辞)
  * @param {() => string} [options.sendMode] 运行时读发送方式设置(auto/text/image)
+ * @param {(session: object) => boolean | null} [options.proactiveGate]
+ *   发图概率:本轮抽签结果。false = 未命中(只回文字);true/null = 不限制。
+ *   index.js 会缓存同一轮的抽签结果,所以同一轮多次调 send_meme 结果一致。
  * @param {() => Array<{tag: string, count: number}> | null} [options.tagStats]
  *   跨启用图库的分类统计(按张数降序)。搜索没命中时用它给模型真实的换词建议,
  *   而不是只甩一串静态情绪字典(issue #53)。
@@ -812,6 +829,13 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
   const prepareSendPath = typeof options.prepareSendPath === 'function' ? options.prepareSendPath : null
   /** 运行时的发送方式设置(auto/text/image):每次执行读一次,设置改了下一条消息就生效 */
   const sendModeOf = typeof options.sendMode === 'function' ? options.sendMode : () => 'auto'
+  /** 发图概率:index.js 注入的每轮抽签回调;null = 没有这项设置 */
+  const proactiveGateOf = typeof options.proactiveGate === 'function' ? options.proactiveGate : null
+  /** 本轮是否被发图概率拦下(只在「自动」发送方式下有意义) */
+  const chanceBlockedFor = (session) => {
+    if (!proactiveGateOf) return false
+    try { return proactiveGateOf(session) === false } catch { return false }
+  }
   /** 跨启用图库的分类统计(张数降序);没有就退回静态情绪字典 */
   const tagStatsOf = typeof options.tagStats === 'function' ? options.tagStats : () => null
   /** 没命中时给模型的换词建议:真实分类统计优先,拉不到才用静态情绪字典(issue #53) */
@@ -875,6 +899,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       const sendMode = normalizeSendMode(sendModeOf())
       const textMode = sendMode === 'text'
       const imageMode = sendMode === 'image'
+      // 发图概率只约束「自动」模式下的主动发图;纯文字本来就不发,图片模式要求每次真发。
+      const chanceBlocked = !textMode && !imageMode && chanceBlockedFor(exec?.agent?.session)
 
       if (action === 'send') {
         if (textMode) {
@@ -963,14 +989,23 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           ? rows.map((m, i) => ({ caption: captionOf(m), path: m.path, absPath: sendable(i), library: libraryOf(m) }))
           : rows.map((m, i) => ({ path: m.path, absPath: sendable(i), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
+      // 发图概率未命中:工具结果也要跟系统提示保持一致,否则模型看着候选行照发。
+      // 用户明确要图时不拦——提示里保留主动发图以外的正常投递方式。
+      const chanceNote = chanceBlocked
+        ? '本轮发图概率抽签未命中:不要主动发表情图片,用文字接梗即可;只有用户明确要求发表情/发图/斗图时才照常发。'
+        : ''
       const howToSend = textMode
         ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file 或 qqbot_send_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
-        : (imageMode ? '当前发送方式是「图片」:挑好图就必须真的发出去,不能只写文字描述。' : '') +
+        : chanceNote +
+          (imageMode ? '当前发送方式是「图片」:挑好图就必须真的发出去,不能只写文字描述。' : '') +
           (imMode
-            ? '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)——它会作为 ' + imLabel +
-              ' 原生图片消息发出;不用等用户要求,现在就能主动发。回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
+            ? (chanceBlocked ? '发图:只在用户明确要图时,把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)' : '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)') +
+              '——它会作为 ' + imLabel +
+              ' 原生图片消息发出' + (chanceBlocked ? '。' : ';不用等用户要求,现在就能主动发。') +
+              '回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
             : webMode
-              ? '发图:把下面某一行的 [表情: ...] 整段原样写进回复(描述抄候选原文,可加一两句文字,不要加网址)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。' +
+              ? (chanceBlocked ? '发图:只在用户明确要图时,把下面某一行的 [表情: ...] 整段原样写进回复' : '发图:把下面某一行的 [表情: ...] 整段原样写进回复') +
+                '(描述抄候选原文,可加一两句文字,不要加网址)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。' +
                 '如果本会话的工具表里有 qqbot_send_file(QQ 官方机器人的 dsh-qqbot 插件),说明当前是 QQ 机器人会话:此时不要写 [表情: ...] 标记,把挑中候选的 absPath(绝对路径)原样传给 qqbot_send_file 的 file_path 参数发出,正文只写普通文字、不要贴路径;若它返回路径白名单拒绝,提示用户在 dsh-qqbot 配置的 sendFile.extraRoots 里加上图库目录(通常是 ~/.dsh/meme-packs)。'
               : '用 send + path 发出。')
 
