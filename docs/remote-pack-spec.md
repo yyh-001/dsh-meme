@@ -76,7 +76,7 @@
 }
 ```
 
-`archiveUrl` 指向插件「导出图库」生成的 ZIP（根目录含 `index.db`、`manifest.json`、`memes/`；STORE 与 DEFLATE 压缩均可）。插件下载后限制 ZIP ≤100MB，校验 `sha256`，并校验 ZIP 内 `manifest.json.id` 与目录 `id` 一致，再原子安装到用户扫描目录。旧版逐图下载条目仍可写成：
+`archiveUrl` 指向插件「导出图库」生成的 ZIP（根目录含 `index.db`、`manifest.json`、`memes/`；STORE 与 DEFLATE 压缩均可）。插件下载后限制 ZIP ≤200MB，校验 `sha256`，并校验 ZIP 内 `manifest.json.id` 与目录 `id` 一致，再原子安装到用户扫描目录。旧版逐图下载条目仍可写成：
 
 ```json
 {
@@ -126,7 +126,7 @@
 - `manifest.json` 里插件真正会读的是 `name` / `description` / `version` 三个字段；`maintainer` / `license` / `tags` / `source` 等只是给人和市场看的标注。
 - `tag` 建议用六个情绪桶 `happy / angry / sad / shy / confused / daily`，或桶内细类（`like` / `meow` / `givemoney` / `color` → happy，`sigh` → sad，`surprised` / `see` → confused，`sleep` / `morning` / `work` / `cpu` / `reply` → daily，`fool` / `baka` → angry）。**模型只认这六个桶**，桶外的分类搜不到。
 - 图片支持 `jpg/png/gif/webp`，单张 ≤8MB；`caption` 是命脉（模型按它选图、前端按它配图）。
-- 导出 ZIP 只打包索引里列到的图（不带 `.git`、备份、缩略图等杂物；STORE 与 DEFLATE 压缩均可解析）。导入校验：优先 `index.db`；纯图片 ZIP（无 `index.db`）会自动按目录名建索引导入；ZIP 内 `manifest.json.id` 与请求 id 不一致会拒绝；条目路径越界会拒绝。走市场的 ZIP 还要求 ≤100MB 并核对 `sha256`。
+- 导出 ZIP 只打包索引里列到的图（不带 `.git`、备份、缩略图等杂物；STORE 与 DEFLATE 压缩均可解析）。导入校验：优先 `index.db`；纯图片 ZIP（无 `index.db`）会自动按目录名建索引导入；ZIP 内 `manifest.json.id` 与请求 id 不一致会拒绝；条目路径越界会拒绝。走市场的 ZIP 还要求 ≤200MB 并核对 `sha256`。
 - `previews/` 目录**不是**插件需要的，那是宣传页/市场条目做预览图用的约定。
 
 ## 目录源覆盖

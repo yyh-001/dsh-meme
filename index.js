@@ -1583,7 +1583,9 @@ export function apply(ctx, config) {
     let remoteJobSeq = 0
     const REMOTE_MANIFEST_MAX = 2 * 1024 * 1024
     const REMOTE_IMAGE_MAX = 8 * 1024 * 1024
-    const REMOTE_ARCHIVE_MAX = 100 * 1024 * 1024
+    // 安装时整个 ZIP 会驻留内存(buffers + 解包条目),200MB 包约需 400MB 峰值;
+    // 这是插件自己的安全上限,不是 GitHub/QQ 的限制(Release 单附件上限 2GB)。
+    const REMOTE_ARCHIVE_MAX = 200 * 1024 * 1024
     const REMOTE_CONCURRENCY = 4
     const REMOTE_MAX_ITEMS = 500
     const PREVIEW_MAX = 60      // 预览弹窗最多列这么多张(清单包里可能上百张)
@@ -1823,8 +1825,8 @@ export function apply(ctx, config) {
       for (const u of assetMirrors(url)) {
         let res
         try {
-          // 大包给足 3 分钟(上限 100MB,慢链路也够)
-          res = await fetch(u, { signal: AbortSignal.timeout(180000), redirect: 'follow' })
+          // 大包给足 6 分钟(上限 200MB,慢链路也够)
+          res = await fetch(u, { signal: AbortSignal.timeout(360000), redirect: 'follow' })
         } catch (error) {
           lastError = shortFetchError(error)
           lastWasShaMismatch = false
@@ -1836,14 +1838,14 @@ export function apply(ctx, config) {
           continue
         }
         const declared = Number(res.headers.get('content-length') || 0)
-        if (declared > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 超过 100MB,拒绝处理')
+        if (declared > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 超过 200MB,拒绝处理')
         const chunks = []
         let size = 0
         try {
           if (res.body && typeof res.body[Symbol.asyncIterator] === 'function') {
             for await (const chunk of res.body) {
               size += chunk.length
-              if (size > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
+              if (size > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤200MB)')
               chunks.push(Buffer.from(chunk))
               if (onProgress) onProgress(size, declared)
             }
@@ -1860,7 +1862,7 @@ export function apply(ctx, config) {
           continue
         }
         const buf = Buffer.concat(chunks)
-        if (buf.byteLength === 0 || buf.byteLength > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤100MB)')
+        if (buf.byteLength === 0 || buf.byteLength > REMOTE_ARCHIVE_MAX) throw new Error('ZIP 大小超限(≤200MB)')
         const actual = createHash('sha256').update(buf).digest('hex')
         if (expected && actual !== expected) {
           lastError = 'SHA-256 不一致'
