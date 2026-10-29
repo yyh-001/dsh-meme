@@ -2,7 +2,7 @@ import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
 /**
@@ -30,6 +30,9 @@ const seedPack = (id, rows) => {
   const w = memesMod.openIndexWriter(dir)
   try {
     for (const [rel, tag, caption, keywords] of rows) {
+      const file = join(dir, rel)
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, Buffer.from([0xff, 0xd8, 0xff, 0xd9])) // 最小 JPEG 头尾,绝对路径可解析
       w.prepare('INSERT INTO memes (path, tag, file_name, caption, keywords, mtime, captioned_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(rel, tag, rel.split('/').pop(), caption, keywords, Date.now(), Date.now())
     }
@@ -93,18 +96,19 @@ test('#53-1 Web 候选 JSON 带 path/library 出处,用户可见行不含路径'
   assert.equal(r.ok, true, r.message)
   assert.ok(r.hits.length > 0)
   assert.ok(r.hits.every((h) => typeof h.path === 'string' && h.path.length > 0), 'hits 带 path')
+  assert.ok(r.hits.every((h) => isAbsolute(h.path)), 'path 是磁盘绝对路径(issue #59)')
   assert.ok(r.hits.every((h) => typeof h.library === 'string' && h.library.length > 0), 'hits 带所属图库')
   assert.match(r.libraryHint || r.message, /[\s\S]*/)
   assert.doesNotMatch(r.message, /path=/, '用户可见候选行不含路径')
   assert.match(r.message, /出处信息/, '发图说明讲清 path/library 只是出处')
 })
 
-test('#53-1 跨库时候选 library 标明出处,path 带包前缀(非激活库)', async () => {
+test('#53-1 跨库时候选 library 标明出处,path 是其它库的磁盘绝对路径', async () => {
   setSettings({ enabledPacks: ['main-pack', 'other-pack'] })
   const r = await sendMeme.execute({ query: '别家', limit: 4 }, webExec())
   assert.equal(r.ok, true, r.message)
   assert.equal(r.hits.length, 1)
-  assert.equal(r.hits[0].path, 'other-pack/memes/happy/x.gif', '非激活库 path 带前缀(与 send 约定一致)')
+  assert.equal(r.hits[0].path, resolve(otherDir, 'memes/happy/x.gif'), '非激活库 path 是绝对路径(issue #59)')
   assert.match(r.hits[0].library, /other-pack/)
   setSettings({})
 })
@@ -125,10 +129,13 @@ test('#53-3 meme_list:默认跨启用库,带 library/tag/caption/path;q/tag/pack
   assert.equal(all.total, 4)
   assert.equal(all.rows.length, 4)
   assert.ok(all.rows.every((r) => typeof r.library === 'string' && r.path))
-  const mainRows = all.rows.filter((r) => !r.path.startsWith('other-pack/'))
-  const otherRows = all.rows.filter((r) => r.path.startsWith('other-pack/'))
-  assert.equal(otherRows.length, 1, '非激活库 path 带前缀')
-  assert.equal(mainRows.length, 3, '激活库 path 不带包前缀')
+  assert.ok(all.rows.every((r) => isAbsolute(r.path)), 'meme_list path 是磁盘绝对路径(issue #59)')
+  const mainRoot = resolve(mainDir)
+  const otherRoot = resolve(otherDir)
+  const mainRows = all.rows.filter((r) => r.path.startsWith(mainRoot))
+  const otherRows = all.rows.filter((r) => r.path.startsWith(otherRoot))
+  assert.equal(otherRows.length, 1, '非激活库行指向其它包目录')
+  assert.equal(mainRows.length, 3, '激活库行指向激活包目录')
 
   const byQ = await memeList.execute({ q: '无语' }, webExec())
   assert.equal(byQ.total, 4)
@@ -140,7 +147,7 @@ test('#53-3 meme_list:默认跨启用库,带 library/tag/caption/path;q/tag/pack
 
   const byPack = await memeList.execute({ packId: 'other-pack' }, webExec())
   assert.equal(byPack.rows.length, 1)
-  assert.equal(byPack.rows[0].path, 'other-pack/memes/happy/x.gif')
+  assert.equal(byPack.rows[0].path, resolve(otherDir, 'memes/happy/x.gif'))
 
   const bad = await memeList.execute({ packId: 'nope' }, webExec())
   assert.equal(bad.ok, false)
@@ -164,6 +171,12 @@ test('#53-4 meme_update:改 caption/keywords/tag,只改索引;前缀路径与无
   assert.equal(row2.caption, '别家的日常')
   // 只改指定的字段,其它字段保留
   assert.equal(row2.keywords, '开心')
+
+  // 绝对路径(issue #59 的新候选格式)也要能定位
+  const absPath = resolve(mainDir, 'memes/happy/b.jpg')
+  const r3 = await memeUpdate.execute({ path: absPath, caption: '绝对路径也能改' }, webExec())
+  assert.equal(r3.ok, true, r3.message)
+  assert.equal(rowOf('main-pack', 'memes/happy/b.jpg').caption, '绝对路径也能改')
 
   // 校验:一个字段都不给 / 未知路径 / 非法 tag
   assert.equal((await memeUpdate.execute({ path: 'memes/happy/a.jpg' }, webExec())).ok, false)

@@ -152,6 +152,36 @@ test('⑤ 新版宿主的消息行标记(data-chat-flow-key)也认', async () =>
   assert.equal(p.textContent, '新版 [表情: 开心]')
 })
 
+test('⑤-2 与自定义会话头像共存时,表情图插在内容槽前、头像之后(issue #58)', async () => {
+  // 自定义头像插件会把 .we-avatar 插到 row.firstChild;表情图若也按 firstChild 插,
+  // 就会越过头像变成 [表情][头像][气泡]。锚点应该是消息内容槽。
+  const flow = new Element('div')
+  flow.setAttribute('data-chat-flow', '1')
+  const row = new Element('div')
+  row.setAttribute('data-chat-flow-key', 'k58')
+  const avatar = new Element('span')
+  avatar.setAttribute('class', 'we-avatar')
+  avatar.setAttribute('aria-hidden', 'true')
+  row.appendChild(avatar)
+  const slot = new Element('div')
+  slot.setAttribute('data-slot', 'conversation.chat.node')
+  const p = new Element('p')
+  p.appendChild(new TextNode('头像内侧 [表情: 开心]'))
+  slot.appendChild(p)
+  row.appendChild(slot)
+  flow.appendChild(row)
+  body.appendChild(flow)
+  await scan()
+  const imgs = imgsIn(row)
+  assert.equal(imgs.length, 1, '应装饰出一张图')
+  const kids = row.childNodes.filter((n) => n.nodeType === 1)
+  assert.equal(kids[0], avatar, '头像必须仍在行首')
+  const imgIndex = kids.indexOf(imgs[0])
+  const slotIndex = kids.indexOf(slot)
+  assert.ok(imgIndex > 0 && imgIndex < slotIndex, '表情图应在头像之后、内容槽之前: ' + kids.map((n) => n.tagName + '.' + (n.getAttribute('class') || '')).join(' > '))
+  assert.equal(p.textContent, '头像内侧 [表情: 开心]', 'textContent 仍要与替换前一致')
+})
+
 // ---------- issue #26:宿主重渲染(textContent 覆写)后的自愈 ----------
 // React 对纯文本 children 的更新走 textContent 覆写,注入的 img/ghost 被一起抹掉、原文
 // 裸露;而 data-meme-decorated 在元素属性上不受覆写影响 → 旧逻辑见到标记就永久跳过,

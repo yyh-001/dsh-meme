@@ -11,9 +11,9 @@
 - **QQ 官方机器人(dsh-qqbot 插件)**:工具表里有 `qqbot_send_file` 时,不要写 `[表情:]` 标记——把挑中候选的 **`absPath` 绝对路径传给 `qqbot_send_file` 的 `file_path`**,正文只写普通文字。它默认启用路径白名单(media + agent cwd + `sendFile.extraRoots`);被拒时提示用户在 dsh-qqbot 配置的 `sendFile.extraRoots` 里加入图库目录(通常 `~/.dsh/meme-packs`)。
 - **QQ 发图尺寸**:设置页打开后,IM 的 `path` 和 Web 的 `absPath` 已经是缩到 200-450px 的发送副本(在图库目录的 `.send-cache/` 下),照常原样传给 `dsh_im_return_file` / `qqbot_send_file`,不要再自己缩图或改回图库原图。Web 候选的 `path` 仍是原图出处。没装 sharp 时按原图发送。
 
-## 2. path 前缀约定
+## 2. path 约定
 
-候选/清单里的 path:**当前激活库不带前缀,其它库带 `packId/` 前缀**。原样传给 `meme_update`、两步模式的 `send`、`dsh_im_return_file`(IM 模式给的是绝对路径)都能对上。
+候选/清单里的 `path` 现在是**磁盘绝对路径**(issue #59),可以直接交给 `read_image` 等通用文件工具;`/dsh-memes/...` 是插件的 HTTP 路由,不是文件路径,别原样当文件用。`meme_update`、两步模式的 `send`、`dsh_im_return_file` 都接受绝对路径,也仍兼容旧的「激活库相对路径 / 其它库 `packId/` 前缀」格式。`absPath` 是真正要投递的副本(开了 QQ 缩图时可能指向 `.send-cache/`),与 `path` 的原图出处是两件事。
 
 ## 3. GIF 的坑(宿主行为,无法还原)
 

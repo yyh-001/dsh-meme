@@ -3110,7 +3110,13 @@ window.__ModuleLoader__.load({
             if (kind === 'user' || kind === 'steering') {
               for (const img of imgs) img.style.marginLeft = 'auto'
             }
-            for (const img of imgs) row.insertBefore(img, row.firstChild)
+            // 锚到消息内容槽之前,而不是行首:别的插件(自定义会话头像)也会往行首插
+            // 装饰节点,按 row.firstChild 插会越过头像,变成 [表情][头像][气泡](issue #58)。
+            // 内容槽可能是深层节点,先找到它在行里的直接子节点;取不到才退回行首。
+            let anchor = row.querySelector('[data-slot="conversation.chat.node"]')
+            while (anchor && anchor.parentElement && anchor.parentElement !== row) anchor = anchor.parentElement
+            if (!anchor || anchor === row) anchor = row.firstChild
+            for (const img of imgs) row.insertBefore(img, anchor)
             // 排布模式(issue #50):stacked 时行翻成纵向 flex,图在上正文在下;
             // inline 不打标记,CSS 不命中,观感与旧版一致。
             if (memeLayoutMode === 'stacked') row.setAttribute('data-meme-layout', 'stacked')

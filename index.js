@@ -15,7 +15,7 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, rmSync, readdirSync, renameSync, statSync } from 'node:fs'
-import { join, dirname, resolve, sep, basename } from 'node:path'
+import { join, dirname, isAbsolute, resolve, sep, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
 import { inflateRawSync } from 'node:zlib'
@@ -948,6 +948,19 @@ export function apply(ctx, config) {
     },
     resolveStored(stored) {
       const raw = String(stored || '')
+      // 候选 path 已改成绝对路径(issue #59);绝对路径要按所有图库根校验,
+      // 不能只按当前激活库,否则跨库候选会被误拒。
+      if (isAbsolute(raw)) {
+        const abs = resolve(raw)
+        for (const p of packRows()) {
+          const root = resolve(p.path)
+          if (abs === root || abs.startsWith(root + sep)) {
+            if (!existsSync(abs)) throw new Error('文件不存在: ' + raw)
+            return abs
+          }
+        }
+        return memes.resolveStored(raw)
+      }
       const slash = raw.indexOf('/')
       const first = slash > 0 ? raw.slice(0, slash) : ''
       if (first) {
@@ -1432,7 +1445,7 @@ export function apply(ctx, config) {
     }
     registerToolWhenReady(ctx, 'meme_list', () => ctx.tools.register(defineTool({
       name: 'meme_list',
-      description: '列出图库里的表情包清单(只读,维护用):按关键词/分类/图库筛选,每张带 所属图库、分类、描述、关键词、path。找重复图、核对错分类、整理描述时用;发给用户看图请用 send_meme。改元数据用 meme_update。',
+      description: '列出图库里的表情包清单(只读,维护用):按关键词/分类/图库筛选,每张带 所属图库、分类、描述、关键词、path。path 是磁盘绝对路径,可直接交给 read_image 等通用文件工具;`/dsh-memes/...` 是插件的 HTTP 路由,不是文件路径。找重复图、核对错分类、整理描述时用;发给用户看图请用 send_meme。改元数据用 meme_update。',
       parameters: {
         q: { type: 'string', description: '关键词(可选,空格分隔多个全命中):按 描述/关键词/文件名 子串筛' },
         tag: { type: 'string', description: '分类(可选,如 happy)' },
@@ -1450,7 +1463,6 @@ export function apply(ctx, config) {
         const limit = Math.max(1, Math.min(100, Math.floor(Number(args.limit) || 20)))
         const packs = packRows().filter((p) => (packId ? p.id === packId : enabledIds().includes(p.id)))
         if (packId && packs.length === 0) return { ok: false, message: '图库不存在: ' + packId }
-        const active = activePackId()
         const matched = []
         let total = 0
         for (const p of packs) {
@@ -1468,8 +1480,9 @@ export function apply(ctx, config) {
           tag: m.tag,
           caption: m.caption || m.file_name,
           keywords: m.keywords || '',
-          // 与 send_meme 候选同款约定:当前激活库不带前缀,其它库带包前缀
-          path: (p.id === active ? '' : p.id + '/') + m.path,
+          // 磁盘绝对路径(issue #59):外部通用文件工具可直接用。meme_update/send 的
+          // 解析器仍兼容旧的「激活库相对路径 / 其它库 packId/ 前缀」格式。
+          path: resolve(p.path, m.path),
         }))
         const lines = rows.map((r, i) => (i + 1) + '. [' + r.tag + '] ' + r.caption + ' | 库=' + r.library + ' | path=' + r.path)
         return {

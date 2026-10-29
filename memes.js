@@ -6,7 +6,7 @@
  * 情绪里筛关键词。候选都带 caption,模型看描述觉得贴再发。
  */
 import { DatabaseSync } from 'node:sqlite'
-import { basename, dirname, join, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -512,9 +512,11 @@ export class MemesStore {
     return { mood, memes: pickRandom(memes, n), tags: moodNames() }
   }
 
-  /** 把索引内相对路径解析为绝对路径(不允许逃出图库根)。 */
+  /** 把索引内相对路径或绝对路径解析为绝对路径(不允许逃出图库根)。 */
   resolveStored(stored) {
-    const target = resolve(this.root, stored)
+    const raw = String(stored || '')
+    // 候选 path 现在也会直接给绝对路径(issue #59);绝对路径同样要过根目录校验。
+    const target = isAbsolute(raw) ? resolve(raw) : resolve(this.root, raw)
     if (target !== this.root && !target.startsWith(this.root + sep)) {
       throw new Error('路径超出表情包目录')
     }
@@ -892,7 +894,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       enum: ['search', 'send'],
       description: 'search: 按情绪或关键词取候选; send: 发送挑中的 path',
     }
-    parameters.path = { type: 'string', description: 'send 时要发的图路径(来自 search 候选列表)' }
+    parameters.path = { type: 'string', description: 'send 时要发的图路径(来自 search 候选列表;磁盘绝对路径,也兼容旧的包前缀/相对格式)' }
   }
 
   ctx.tools.register(defineTool({
@@ -995,7 +997,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         if (imMode) return (i + 1) + '. path=' + sendable + ' | 分类=' + m.tag + ' | 描述=' + caption
         return webMode
           ? (i + 1) + '. [表情: ' + caption + ']'
-          : (i + 1) + '. path=' + m.path + ' | [' + m.tag + '] ' + caption
+          : (i + 1) + '. path=' + absolutePathOf(m) + ' | [' + m.tag + '] ' + caption
       })
       const hits = (rows, paths) => {
         // 出处元信息(issue #53):path/library 进模型可见的 JSON(用户问「这图哪来的」
@@ -1007,9 +1009,12 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         const sendable = (i) => paths[i] || absolutePathOf(rows[i])
         if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         if (imMode) return rows.map((m, i) => ({ path: sendable(i), tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
+        // path 给磁盘绝对路径(issue #59):外部 read_image 等通用文件工具可直接用;
+        // 旧的包前缀/相对格式仍被 meme_update/send 的解析器接受。absPath 是真正要投递的
+        // 副本(开了 QQ 缩图时可能是 .send-cache 里的文件),两件事不要混。
         return webMode
-          ? rows.map((m, i) => ({ caption: captionOf(m), path: m.path, absPath: sendable(i), library: libraryOf(m) }))
-          : rows.map((m, i) => ({ path: m.path, absPath: sendable(i), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
+          ? rows.map((m, i) => ({ caption: captionOf(m), path: absolutePathOf(m), absPath: sendable(i), library: libraryOf(m) }))
+          : rows.map((m, i) => ({ path: absolutePathOf(m), absPath: sendable(i), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
       // 发图概率未命中:工具结果也要跟系统提示保持一致,否则模型看着候选行照发。
       // 用户明确要图时不拦——提示里保留主动发图以外的正常投递方式。
