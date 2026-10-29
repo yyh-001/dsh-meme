@@ -33,11 +33,20 @@ const makeEl = (tag) => ({
   fire(type, event) { for (const l of this._ls.filter((l) => l.type === type)) l.fn(event) },
   // 认三个范围:老版容器 data-chat-flow / 新版行 data-chat-flow-key / 消息内容槽;
   // 以及本插件自己的 img[data-meme-img]。issue #44 起放大只认后两者。
+  // issue #57 起还会查「祖先里有没有交互控件」:点击判定会拿交互选择器表
+  // (以 button,a,[role=... 开头)调 closest,按真实 closest 语义沿 parentNode 链找。
   closest(sel) {
     const s = String(sel)
     if (s.includes('data-meme-img')) return 'data-meme-img' in this.attrs ? this : null
     if (s.includes('conversation.chat.node')) return this.inSlot ? {} : null
     if (s.includes('data-chat-flow')) return this.inFlow ? {} : null
+    if (s.includes('button') || s.includes('[role')) {
+      for (let n = this; n && n.tagName; n = n.parentNode) {
+        if (['BUTTON', 'A', 'INPUT', 'TEXTAREA', 'SELECT', 'LABEL', 'SUMMARY'].includes(n.tagName)) return n
+        if (n.getAttribute && n.getAttribute('role')) return n
+      }
+      return null
+    }
     return null
   },
 })
@@ -104,6 +113,25 @@ const imgOwn = () => {
   el.attrs['data-meme-img'] = '1'
   el.src = 'http://localhost/dsh-memes/p/memes/happy/2.jpg'
   return el
+}
+// 交付卡片里的应用图标:外面套着「用 xx 打开」的 <button>,而整张卡片注入在内容槽内(issue #57)
+const imgInCardButton = () => {
+  const btn = makeEl('button')
+  const img = makeEl('img')
+  img.inSlot = true
+  img.src = 'data:image/png;base64,AAAA'
+  btn.appendChild(img)
+  return { img, btn }
+}
+// 宿主 React 组件里不止 <button>:包着 [role="button"] 的容器也算交互控件
+const imgInRoleButton = () => {
+  const wrap = makeEl('span')
+  wrap.setAttribute('role', 'button')
+  const img = makeEl('img')
+  img.inSlot = true
+  img.src = 'data:image/png;base64,AAAB'
+  wrap.appendChild(img)
+  return { img, btn: wrap }
 }
 const evt = () => {
   const e = { key: '', deltaY: 0, defaultPrevented: false, stopped: false, target: null }
@@ -259,6 +287,49 @@ test('⑩ 本插件提到行首的表情图仍可放大(在内容槽外,但带 d
   const b = box()
   assert.ok(b, '自己的表情图要能放大')
   assert.equal(b.children[0].src, 'http://localhost/dsh-memes/p/memes/happy/2.jpg')
+  assert.ok(e.defaultPrevented && e.stopped)
+  dispose()
+})
+
+test('⑪ 交付卡片按钮里的应用图标:不放大、手势放行给按钮(issue #57)', () => {
+  const dispose = installMemeZoom(docEl)
+  const { img, btn } = imgInCardButton()
+  const e = evt()
+  e.target = img
+  fireDoc('click', e)
+  assert.equal(box(), undefined, '按钮图标不该弹放大层')
+  assert.equal(e.defaultPrevented, false, '捕获层不能 preventDefault 吃掉手势')
+  assert.equal(e.stopped, false, '捕获层不能 stopPropagation 掐断冒泡')
+
+  let acted = false
+  btn.addEventListener('click', () => { acted = true })
+  btn.fire('click', e)
+  assert.ok(acted, '按钮自己的 onClick(挂在 button 上,靠冒泡/目标阶段)应收到事件')
+  dispose()
+})
+
+test('⑫ [role="button"] 容器里的图标同样放过(issue #57)', () => {
+  const dispose = installMemeZoom(docEl)
+  const { img } = imgInRoleButton()
+  const e = evt()
+  e.target = img
+  fireDoc('click', e)
+  assert.equal(box(), undefined)
+  assert.equal(e.defaultPrevented, false)
+  assert.equal(e.stopped, false)
+  dispose()
+})
+
+test('⑬ 内容槽里普通容器(div)包着的聊天图仍能放大,别把放过范围开太大', () => {
+  const dispose = installMemeZoom(docEl)
+  const wrap = makeEl('div')
+  const img = imgInFlow()
+  wrap.appendChild(img)
+  const e = evt()
+  e.target = img
+  fireDoc('click', e)
+  const b = box()
+  assert.ok(b, '非交互祖先只是普通容器,不该影响放大')
   assert.ok(e.defaultPrevented && e.stopped)
   dispose()
 })

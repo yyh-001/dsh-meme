@@ -65,6 +65,8 @@ test('apply() 建的每个 <style> 都带 data-plugin=dsh-meme(issue #32)', () =
   assert.ok(appended[2].textContent.includes('img[data-meme-img]'), '自己的表情图要有放大光标')
   assert.ok(appended[2].textContent.includes('[data-slot="conversation.chat.node"] img'), '消息内容槽里的图要有放大光标')
   assert.equal(appended[2].textContent.includes('[data-chat-flow]'), false, '范围不能再是整条 FlowItem 行(issue #44)')
+  // issue #57:交互控件里的图标(交付卡片按钮图标)要排除,光标还原继承值
+  assert.ok(appended[2].textContent.includes('button img{cursor:inherit}'), '按钮里的图标不给 zoom-in')
   assert.ok(appended[3].textContent.includes('[data-meme-layout="stacked"]'), '第四个是「独占一行」排布规则(issue #50)')
 })
 

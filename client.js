@@ -137,12 +137,22 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 交互控件里的 `<img>`(宿主交付卡片「用 xx 打开」按钮的应用图标、文件类型图标等)
+     * 点它的语义是按钮动作不是看图,点击手势要放行。类名是 CSS module 哈希值
+     * (OMoRSG_*),判交互只能靠语义标签和 role;input/select 这些放进来纯属保险。
+     * 模块级常量:光标重置 CSS 也按它生成。
+     */
+    const INTERACTIVE_IMG_SEL = 'button,a,[role="button"],[role="link"],[role="menuitem"],[role="tab"],input,select,textarea,label,summary'
+
+    /**
      * 点击聊天里的图放大查看:滚轮缩放、双击复位、Esc 或点背景关闭。
      *
      * 只认**消息正文里的图**和本插件提到行首的 `img[data-meme-img]` —— 消息正文在宿主的
      * 内容槽 `[data-slot="conversation.chat.node"]` 里。别的插件(比如自定义会话头像)也会
      * 往 FlowItem 行里注入装饰性图片,它们是内容槽的兄弟节点,按整行认会连装饰图一起放大
      * 并显示 zoom-in 光标(issue #44)。输入框预览、面板缩略图、遮罩里自己那张也都不碰。
+     * 内容槽里还塞着宿主的交付卡片,卡片按钮图标同样是 `<img>`,也在交互控件判定上放过
+     * (issue #57)——交付卡片整体在槽内,按槽认会连按钮图标一起放大并吞掉按钮的手势。
      * 监听挂在 document 的**捕获阶段**、装一次就够:流式输出期间消息行反复重建,
      * 挂在容器上的监听会跟着丢。
      *
@@ -209,6 +219,9 @@ window.__ModuleLoader__.load({
         // 行里其它插件注入的装饰图不在内容槽内、也没有我们的标记,直接放过(issue #44)。
         if (!t.closest) return
         if (!t.closest('img[data-meme-img]') && !t.closest('[data-slot="conversation.chat.node"]')) return
+        // 交互控件里的图标放过:捕获层不吃 preventDefault/stopPropagation,
+        // 让控件自己的 onClick(冒泡/目标阶段)照常收到这一下(issue #57)。
+        if (t.closest(INTERACTIVE_IMG_SEL)) return
         e.preventDefault()
         e.stopPropagation()
         open(t.currentSrc || t.src, t.alt)
@@ -2742,8 +2755,14 @@ window.__ModuleLoader__.load({
       ctx.effect(() => () => { pickerStyle.remove() }, 'dsh-expression-entry: meme-picker styles')
 
       // 点图放大:光标提示样式同样走 createOwnedStyle(issue #32),遮罩与监听装一次、卸载时摘掉。
-      // 范围与 installMemeZoom 的点击判定保持一致:只给内容槽里的图和本插件提到行首的图上光标(issue #44)。
-      const zoomStyle = createOwnedStyle('img[data-meme-img],[data-slot="conversation.chat.node"] img{cursor:zoom-in}')
+      // 范围与 installMemeZoom 的点击判定保持一致:只给内容槽里的图和本插件提到行首的图上光标(issue #44),
+      // 交互控件里的图标除外,光标还原成继承值,按钮显式给啥就是啥(issue #57)。
+      const zoomStyle = createOwnedStyle(
+        'img[data-meme-img],[data-slot="conversation.chat.node"] img{cursor:zoom-in}'
+        + INTERACTIVE_IMG_SEL.split(',')
+          .map((s) => '[data-slot="conversation.chat.node"] ' + s + " img{cursor:inherit}")
+          .join('')
+      )
       ctx.effect(() => () => { zoomStyle.remove() }, 'dsh-expression-entry: zoom styles')
 
       // 表情排布「独占一行」(issue #50):行元素翻成纵向 flex——图在上,正文在下按正常
