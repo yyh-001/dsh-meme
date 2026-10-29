@@ -2276,7 +2276,11 @@ export function apply(ctx, config) {
           // 编码后的 URL 落到白名单匹配刚好对上。
           const encPath = (rel) => String(rel || '').split('/').map(encodeURIComponent).join('/')
           const urlFor = (m, pid) => ({ ...m, url: ROUTE + '/' + pid + '/' + encPath(m.path) })
-          const packList = () => packs.map((p) => ({ id: p.id, name: p.name, count: p.count }))
+          // 单张表情的文件大小(图库页/表情卡片展示);文件缺失按 0 处理,不影响列表
+          const sizeOf = (root, rel) => {
+            try { return statSync(join(root, rel)).size } catch { return 0 }
+          }
+          const packList = () => packs.map((p) => ({ id: p.id, name: p.name, count: p.count, size: p.size }))
           // 面板的分类下拉要列图库里真实的 tag(按张数降序),不是写死的六个情绪桶;
           // 按 tag 筛选也改为精确匹配——桶展开(选「开心」混进 like/meow)对浏览图库
           // 的人类用户是反直觉的(用户反馈)。send_meme 工具侧保留情绪桶语义。
@@ -2293,7 +2297,7 @@ export function apply(ctx, config) {
               let store = null
               try {
                 store = new MemesStore(p.path)
-                for (const m of store.list().memes) all.push(urlFor(m, p.id))
+                for (const m of store.list().memes) all.push({ ...urlFor(m, p.id), size: sizeOf(p.path, m.path) })
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
@@ -2318,11 +2322,12 @@ export function apply(ctx, config) {
             tags = realTags(memes.list().memes)
           }
           const pid = pack ? pack.id : activeId
+          const rowRoot = pack ? pack.path : memes.root
           json(res, {
             ok: true, total: rows.length, tags,
             packId: pid,
             packs: packList(),
-            memes: rows.map((m) => urlFor(m, pid)),
+            memes: rows.map((m) => ({ ...urlFor(m, pid), size: sizeOf(rowRoot, m.path) })),
             remoteSubs: remoteSubs(),
             remoteDirUrl: remoteDirUrlList(),
             layoutMode: normalizeLayoutMode(readSettings().layoutMode),

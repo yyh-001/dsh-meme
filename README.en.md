@@ -63,7 +63,7 @@ You send one, the AI replies with one.
 
 Open **设置 (Settings) → 表情包 (Memes)**:
 
-- **图库 (Packs)**: click a card to manage images; the category dropdown filters by real categories; “扫描新增 (Scan)” indexes images you copied into the folder and cleans up stale rows. Each switch controls whether the AI can use that pack; several can be enabled. Create, import/export ZIPs, submit, delete and update.
+- **图库 (Packs)**: cards show image count and disk size; click a card to manage images. The category dropdown filters by real categories; “扫描新增 (Scan)” indexes images you copied into the folder and cleans up stale rows. Each switch controls whether the AI can use that pack; several can be enabled. Create, import/export ZIPs, submit, delete and update.
 - **发现 (Discover)**: preview marketplace packs and install them (Release ZIPs verify SHA-256).
 - **设置 (Settings)**: scan directory, proactive memes, prompt, send mode (automatic / text-only / image), send chance (toggle + 0/10/20/30/50/70/100%), QQ send size (toggle + 200/300/400/450 px long edge), layout (side-by-side / full-width row), LAN access, `AGENTS.md`.
 

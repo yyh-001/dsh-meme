@@ -93,6 +93,18 @@ test('分类下拉返回图库里的真实 tag(按张数),不再是写死的六�
   assert.ok(!r.tags.includes('sad'))
 })
 
+test('图库页大小:包总大小 = 图片字节数之和,列表里每张也带大小', async () => {
+  const root = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  const pack = root.packs.find((p) => p.id === 'panel-pack')
+  assert.ok(pack, 'payload 里应有当前图库')
+  assert.equal(pack.size, PNG.length * 6, '包大小按图片文件字节数累加(6 张)')
+
+  const list = JSON.parse((await get('/dsh-memes-api?packId=panel-pack')).body)
+  assert.equal(list.total, 6)
+  assert.ok(list.memes.every((m) => m.size === PNG.length), '每张表情带文件大小')
+  assert.equal(list.packs.find((p) => p.id === 'panel-pack').size, PNG.length * 6, '列表接口的 packs 也带大小')
+})
+
 test('按分类筛选是精确匹配:选 happy 不再把 like/meow 混进来', async () => {
   const happy = JSON.parse((await get('/dsh-memes-api?tag=happy')).body)
   assert.equal(happy.total, 2, '只有两张 tag=happy(a.jpg 和 f#1.jpg)')

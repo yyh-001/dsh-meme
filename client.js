@@ -502,6 +502,7 @@ window.__ModuleLoader__.load({
             isBundled ? '内置' : (isUserPack ? '导入' : '自定义'),
             installed ? 'v' + installed.replace(/^v/i, '') : '',
             count ? count + ' 张' : '',
+            p.size ? fmtBytes(p.size) : '',
             hasUpdate ? '可更新到 v' + String(entry.version).replace(/^v/i, '') : '',
           ].filter(Boolean).join(' · '),
           tags: (entry && (entry.keywords || entry.tags)) || [],
@@ -1225,6 +1226,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'meta' },
           h('div', { className: 'tag' }, tagZh(m.tag)),
           h('div', { className: 'cap' }, m.caption || m.file_name),
+          m.size ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } }, fmtBytes(m.size)) : null,
           h('div', { className: 'acts' },
             h('button', { onClick: () => setEdit({ path: m.path, tag: m.tag, caption: m.caption || '', keywords: m.keywords || '' }) }, '编辑'),
             h('button', { className: 'danger', onClick: () => onDelete(m) }, '删除'),
@@ -1376,7 +1378,8 @@ window.__ModuleLoader__.load({
             h('div', { className: 'row', style: { width: '100%' } },
               h('button', { onClick: () => { setPackView(''); setRootNotice('') } }, '← 图库列表'),
               h('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } },
-                (curPack ? curPack.name : packView) + ' · ' + total + ' 张'),
+                (curPack ? curPack.name : packView) + ' · ' + total + ' 张'
+                  + (curPack && curPack.size ? ' · ' + fmtBytes(curPack.size) : '')),
             ),
             memeRoot ? h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', wordBreak: 'break-all' } }, memeRoot) : null,
             h('div', { className: 'row' },
@@ -2119,6 +2122,16 @@ window.__ModuleLoader__.load({
     function fmtCount(n) {
       const x = Number(n) || 0
       return x >= 1000 ? (Math.round(x / 100) / 10) + 'k' : String(x)
+    }
+
+    /** 文件大小:图库卡片/表情卡片用,一位小数就够 */
+    function fmtBytes(n) {
+      const x = Number(n) || 0
+      if (x <= 0) return ''
+      if (x < 1024) return x + ' B'
+      if (x < 1024 * 1024) return (Math.round(x / 102.4) / 10) + ' KB'
+      if (x < 1024 * 1024 * 1024) return (Math.round(x / (1024 * 1024) * 10) / 10) + ' MB'
+      return (Math.round(x / (1024 * 1024 * 1024) * 10) / 10) + ' GB'
     }
 
     /** 悬浮面板上次拉到的全量数据;再次打开先拿它渲染,后台再刷新(图库多时首屏不闪)。 */

@@ -134,7 +134,29 @@ export function readPackMeta(dir, id = basename(dir), source = 'custom') {
     if (row && row.path) cover = String(row.path)
     db.close()
   } catch { /* 空库或坏库 */ }
-  return { id, name, description, version, count, cover, path: resolve(dir), source }
+  return { id, name, description, version, count, cover, size: packSizeBytes(dir), path: resolve(dir), source }
+}
+
+/**
+ * 图库总大小(只算图片文件,不含 index.db/manifest)。
+ * scanPacks 每次调用都会读 meta,而 packPayload 在每次面板操作后都会重扫,
+ * 所以按「目录 mtime + 60s」缓存:加/删文件会改目录 mtime,立即失效;
+ * 同尺寸覆盖同名文件这种极端情况最多滞后一分钟。
+ */
+const packSizeCache = new Map()
+export function packSizeBytes(dir) {
+  const abs = resolve(dir)
+  let mtimeMs = 0
+  try { mtimeMs = statSync(abs).mtimeMs } catch { return 0 }
+  const now = Date.now()
+  const hit = packSizeCache.get(abs)
+  if (hit && hit.mtimeMs === mtimeMs && now - hit.checkedAt < 60000) return hit.bytes
+  let bytes = 0
+  for (const rel of walkPackImages(abs)) {
+    try { bytes += statSync(join(abs, rel)).size } catch { /* 文件刚被删/被占用 */ }
+  }
+  packSizeCache.set(abs, { bytes, checkedAt: now, mtimeMs })
+  return bytes
 }
 
 /**
