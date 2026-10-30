@@ -1,31 +1,39 @@
 <p align="center">
-  <img src="./docs/hero-banner-v4.jpg" alt="dsh-meme — 找得到、发得出、学得会" width="100%" />
-</p>
-
-<p align="center"><strong>给 DeepSeek Harness 加上表情包：自己点图发，也能让 AI 接着斗图。</strong></p>
-
-<p align="center">
-  <a href="https://www.npmjs.com/package/dsh-meme"><img src="https://img.shields.io/npm/v/dsh-meme?style=flat-square" alt="npm version" /></a>
-  <a href="./LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="MIT" /></a>
-  <img src="https://img.shields.io/badge/Node-%E2%89%A522.13-blue?style=flat-square" alt="Node ≥ 22.13" />
+  <img src="./docs/hero-banner-v4.jpg" alt="dsh-meme — 找得到、发得出、学得会" width="880" />
 </p>
 
 <p align="center">
-  <a href="https://yyh-001.github.io/dsh-meme/">预览表情包</a> ·
-  <a href="https://github.com/yyh-001/dsh-meme-packs">图库市场</a> ·
-  <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">反馈问题</a> ·
-  <strong>中文</strong> · <a href="./README.en.md">English</a>
+  <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a> 的表情包插件 ——<br />
+  输入框一键发图，AI 按聊天气氛接梗；图库能自己养，也能从市场装。
 </p>
 
-## 能做什么
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-meme"><img src="https://img.shields.io/npm/v/dsh-meme?label=npm&color=4D6BFE&style=flat-square" alt="npm version" /></a>
+  <img src="https://img.shields.io/badge/Node-%E2%89%A522.13-4D6BFE?style=flat-square" alt="Node ≥ 22.13" />
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-4D6BFE?style=flat-square" alt="MIT" /></a>
+  <br />
+  <img src="https://img.shields.io/npm/dm/dsh-meme?label=downloads&color=4D6BFE&style=flat-square" alt="npm downloads" />
+  <img src="https://img.shields.io/github/stars/yyh-001/dsh-meme?label=stars&color=4D6BFE&style=flat-square" alt="Stars" />
+  <img src="https://img.shields.io/github/forks/yyh-001/dsh-meme?label=forks&color=4D6BFE&style=flat-square" alt="Forks" />
+</p>
 
-- **一键发图**：输入框旁点 😊，搜索、按图库或情绪筛选，点一张就发送。
-- **主动斗图**：AI 会按聊天情绪自己找图接梗，不用等你开口；设置页可开关「AI 主动发表情」、设发图概率（0–100%）或改写提示词调整风格。
-- **IM / 手机斗图**：QQ、微信、飞书等经 dsh-im 接入后，表情包以原生图片消息发出，不用写文字标记；手机/平板经电脑局域网 IP 打开 DSH Web，设置页打开「局域网访问图库」即可收发（默认关，见下文）。QQ 大图容易被客户端当图片消息拉伸，可在设置页打开「QQ 发图尺寸」，发送前把副本缩到 200–450px，Web 仍用原图。
-- **学会新图**：上传图片后说「把这张图入库」，AI 自动识别分类和描述；也可以把图片文件直接拷进图库目录，点「扫描新增」一键入库（动图 GIF 建议走这条，原始动画保留；文件改名/删除后扫描会顺手清理失效记录）。
-- **整理图库**：跟 AI 说「列一下表情包清单」「帮我查查重复」「把这张改成 work 分类」——内置 `meme_list` / `meme_update` 维护工具，改分类/描述/关键词不用手动翻面板（删除留在面板，防误删）。
-- **管理与分享**：多图库开关、上传与编辑、ZIP 导入导出、市场安装与更新。
-- **开箱即用**：内置大肥鱼图库（24 张），核心功能零第三方运行依赖，使用 Node 内置 SQLite；QQ 缩图是可选能力（dsh-im 已自带 sharp，未安装时按原图发送）。
+<p align="center">
+  <samp><a href="https://yyh-001.github.io/dsh-meme/">预览表情包</a> · <a href="https://github.com/yyh-001/dsh-meme-packs">图库市场</a> · <a href="https://github.com/yyh-001/dsh-meme/issues/new/choose">反馈问题</a> · <a href="./README.en.md">English</a> · <strong>中文</strong></samp>
+</p>
+
+> [!IMPORTANT]
+> **dsh-meme 是 DeepSeek Harness 的插件，不是独立应用。**  
+> 需要先装好 DSH，再通过插件市场或 CLI 装进某个 profile；社区开源项目，并非 DeepSeek 官方产品。
+
+## 功能
+
+- 😊 **一键发图** — 输入框旁点 😊，搜索、按图库或情绪筛选，点一张就发送。
+- 🎭 **主动斗图** — AI 会按聊天情绪自己找图接梗，不用等你开口；设置页可开关「AI 主动发表情」、设发图概率（0–100%）或改写提示词调整风格。
+- 📱 **IM / 手机斗图** — QQ、微信、飞书等经 dsh-im 接入后，表情包以原生图片消息发出，不用写文字标记；手机/平板经电脑局域网 IP 打开 DSH Web，设置页打开「局域网访问图库」即可收发（默认关）。QQ 大图容易被客户端当图片消息拉伸，可打开「QQ 发图尺寸」把发送副本缩到 200–450px，Web 仍用原图。
+- 🧠 **学会新图** — 上传图片后说「把这张图入库」，AI 自动识别分类和描述；也可以把图片文件直接拷进图库目录，点「扫描新增」一键入库（动图 GIF 建议走这条，原始动画保留；文件改名/删除后扫描会顺手清理失效记录）。
+- 🗂️ **整理图库** — 跟 AI 说「列一下表情包清单」「帮我查查重复」「把这张改成 work 分类」——内置 `meme_list` / `meme_update` 维护工具，改分类/描述/关键词不用手动翻面板（删除留在面板，防误删）。
+- 📦 **管理与分享** — 多图库开关、上传与编辑、ZIP 导入导出、市场安装与更新。
+- 🚀 **开箱即用** — 内置大肥鱼图库（24 张），核心功能零第三方运行依赖，使用 Node 内置 SQLite；QQ 缩图是可选能力（dsh-im 已自带 sharp，未安装时按原图发送）。
 
 ## 宣传视频
 
@@ -39,35 +47,59 @@
 
 ## 安装
 
-在 DSH 中打开 **插件 → 添加插件**，输入 `dsh-meme` 并安装。
+需要 **Node.js ≥ 22.13.0**。
 
-也可以安装到指定 profile：
+| 方式 | 做法 |
+| --- | --- |
+| 插件市场（推荐） | DSH → **插件 → 添加插件**，输入 `dsh-meme` 并安装 |
+| 命令行 | `dsh plugin --profile web add dsh-meme`，把 `web` 换成目标 profile |
 
-```bash
-dsh plugin --profile web add dsh-meme
-```
-
-需要 **Node.js ≥ 22.13.0**。旧包名 `dsh-expression` 已弃用，内部插件 ID 保留兼容。
+装好后打开任意会话，输入框旁会出现 😊。旧包名 `dsh-expression` 已弃用，内部插件 ID 保留兼容。
 
 ## 效果预览
 
-你发一张，AI 接着回一张。
+**斗图：你发一张，AI 接着回一张**
 
 <p align="center">
-  <img src="./docs/chat-example.png" alt="斗图示例：吃白饭的大肥鱼，用户发一张，AI 接着回一张" width="80%" />
+  <img src="./docs/chat-example.png" alt="斗图示例：吃白饭的大肥鱼，用户发一张，AI 接着回一张" width="820" />
 </p>
 
-![输入框表情选择器：搜索、图库与情绪筛选](./docs/quick-picker.png)
+**选图：搜索、图库与情绪筛选**
+
+<p align="center">
+  <img src="./docs/quick-picker.png" alt="输入框表情选择器：搜索、图库与情绪筛选" width="600" />
+</p>
 
 ## 图库管理
 
 打开 **设置 → 表情包**：
 
-- **图库**：卡片显示张数与占用大小，点卡片管理图片；分类下拉按真实分类筛选；「扫描新增」收编手动拷进目录的图片并清理失效记录。卡片开关决定 AI 能否使用该图库，可多选。支持新建、导入/导出 ZIP、投稿、删除和更新。
-- **发现**：预览市场图库并一键安装（Release ZIP 校验 SHA-256）。
-- **设置**：改扫描目录、AI 主动发表情、提示词、发送方式（自动/纯文字/图片）、发图概率（开关 + 0/10/20/30/50/70/100%）、QQ 发图尺寸（开关 + 200/300/400/450px 长边）、表情排布（并排/独占一行）、局域网访问、`AGENTS.md`。
+- **图库** — 卡片显示张数与占用大小，点卡片管理图片；分类下拉按真实分类筛选；「扫描新增」收编手动拷进目录的图片并清理失效记录。卡片开关决定 AI 能否使用该图库，可多选。支持新建、导入/导出 ZIP、投稿、删除和更新。
+- **发现** — 预览市场图库并一键安装（Release ZIP 校验 SHA-256）。
+- **设置** — 改扫描目录、AI 主动发表情、提示词、发送方式（自动/纯文字/图片）、发图概率（开关 + 0/10/20/30/50/70/100%）、QQ 发图尺寸（开关 + 200/300/400/450px 长边）、表情排布（并排/独占一行）、局域网访问、`AGENTS.md`。
 
-![图库管理：已安装图库与独立开关](./docs/panel-library.png)
+<details>
+<summary>设置页截图（展开查看）</summary>
+
+**图库：已安装图库与独立开关**
+
+<p align="center">
+  <img src="./docs/panel-library.png" alt="图库管理：已安装图库与独立开关" width="631" />
+</p>
+
+**发现：市场图库预览与一键安装**
+
+<p align="center">
+  <img src="./docs/panel-discover.png" alt="发现页：市场图库预览与一键安装" width="631" />
+</p>
+
+**设置：发送方式、发图概率与图库目录**
+
+<p align="center">
+  <img src="./docs/panel-settings.png" alt="设置页：发送方式、发图概率与图库目录" width="631" />
+</p>
+
+</details>
 
 默认扫描 `~/.dsh/meme-packs`，设置存 `~/.dsh/dsh-expression.json`，升级保留。ZIP 支持常规压缩和纯图片目录。
 
@@ -75,10 +107,10 @@ dsh plugin --profile web add dsh-meme
 
 ## 常见问题
 
-- **QQ 发表情被当大图拉伸**：QQ 官方机器人没有表情消息类型，大图会按图片消息渲染。设置页打开「QQ 发图尺寸」，选 300px（经验区间 200–450）后，QQ/IM 会发送缩小副本，Web 仍用原图；缩放需要 sharp，dsh-im 已自带，未安装时自动按原图发送。
-- **更新失败 / 插件消失**：先在市场点「重试」；仍失败就完全退出 DSH 后再更新。更早版本或仍失败，退出 DSH 后在 profile 目录执行 `pnpm add dsh-meme@latest`。图库和设置都在 `~/.dsh`，重装不丢。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
-- **国内网络 / 市场拉不到**：默认多镜像竞速 + 磁盘缓存，通常无需配置；拉不到时先在发现页点「重试」，再把「图库目录源」切到「镜像源」。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
-- **手机 / 局域网 / 反向代理**：局域网 IP 访问在设置页打开「局域网访问图库」；反代域名需显式声明可信 Host（`DSH_MEME_TRUSTED_HOSTS` 或 `allowedHosts`）。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
+- **QQ 发表情被当大图拉伸** — QQ 官方机器人没有表情消息类型，大图会按图片消息渲染。设置页打开「QQ 发图尺寸」，选 300px（经验区间 200–450）后，QQ/IM 会发送缩小副本，Web 仍用原图；缩放需要 sharp，dsh-im 已自带，未安装时自动按原图发送。
+- **更新失败 / 插件消失** — 先在市场点「重试」；仍失败就完全退出 DSH 后再更新。更早版本或仍失败，退出 DSH 后在 profile 目录执行 `pnpm add dsh-meme@latest`。图库和设置都在 `~/.dsh`，重装不丢。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
+- **国内网络 / 市场拉不到** — 默认多镜像竞速 + 磁盘缓存，通常无需配置；拉不到时先在发现页点「重试」，再把「图库目录源」切到「镜像源」。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
+- **手机 / 局域网 / 反向代理** — 局域网 IP 访问在设置页打开「局域网访问图库」；反代域名需显式声明可信 Host（`DSH_MEME_TRUSTED_HOSTS` 或 `allowedHosts`）。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
 
 ## 分享自己的图库
 
@@ -88,7 +120,7 @@ dsh plugin --profile web add dsh-meme
 
 | 工具 | 用法 |
 | --- | --- |
-| `send_meme` | 按情绪 `tag` 随机抽图，或按 `query` 搜描述/关键词/文件名；跨所有启用图库，候选带 `path` / `library`，没命中时返回真实分类统计 |
+| `send_meme` | 按情绪 `tag` 随机抽图，或按 `query` 搜描述/关键词/文件名；跨所有启用图库，候选带 `path`（磁盘绝对路径）/ `library`，IM 场景另有 `absPath`；没命中时返回真实分类统计 |
 | `learn_meme` | 收录最近一张用户图片，也可指定 `attachmentId` / `imageUrl`；附件 GIF 被压成单帧时会提示 |
 | `meme_list` | 跨启用图库按关键词/分类/图库筛清单，带所属图库、分类、描述、关键词和 path |
 | `meme_update` | 改一张图的分类/描述/关键词（只改索引不动文件）；path 用 `meme_list` / `send_meme` 的原样 |
@@ -98,7 +130,7 @@ send_meme tag=happy
 send_meme query="猫 比心"
 learn_meme
 meme_list tag=work
-meme_update path="memes/work/a.jpg" caption="加班到趴桌"
+meme_update path="C:\Users\<你>\.dsh\meme-packs\work\a.jpg" caption="加班到趴桌"
 ```
 
 情绪桶：`happy` / `angry` / `sad` / `shy` / `confused` / `daily`。模型应把候选里的 `[表情: 描述]` 原样写进回复；没有合适的候选就换关键词或纯文字回复。
@@ -107,9 +139,13 @@ meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 
 **动图读取**：`learn_meme` 和上传识图会把 GIF 采样成多帧胶片条再送模型，caption 能描述动作；原图仍保留动画。WebP / APNG 只读元数据、按第一帧识别。
 
-**IM 投递**：接入 dsh-im 后，`send_meme` 候选带绝对路径，模型调用 `dsh_im_return_file` 发原生图片；Web 聊天仍用 `[表情: 描述]`。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接 QQ。
+### IM 投递
 
-**QQ 官方机器人（[dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot)）**：候选带 `absPath`，交给 `qqbot_send_file` 的 `file_path`。dsh-qqbot 默认有路径白名单，需要把图库目录加进 `sendFile.extraRoots`：
+经 [dsh-im](https://github.com/xmanrui/dsh-im) 接入后，`send_meme` 候选带绝对路径，模型调用 `dsh_im_return_file` 发原生图片；Web 聊天仍用 `[表情: 描述]`。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接 QQ。
+
+### QQ 官方机器人
+
+对 [dsh-qqbot](https://github.com/tencent-connect/dsh-qqbot) 会话，候选带 `absPath`，交给 `qqbot_send_file` 的 `file_path`。dsh-qqbot 默认有路径白名单，需要把图库目录加进 `sendFile.extraRoots`：
 
 ```yaml
 # qqbot profile 的 cordis.patch.yml（或「设置 → QQ 机器人」）
@@ -137,8 +173,32 @@ meme_update path="memes/work/a.jpg" caption="加班到趴桌"
 
 插件 HTTP 接口默认只接受回环 Host；手机/局域网与反向代理的配置见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
 
+## 开发
+
+纯 ESM，没有构建步骤。克隆仓库后直接跑测试：
+
+```sh
+git clone https://github.com/yyh-001/dsh-meme.git
+cd dsh-meme
+npm test
+```
+
+测试用 Node 内置 test runner（`node --test test/*.test.mjs`），发版前应全绿。本机用 `link:` 装进 profile 时，改完代码重启 DSH 即生效；给 agent 的硬约定见 [AGENTS.md](./AGENTS.md)。
+
 ## 交流反馈
 
-[QQ 1 群（已满）](https://qm.qq.com/q/7AD2g70HqS) · [dsh 插件 2 群](https://qm.qq.com/q/HCtId2UY4q)
+- 遇到问题先看 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)，没解决就 [开 issue](https://github.com/yyh-001/dsh-meme/issues/new/choose)。
+- 交流群：[QQ 1 群（已满）](https://qm.qq.com/q/7AD2g70HqS) · [dsh 插件 2 群](https://qm.qq.com/q/HCtId2UY4q)
+- 版本更新见 [npm](https://www.npmjs.com/package/dsh-meme?activeTab=versions)。
 
-代码采用 [MIT](./LICENSE) 许可；图库图片的来源与使用许可请分别查看各图库说明。
+## 相关项目
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) — 上游 agent 平台
+- [dsh-im](https://github.com/xmanrui/dsh-im) — QQ / 微信 / 飞书等 IM 接入，表情包以原生图片发送
+- [dsh-meme-packs](https://github.com/yyh-001/dsh-meme-packs) — 可下载图库与机器可读目录
+- [dsh-companion](https://github.com/yyh-001/dsh-companion) — 陪伴模式插件，也能接 QQ 通道
+- [agent-expression](https://github.com/yyh-001/agent-expression) — 同一套图库思路的本地 Skill，适配 OpenClaw / Hermes / Cursor
+
+## 许可
+
+代码采用 [MIT](./LICENSE) 许可。内置、市场与第三方图库的图片版权与使用范围见各图库说明。
