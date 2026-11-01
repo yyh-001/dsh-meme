@@ -149,12 +149,13 @@ test('开启 + 50%:命中后要求「这一轮发一张」,不再给按气氛跳
   Math.random = () => 0.1 // 10 < 50,命中
   try {
     const web = await promptOf(webSession())
-    assert.match(web, /发图概率抽签:本轮命中/)
-    assert.match(web, /这一轮要主动发一张表情包/)
+    assert.match(web, /发图概率抽签命中/)
+    assert.match(web, /必须主动发一张表情包/)
+    assert.match(web, /send_meme/)
     assert.doesNotMatch(web, /可以按聊天气氛主动发表情包/, '命中不再只是「允许」')
     assert.doesNotMatch(web, /抽签未命中/)
     const im = await promptOf(imSession())
-    assert.match(im, /发图概率抽签:本轮命中/)
+    assert.match(im, /发图概率抽签命中/)
     assert.match(im, /dsh_im_return_file/)
   } finally {
     Math.random = original
@@ -164,12 +165,12 @@ test('开启 + 50%:命中后要求「这一轮发一张」,不再给按气氛跳
 test('开启 + 100%:每轮命中都要求发一张', async () => {
   setSettings({ sendChanceEnabled: true, sendChance: 100 })
   const web = await promptOf(webSession())
-  assert.match(web, /发图概率抽签:本轮命中/)
-  assert.match(web, /这一轮要主动发一张表情包/)
-  assert.match(web, /主动斗图/)
+  assert.match(web, /发图概率抽签命中/)
+  assert.match(web, /必须主动发一张表情包/)
+  assert.match(web, /斗图规则/)
   assert.doesNotMatch(web, /抽签未命中/)
   const im = await promptOf(imSession())
-  assert.match(im, /发图概率抽签:本轮命中/)
+  assert.match(im, /发图概率抽签命中/)
   assert.match(im, /dsh_im_return_file/)
 })
 
@@ -210,7 +211,7 @@ test('每轮只抽一次:同一轮多次装配结果一致,新用户消息重新
     // 同会话新用户消息(seq 变了)= 新一轮,重新抽签
     Math.random = () => 0.0
     const nextTurn = await promptOf(webSession({ id: 'session-turn-cache', seq: 4 }))
-    assert.match(nextTurn, /发图概率抽签:本轮命中/, '新消息应该重新抽签')
+    assert.match(nextTurn, /发图概率抽签命中/, '新消息应该重新抽签')
   } finally {
     Math.random = original
   }

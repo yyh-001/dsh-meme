@@ -609,9 +609,20 @@ export function apply(ctx, config) {
    * 直接换成「本轮只回文字」的版本,并保留用户明确要图时的投递方式。
    */
   // 抽签是程序决定的,但「发不发」最终由模型调用 send_meme 执行。命中若只写「可以发」,
-  // 模型经常选择不发,实际发图率会明显低于设置值(用户设 100% 仍收到纯文字)。
-  // 所以命中一律写成「这一轮要发一张」,只给「图库完全不可用」一个出口。
-  const SEND_CHANCE_HIT_RULE = '发图概率抽签:本轮命中。这一轮要主动发一张表情包:先用 send_meme 按当前气氛挑图,挑到后按渠道规则发出去(Web 回复里写 [表情: 描述],IM 把候选 path 交给 dsh_im_return_file);只有图库完全不可用、确实没有能用的图时,才允许只回文字。'
+  // 模型经常选择不发,实际发图率会明显低于设置值(实测 30% 命中轮仍回纯文字)。
+  // 所以命中一律写成「必须发一张」,并替换默认提示词而不是只在末尾补一句——
+  // 默认提示词里「想发就发」的措辞会盖过末尾的短规则。
+  const SEND_CHANCE_HIT_RULE = '发图概率抽签:本轮命中(最高优先级)。这一轮必须主动发一张表情包:先调用 send_meme 挑一张贴合当前气氛的图,然后 Web 把候选的 [表情: 描述] 原样写进回复正文、IM 把候选 path 交给 dsh_im_return_file;不要只写文字描述,也不要贴图片路径。只有 send_meme 报错或确实没有任何候选时,才允许只回文字。'
+  const chanceHitPrompt = (channel) => {
+    const label = IM_CHANNEL_LABELS[channel] || 'IM'
+    return '斗图规则:本轮发图概率抽签命中——这一轮必须主动发一张表情包:\n' +
+      '- 先调用 send_meme(tag 或 query) 挑一张贴合当前气氛的图;\n' +
+      (channel
+        ? '- 把候选的 path 原样交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字;\n'
+        : '- 把候选的 [表情: 描述] 原样写进回复正文(前端会配图);\n') +
+      '- 不要只写文字描述、不要贴图片路径或 markdown 图片;\n' +
+      '- 只有 send_meme 报错或确实没有任何候选时,才允许只回文字。'
+  }
   const SEND_CHANCE_MISS_RULE = '发图概率抽签:本轮未命中——这一轮不要主动发表情图片:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file / qqbot_send_file,也不要在回复里贴图片路径或 markdown 图片;用文字接梗、吐槽、卖萌即可。只有用户明确要求发表情/发图/斗图时,才照常发。'
   const chanceMissPrompt = (channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
@@ -656,18 +667,25 @@ export function apply(ctx, config) {
   const turnKeyOf = (session) => {
     try {
       const id = String(session?.id || session?.sessionId || '')
+      // 拿不到会话 id 就别造 key:早先的兜底 `#events0` 是**全进程共享**的一格缓存,
+      // 某一轮 miss 写进去以后,所有识别不到会话的 agent/步骤都永远读 miss(实测 0/8)。
+      if (!id) return ''
       const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : []
       for (let i = events.length - 1; i >= 0; i--) {
         const event = events[i]
         if (event && event.type === 'user/message' && Number.isSafeInteger(event.seq)) return id + '#' + event.seq
       }
-      return id + '#events' + events.length
+      // 没找到用户消息:用最后一条事件的 seq(每步都会前进);一条都没有就不缓存
+      const last = events.length > 0 ? events[events.length - 1] : null
+      return last && Number.isSafeInteger(last.seq) ? id + '#e' + last.seq : ''
     } catch { return '' }
   }
   const chanceAllowedFor = (session) => {
     const chance = sendChanceOf()
     const key = turnKeyOf(session)
-    if (!key) return Math.random() * 100 < chance
+    // 识别不到会话/轮次(通常是子 agent 的 assemble):按「不主动发图」处理,
+    // 既不写缓存也不掷骰子 —— 子 agent 本来就不该往聊天里发表情。
+    if (!key) return false
     if (chanceRolls.has(key)) return chanceRolls.get(key)
     const allowed = Math.random() * 100 < chance
     chanceRolls.set(key, allowed)
@@ -727,11 +745,13 @@ export function apply(ctx, config) {
       // 未命中:整段换成只回文字版本——默认提示词整段都在教主动发图,
       // 在末尾补一句「不要发」会和它打架,模型多半照发。
       text = chanceMissPrompt(channel)
+    } else if (chanceOn) {
+      // 命中:同样整段替换,避免默认提示词里「想发就发」的措辞稀释强制指令
+      text = chanceHitPrompt(channel)
     } else {
       // IM 会话:默认提示词整段换成 IM 版([表情:] 那条在 IM 里是错的)
       text = channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT
       if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
-      else if (chanceOn) text += '\n\n' + SEND_CHANCE_HIT_RULE
     }
     assembled.sections.push({ name: 'dsh-expression:companion', text })
     return assembled
