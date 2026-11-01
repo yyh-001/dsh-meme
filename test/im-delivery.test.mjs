@@ -221,13 +221,13 @@ test('系统提示:IM 会话追加原生发图规则,Web 会话保持原提示�
   const imPrompt = await run({ agent: { session: imSession('qq') } })
   assert.ok(imPrompt.sections.some((s) => s.name === 'dsh-expression:companion'))
   const imText = imPrompt.sections.find((s) => s.name === 'dsh-expression:companion').text
-  assert.match(imText, /主动用 send_meme/, '主动斗图规则仍在')
+  assert.match(imText, /send_meme/, '主动斗图规则仍在')
   assert.match(imText, /dsh_im_return_file/)
   assert.match(imText, /QQ/)
   assert.match(imText, /不要写 \[表情:/)
   assert.match(imText, /markdown/, 'IM 提示要禁止正文里再放 markdown 图片/路径')
   assert.match(imText, /方括号/, 'IM 提示要禁止方括号描述标记')
-  assert.match(imText, /不用等用户先授权/)
+  assert.match(imText, /不用等用户开口/)
 
   const webPrompt = await run({ agent: { session: webSession() } })
   const webText = webPrompt.sections.find((s) => s.name === 'dsh-expression:companion').text

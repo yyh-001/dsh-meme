@@ -564,12 +564,10 @@ export function apply(ctx, config) {
     } catch (e) {}
   }
   // 陪伴模式提示词:模型主动斗图。设置页可编辑覆盖(settings.companionPrompt)。
-  const DEFAULT_COMPANION_PROMPT = '斗图规则:主动斗图,不要等用户开口:\n' +
-    '- 聊天气氛合适就主动用 send_meme 发一张贴题的表情包,不用等用户要求,发图优先于纯文字;\n' +
-    '- 发图先 search 拿候选,[表情: 描述] 里的描述必须抄候选原文,自己编的描述前端配不上图;\n' +
-    '- 在 QQ 官方机器人会话里(工具表里有 qqbot_send_file,即 dsh-qqbot 插件):不要写 [表情: 描述] 标记,把挑中候选的 absPath(绝对路径)原样传给 qqbot_send_file 的 file_path 发出,正文只写普通文字、不要贴路径;若被路径白名单拒绝,提示用户把图库目录(通常 ~/.dsh/meme-packs)加进 dsh-qqbot 配置的 sendFile.extraRoots;\n' +
-    '- 情绪到点、接梗、吐槽、卖萌时都主动甩图,别冷场;对方说正事/干活时克制;\n' +
-    '- 发完保持简短,让图自己说话,不啰嗦不复述。'
+  const DEFAULT_COMPANION_PROMPT = '斗图规则:氛围合适就主动发一张表情包,不用等用户开口;对方说正事时克制。\n' +
+    '- 先调 send_meme 拿候选,[表情: 描述] 必须抄候选原文,别自己编;\n' +
+    '- QQ 官方机器人(工具表里有 qqbot_send_file):不要写标记,把候选 absPath 原样传给 file_path;\n' +
+    '- 发完简短,让图自己说话,不啰嗦不复述。'
   /**
    * dsh-im 的 IM 渠道里没有 dsh-meme 的前端配图器:[表情: 描述] 只会被当成一行
    * 方括号文字发出。所以 IM 会话要换一条投递路径——send_meme 在 IM 模式会返回
@@ -588,11 +586,10 @@ export function apply(ctx, config) {
   const imNoInlineImageRule = (label) => '- 回复正文只写普通聊天的文字:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要写 markdown 图片(![]()),更不要把本地文件路径贴进回复——' + label + ' 里这些只会显示成难看的文字,图片会由 dsh_im_return_file 作为原生消息发出;\n'
   const imCompanionPrompt = (channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
-    return '斗图规则:主动斗图,不要等用户开口:\n' +
-      '- 聊天气氛合适就主动用 send_meme 拿候选,再把挑中的候选 path(绝对路径)交给 dsh_im_return_file,让它作为 ' + label + ' 原生图片消息发出,发图优先于纯文字;\n' +
+    return '斗图规则:氛围合适就主动发图,不用等用户开口;对方说正事时克制。\n' +
+      '- 先调 send_meme 拿候选,把候选 path 交给 dsh_im_return_file 作为 ' + label + ' 原生图片发出;\n' +
       imNoInlineImageRule(label) +
-      '- 也不用在正文里解释图片投递过程(不必说「图已排队/等发出」),发完保持简短,让图自己说话,不啰嗦不复述;\n' +
-      '- 不用等用户先授权、先说明「可以发表情」,直接发;情绪到点、接梗、吐槽、卖萌时都主动甩图,别冷场,对方说正事/干活时克制。'
+      '- 发完保持简短,不解释投递过程。'
   }
   /** 用户自定义过提示词时不动原文,只在末尾补 IM 的投递方式 */
   const imCompanionRules = (channel) => {
@@ -602,36 +599,41 @@ export function apply(ctx, config) {
       imNoInlineImageRule(label) +
       '- 不用等用户先授权:气氛合适就直接 send_meme → dsh_im_return_file 主动发;对方说正事/干活时克制。'
   }
-  /**
-   * 发图概率的提示词:抽签结果由插件决定,模型只负责执行。
-   * 未命中时不能只在默认提示词后面补一句「不要发」——默认提示词整段都在教
-   * 「主动斗图、发图优先于纯文字」,两句冲突时模型很容易照样发。所以未命中
-   * 直接换成「本轮只回文字」的版本,并保留用户明确要图时的投递方式。
-   */
-  // 抽签是程序决定的,但「发不发」最终由模型调用 send_meme 执行。命中若只写「可以发」,
-  // 模型经常选择不发,实际发图率会明显低于设置值(实测 30% 命中轮仍回纯文字)。
-  // 所以命中一律写成「必须发一张」,并替换默认提示词而不是只在末尾补一句——
-  // 默认提示词里「想发就发」的措辞会盖过末尾的短规则。
-  const SEND_CHANCE_HIT_RULE = '发图概率抽签:本轮命中(最高优先级)。这一轮必须主动发一张表情包:先调用 send_meme 挑一张贴合当前气氛的图,然后 Web 把候选的 [表情: 描述] 原样写进回复正文、IM 把候选 path 交给 dsh_im_return_file;不要只写文字描述,也不要贴图片路径。只有 send_meme 报错或确实没有任何候选时,才允许只回文字。'
-  const chanceHitPrompt = (channel) => {
+  // ---- 主动发图三档(关闭 / 看气氛 / 每轮都发) ----
+  // 不再让用户调 0-100% 概率:三档各配一套固定提示词,同一档内 system prompt
+  // 不变,不会因为每轮抽签结果不同而破坏前缀缓存。
+  const SEND_GEARS = ['off', 'auto', 'active', 'always']
+  const normalizeSendGear = (value) => (SEND_GEARS.includes(value) ? value : 'auto')
+  const GEAR_OFF_RULE = '主动发图档位:关闭——这一轮不要主动发图,只回文字;只有用户明确要求发表情/发图/斗图时才按上面的发送方式发。'
+  const GEAR_ACTIVE_RULE = '主动发图档位:活跃——发图比平时更频繁:大部分合适的回合都主动发一张表情包,只有对方明确在说正事/严肃话题时才克制。'
+  const GEAR_ALWAYS_RULE = '主动发图档位:每轮都发——这一轮必须主动发一张表情包:先调 send_meme 挑贴合当前气氛的图,再按发送方式发出;不要只写文字描述,只有 send_meme 报错或没有任何候选时才允许只回文字。'
+  const gearPrompt = (gear, channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
-    return '斗图规则:本轮发图概率抽签命中——这一轮必须主动发一张表情包:\n' +
-      '- 先调用 send_meme(tag 或 query) 挑一张贴合当前气氛的图;\n' +
-      (channel
-        ? '- 把候选的 path 原样交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字;\n'
-        : '- 把候选的 [表情: 描述] 原样写进回复正文(前端会配图);\n') +
-      '- 不要只写文字描述、不要贴图片路径或 markdown 图片;\n' +
-      '- 只有 send_meme 报错或确实没有任何候选时,才允许只回文字。'
-  }
-  const SEND_CHANCE_MISS_RULE = '发图概率抽签:本轮未命中——这一轮不要主动发表情图片:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file / qqbot_send_file,也不要在回复里贴图片路径或 markdown 图片;用文字接梗、吐槽、卖萌即可。只有用户明确要求发表情/发图/斗图时,才照常发。'
-  const chanceMissPrompt = (channel) => {
-    const label = IM_CHANNEL_LABELS[channel] || 'IM'
-    return '斗图规则:本轮发图概率抽签未命中——只回文字,不主动发表情图片:\n' +
-      '- 不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file 或 qqbot_send_file,也不要在回复里贴图片路径/markdown 图片;\n' +
-      '- 用文字接梗、吐槽、卖萌、接话;对方说正事/干活时正常帮忙;\n' +
-      (channel
-        ? '- 只有用户明确要求发表情/发图/斗图时:先 send_meme 拿候选,再把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字。'
-        : '- 只有用户明确要求发表情/发图/斗图时,才照常把候选的 [表情: 描述] 写进回复(QQ 官方机器人会话改用 qqbot_send_file)。')
+    if (gear === 'off') {
+      return '斗图规则:不主动发表情包,只回文字;\n' +
+        '- 只有用户明确要求发表情/发图/斗图时才发:先调 send_meme 拿候选;\n' +
+        (channel
+          ? '- 把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文不要写标记/路径。\n'
+          : '- 把候选的 [表情: 描述] 写进回复。\n')
+    }
+    if (gear === 'active') {
+      return '斗图规则:活跃模式,发图比平时更频繁:\n' +
+        '- 大部分合适的回合都主动发一张表情包,接梗、吐槽、卖萌时别冷场;\n' +
+        '- 先调 send_meme 挑一张贴合当前气氛的图,' +
+        (channel
+          ? '把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字。\n'
+          : '把候选的 [表情: 描述] 原样写进回复。\n') +
+        '- 只有对方明确在说正事/严肃话题时才克制。'
+    }
+    if (gear === 'always') {
+      return '斗图规则:每轮都必须主动发一张表情包:\n' +
+        '- 先调 send_meme 挑一张贴合当前气氛的图;\n' +
+        (channel
+          ? '- 把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字。\n'
+          : '- 把候选的 [表情: 描述] 原样写进回复。\n') +
+        '- 不要只写文字描述;只有 send_meme 报错或没有任何候选时才允许只回文字。'
+    }
+    return channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT
   }
   /** dsh-im 是否在进程内(它提供 dsh_im_return_file,是 IM 发图的唯一通道) */
   const hasImDelivery = () => {
@@ -649,57 +651,30 @@ export function apply(ctx, config) {
   const qqSendResizeOf = () => readSettings().qqSendResize === true
   const qqSendEdgeOf = () => normalizeQqSendEdge(readSettings().qqSendEdge)
   /**
-   * 发图概率:开关默认关,概率默认 30%。开启后每轮(一条用户消息)抽一次签,
-   * 命中才允许 AI 主动发图,未命中就只回文字;用户明确要图时不受限制。
-   * 只在「发送方式 = 自动」下生效(纯文字本来不发、图片模式要求每次真发)。
+   * 主动发图档位(settings.sendGear):off = 不主动发;auto = 看气氛(默认);
+   * always = 每轮都发。三档各配一套固定提示词,不掷骰子、不注入额外消息,
+   * 与宿主只通过 system-prompt/assemble 这一层交互。
    */
-  const sendChanceOn = () => readSettings().sendChanceEnabled === true
-  const sendChanceOf = () => normalizeSendChance(readSettings().sendChance)
+  const sendGearOf = () => {
+    const s = readSettings()
+    if (typeof s.sendGear === 'string') return normalizeSendGear(s.sendGear)
+    // 兼容旧的 0-100% 概率设置:没开=看气氛;0=关闭;100=每轮都发;中间值归看气氛
+    if (s.sendChanceEnabled !== true) return 'auto'
+    const legacy = normalizeSendChance(s.sendChance)
+    if (legacy <= 0) return 'off'
+    if (legacy >= 100) return 'always'
+    return 'auto'
+  }
   /**
    * 快捷面板点图行为(issue #61):默认「点一张直接发送」(老习惯);
    * 设置里关闭后只把 [表情: 描述] 插进输入框,由用户自己按回车发。
    */
   const pickerSendOnClickOf = () => readSettings().pickerSendOnClick !== false
-  // 抽签结果按「会话 + 最后一条用户消息」缓存:system-prompt/assemble 每模型步都会跑,
-  // 同一轮不能重掷;新消息 seq 变了才是新一轮。Map 只留最近若干轮,防止长会话涨内存。
-  const chanceRolls = new Map()
-  const CHANCE_ROLL_CACHE_MAX = 200
-  const turnKeyOf = (session) => {
-    try {
-      const id = String(session?.id || session?.sessionId || '')
-      // 拿不到会话 id 就别造 key:早先的兜底 `#events0` 是**全进程共享**的一格缓存,
-      // 某一轮 miss 写进去以后,所有识别不到会话的 agent/步骤都永远读 miss(实测 0/8)。
-      if (!id) return ''
-      const events = typeof session?.snapshotEvents === 'function' ? session.snapshotEvents() : []
-      for (let i = events.length - 1; i >= 0; i--) {
-        const event = events[i]
-        if (event && event.type === 'user/message' && Number.isSafeInteger(event.seq)) return id + '#' + event.seq
-      }
-      // 没找到用户消息:用最后一条事件的 seq(每步都会前进);一条都没有就不缓存
-      const last = events.length > 0 ? events[events.length - 1] : null
-      return last && Number.isSafeInteger(last.seq) ? id + '#e' + last.seq : ''
-    } catch { return '' }
-  }
-  const chanceAllowedFor = (session) => {
-    const chance = sendChanceOf()
-    const key = turnKeyOf(session)
-    // 识别不到会话/轮次(通常是子 agent 的 assemble):按「不主动发图」处理,
-    // 既不写缓存也不掷骰子 —— 子 agent 本来就不该往聊天里发表情。
-    if (!key) return false
-    if (chanceRolls.has(key)) return chanceRolls.get(key)
-    const allowed = Math.random() * 100 < chance
-    chanceRolls.set(key, allowed)
-    if (chanceRolls.size > CHANCE_ROLL_CACHE_MAX) chanceRolls.delete(chanceRolls.keys().next().value)
-    return allowed
-  }
   /**
-   * 发给 send_meme 的抽签回调:返回 null = 不启用/不在自动模式(不限制),
-   * false = 本轮未命中(工具结果要和系统提示一起压制主动发图)。
+   * 发给 send_meme 的档位回调:返回 false = 关闭档,工具结果要提示别主动发;
+   * null = 不限制。只影响主动发图,用户明确要图时模型仍可正常挑图。
    */
-  const proactiveGateOf = (session) => {
-    if (!sendChanceOn() || sendModeOf() !== 'auto') return null
-    return chanceAllowedFor(session)
-  }
+  const proactiveGateOf = () => (sendGearOf() === 'off' && sendModeOf() === 'auto' ? false : null)
   // 启动时探测一次 sharp(dsh-im 自带);不可用时开关仍可保存,但发送按原图。
   void loadSharp()
   /** 设置页「允许局域网访问图库」(issue #54):默认关,打开后局域网 IP 字面量的 Host 也放行 */
@@ -727,31 +702,26 @@ export function apply(ctx, config) {
     const sendMode = normalizeSendMode(settingsNow.sendMode)
     const channel = hasImDelivery() ? imChannelOfSession(context?.agent?.session) : null
     const custom = settingsNow.companionPrompt
-    // 发图概率只在「自动」下抽签;纯文字/图片模式的语义是确定的,不掺随机
-    const chanceOn = settingsNow.sendChanceEnabled === true && sendMode === 'auto'
-    const chanceAllowed = chanceOn ? chanceAllowedFor(context?.agent?.session) : true
+    // 三档只在「自动」发送方式下有区别;纯文字/图片模式的语义是确定的
+    const gear = sendMode === 'auto' ? sendGearOf() : 'auto'
     let text
     if (custom) {
-      // 用户自定义提示词永远保留原文,只在末尾追加当前模式/渠道/抽签的规则
+      // 用户自定义提示词永远保留原文,只在末尾追加当前模式/渠道/档位的规则
       text = custom
       if (sendMode === 'text') text += '\n\n' + TEXT_MODE_RULE
       else if (channel) text += '\n\n' + imCompanionRules(channel)
       if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
-      else if (chanceOn) text += '\n\n' + (chanceAllowed ? SEND_CHANCE_HIT_RULE : SEND_CHANCE_MISS_RULE)
+      else if (gear === 'off') text += '\n\n' + GEAR_OFF_RULE
+      else if (gear === 'active') text += '\n\n' + GEAR_ACTIVE_RULE
+      else if (gear === 'always') text += '\n\n' + GEAR_ALWAYS_RULE
     } else if (sendMode === 'text') {
       // 纯文字:默认提示词里的发图指令全部压掉(仍保留斗图语气),也不追加 IM 投递规则
       text = DEFAULT_COMPANION_PROMPT + '\n\n' + TEXT_MODE_RULE
-    } else if (chanceOn && !chanceAllowed) {
-      // 未命中:整段换成只回文字版本——默认提示词整段都在教主动发图,
-      // 在末尾补一句「不要发」会和它打架,模型多半照发。
-      text = chanceMissPrompt(channel)
-    } else if (chanceOn) {
-      // 命中:同样整段替换,避免默认提示词里「想发就发」的措辞稀释强制指令
-      text = chanceHitPrompt(channel)
+    } else if (sendMode === 'image') {
+      text = (channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT) + '\n\n' + IMAGE_MODE_RULE
     } else {
-      // IM 会话:默认提示词整段换成 IM 版([表情:] 那条在 IM 里是错的)
-      text = channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT
-      if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
+      // 三档各一套提示词;IM 会话在 gearPrompt 里换成 IM 投递写法
+      text = gearPrompt(gear, channel)
     }
     assembled.sections.push({ name: 'dsh-expression:companion', text })
     return assembled
@@ -1268,9 +1238,8 @@ export function apply(ctx, config) {
         qqSendEdge: normalizeQqSendEdge(s.qqSendEdge),
         // undefined = 还在探测 sharp;false = 当前环境没有缩放组件
         qqSendResizeSupported: sharpStatus(),
-        // 发图概率:默认关;打开后每轮按概率决定是否主动发图(仅「自动」发送方式)
-        sendChanceEnabled: s.sendChanceEnabled === true,
-        sendChance: normalizeSendChance(s.sendChance),
+        // 主动发图档位:off=不主动 / auto=看气氛(默认) / always=每轮都发
+        sendGear: sendGearOf(),
         // 点图行为:true = 直接发送(默认);false = 只放进输入框
         pickerSendOnClick: s.pickerSendOnClick !== false,
         // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
@@ -2753,18 +2722,17 @@ export function apply(ctx, config) {
                   ? '已关闭 QQ 表情尺寸缩放:按原图发送'
                   : changedEdge ? 'QQ 发图长边已设为 ' + edge + 'px' : 'QQ 表情尺寸缩放保持关闭')
             json(res, { ok: true, ...packPayload(), message })
-          } else if (op === 'setSendChance') {
-            // 发图概率:开关 + 0-100 百分比。开启后每轮由插件抽签,命中才允许
-            // AI 主动发图;用户明确要图不受限制,「纯文字/图片」发送方式下不生效。
-            const enabled = body.enabled === true
-            const chance = normalizeSendChance(body.chance)
-            writeSettings({ sendChanceEnabled: enabled, sendChance: chance })
-            const message = enabled
-              ? (chance === 0
-                  ? '已开启发图概率:0%,AI 不再主动发图,只在你明确要图时才发'
-                  : '已开启发图概率:每轮约 ' + chance + '% 概率主动发图(仅「自动」发送方式生效)')
-              : '已关闭发图概率:AI 按提示词自由决定是否发图'
-            json(res, { ok: true, ...packPayload(), message })
+          } else if (op === 'setSendGear') {
+            // 主动发图三档:off=不主动 / auto=看气氛 / always=每轮都发。
+            // 三档各一套固定提示词,不掷骰子、不注入消息,只影响「自动」发送方式。
+            const gear = String(body.gear == null ? '' : body.gear).trim()
+            if (!SEND_GEARS.includes(gear)) throw new Error('主动发图档位只能是 off / auto / active / always')
+            writeSettings({ sendGear: gear })
+            const label = gear === 'off' ? '关闭(只在你明确要图时发)' : gear === 'active' ? '活跃(发图更频繁)' : gear === 'always' ? '每轮都发' : '看气氛'
+            json(res, {
+              ok: true, ...packPayload(),
+              message: '主动发图已设为「' + label + '」;请新开一个会话再聊,当前会话的提示词已固定',
+            })
           } else if (op === 'setPickerSendOnClick') {
             // 快捷面板点图行为:开 = 点一张直接发送;关 = 只把标记放进输入框(issue #61)
             const enabled = body.enabled === true

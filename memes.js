@@ -672,12 +672,10 @@ export function normalizeSendMode(value) {
 }
 
 /**
- * 发图概率(设置页「发图概率」):0-100 的整数百分比,默认 30%。
- * 只在「发送方式 = 自动」且开启陪伴提示词时生效——每轮(一条用户消息)由插件
- * 掷一次骰子,命中才允许 AI 主动发图;用户明确要图时不受概率限制。
+ * 旧版 0-100 发图概率的归一化:只用于把老设置迁移到三档(0→off、100→always、
+ * 其它值→auto)。新设置键是 sendGear,不再让用户调百分比。
  */
 export const DEFAULT_SEND_CHANCE = 30
-export const SEND_CHANCE_OPTIONS = [0, 10, 20, 30, 50, 70, 100]
 export function normalizeSendChance(value) {
   if (value == null || value === '') return DEFAULT_SEND_CHANCE
   const n = typeof value === 'number' ? value : Number(value)
@@ -1016,10 +1014,10 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
           ? rows.map((m, i) => ({ caption: captionOf(m), path: absolutePathOf(m), absPath: sendable(i), library: libraryOf(m) }))
           : rows.map((m, i) => ({ path: absolutePathOf(m), absPath: sendable(i), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
-      // 发图概率未命中:工具结果也要跟系统提示保持一致,否则模型看着候选行照发。
+      // 主动发图档位=关闭:工具结果也要跟系统提示保持一致,否则模型看着候选行照发。
       // 用户明确要图时不拦——提示里保留主动发图以外的正常投递方式。
       const chanceNote = chanceBlocked
-        ? '本轮发图概率抽签未命中:不要主动发表情图片,用文字接梗即可;只有用户明确要求发表情/发图/斗图时才照常发。'
+        ? '主动发图档位为「关闭」:不要主动发表情图片,用文字接梗即可;只有用户明确要求发表情/发图/斗图时才照常发。'
         : ''
       const howToSend = textMode
         ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file 或 qqbot_send_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'

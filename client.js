@@ -368,9 +368,9 @@ window.__ModuleLoader__.load({
       const [qqSendResize, setQqSendResize] = React.useState(false)
       const [qqSendEdge, setQqSendEdge] = React.useState(300)
       const [qqSendResizeSupported, setQqSendResizeSupported] = React.useState(true)
-      // 发图概率:打开后每轮按概率决定是否主动发图(仅「自动」发送方式);默认关
-      const [sendChanceOn, setSendChanceOn] = React.useState(false)
-      const [sendChance, setSendChance] = React.useState(30)
+      // 主动发图三档:off/auto/always(仅「自动」发送方式);默认 auto
+      // 主动发图三档:off=不主动 / auto=看气氛(默认) / always=每轮都发
+      const [sendGear, setSendGear] = React.useState('auto')
       // 快捷面板点图行为:true=点一张直接发送(默认);false=只放进输入框(issue #61)
       const [pickerSendOnClick, setPickerSendOnClick] = React.useState(true)
       // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
@@ -389,8 +389,7 @@ window.__ModuleLoader__.load({
         setQqSendEdge([200, 300, 400, 450].includes(Number(res.qqSendEdge)) ? Number(res.qqSendEdge) : 300)
         if (res.qqSendResizeSupported === false) setQqSendResizeSupported(false)
         else if (res.qqSendResizeSupported === true) setQqSendResizeSupported(true)
-        setSendChanceOn(res.sendChanceEnabled === true)
-        setSendChance(Number.isFinite(Number(res.sendChance)) ? Math.max(0, Math.min(100, Math.round(Number(res.sendChance)))) : 30)
+        setSendGear(res.sendGear === 'off' || res.sendGear === 'active' || res.sendGear === 'always' ? res.sendGear : 'auto')
         setPickerSendOnClick(res.pickerSendOnClick !== false)
         // 排布设置(old host 不带该字段,按默认并排处理),同时回写模块级状态
         // 让气泡装饰即时翻新(issue #50)
@@ -809,38 +808,21 @@ window.__ModuleLoader__.load({
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
-      // 发图概率:开关/概率立即保存(不需要「保存」按钮),失败回滚
-      const onToggleSendChance = async (next) => {
-        const prev = sendChanceOn
-        setSendChanceOn(next)
+      // 主动发图档位:三档各配固定提示词,立即保存,失败回滚
+      const onPickSendGear = async (gear) => {
+        const prev = sendGear
+        setSendGear(gear)
         try {
-          const res = await apiPost({ op: 'setSendChance', enabled: next, chance: sendChance })
+          const res = await apiPost({ op: 'setSendGear', gear })
           if (res && res.ok) {
             applyRoot(res)
-            setRootNotice(res.message || (next ? '已开启发图概率' : '已关闭发图概率'))
+            setRootNotice(res.message || '已更新主动发图档位')
           } else {
-            setSendChanceOn(prev)
+            setSendGear(prev)
             setRootNotice('保存失败: ' + ((res && res.error) || ''))
           }
         } catch (e) {
-          setSendChanceOn(prev)
-          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
-        }
-      }
-      const onPickSendChance = async (chance) => {
-        const prev = sendChance
-        setSendChance(chance)
-        try {
-          const res = await apiPost({ op: 'setSendChance', enabled: sendChanceOn, chance })
-          if (res && res.ok) {
-            applyRoot(res)
-            setRootNotice(res.message || '已更新发图概率')
-          } else {
-            setSendChance(prev)
-            setRootNotice('保存失败: ' + ((res && res.error) || ''))
-          }
-        } catch (e) {
-          setSendChance(prev)
+          setSendGear(prev)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
@@ -1689,36 +1671,30 @@ window.__ModuleLoader__.load({
             : qqSendResize
               ? 'QQ/IM 发图前把长边缩到 ' + qqSendEdge + 'px,Web 聊天仍用原图;GIF 保留动画。QQ 更容易按表情渲染,平板端不会拉伸满屏'
               : '保持原图发送。QQ 官方机器人没有表情类型,大图会被当图片消息;打开后缩到 200-450px 更容易被识别成表情'),
-        // 发图概率:每轮(一条用户消息)由插件抽签,命中才允许 AI 主动发图;
-        // 默认关 = 维持原来的「按提示词自由发挥」,用户明确要图时不受概率限制
-        h('div', { className: 'section-title' }, '发图概率'),
+        // 主动发图三档:每档一套固定提示词,不再让用户调概率
+        h('div', { className: 'section-title' }, '主动发图'),
         h('div', { className: 'row', style: { width: '100%' } },
-          h('span', {
-            className: 'switch' + (sendChanceOn ? ' on' : ''),
-            title: sendChanceOn ? '点击关闭:恢复按提示词自由发图' : '点击开启:每轮按概率决定是否主动发图',
-            onClick: () => onToggleSendChance(!sendChanceOn),
-          }),
-          h('span', { style: { fontSize: 12 } }, sendChanceOn ? '按概率发图' : '不限概率'),
           h('select', {
-            value: sendChance,
-            onChange: (e) => onPickSendChance(Number(e.target.value)),
-            disabled: !sendChanceOn,
-            title: '每轮主动发图的概率;用户明确要图时不受限制',
-            style: { width: 110, marginLeft: 8 },
+            value: sendGear,
+            onChange: (e) => onPickSendGear(e.target.value),
+            title: '三档各配一套提示词;用户明确要图时不受档位限制',
+            style: { flex: 1, minWidth: 160 },
           },
-            // 选项与 memes.js 的 SEND_CHANCE_OPTIONS 一致;手改设置里的非预设值也回显出来
-            [...new Set([0, 10, 20, 30, 50, 70, 100, sendChance])].sort((a, b) => a - b)
-              .map((n) => h('option', { key: n, value: n }, n + '%')),
+            h('option', { value: 'off' }, '关闭（只在你明确要图时发）'),
+            h('option', { value: 'auto' }, '看气氛（AI 自己判断，默认）'),
+            h('option', { value: 'active' }, '活跃（发图比较频繁）'),
+            h('option', { value: 'always' }, '每轮都发（强制要求）'),
           ),
         ),
         h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
-          !sendChanceOn
-            ? '默认不限制:AI 按提示词自己决定发不发图'
-            : sendChance === 0
-              ? '每轮都不主动发图,只在你明确要图时才发'
-              : sendChance >= 100
-                ? '每轮都主动发一张(会挑贴合气氛的图;图库完全不可用时才回文字)。仅在「发送方式 = 自动」且开启陪伴提示词时生效'
-                : '每轮按 ' + sendChance + '% 概率抽签;命中就主动发一张(图库完全不可用时才回文字)。你明确要图时不受限制,仅在「发送方式 = 自动」且开启陪伴提示词时生效'),
+          (sendGear === 'off'
+            ? '不主动发图,只在你明确要求时发'
+            : sendGear === 'active'
+              ? '大部分合适的回合都主动发一张,明显说正事时克制'
+              : sendGear === 'always'
+                ? '每轮都由提示词要求发一张;图库完全不可用时才回文字'
+                : 'AI 按聊天气氛自己决定发不发')
+          + ';切换后请新开一个会话再聊(当前会话的提示词已固定)'),
         // 快捷面板点图行为(issue #61):默认直接发;关掉只放进输入框,避免手滑发出去
         h('div', { className: 'section-title' }, '快捷发图'),
         h('div', { className: 'row' },

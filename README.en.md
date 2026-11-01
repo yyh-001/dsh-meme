@@ -28,7 +28,7 @@
 ## Features
 
 - 😊 **Click to send** — open 😊 beside the composer, search or filter by pack and mood, and pick an image to send it. Turn off “Click to send” in settings and picking only inserts the marker at your caret, so text and sticker go out together on Enter without accidental sends.
-- 🎭 **Proactive memes** — the AI picks a meme that fits the conversation's mood without waiting to be asked; toggle “Proactive memes”, set a send chance (0–100%; 100% sends a meme every turn), or edit the prompt in settings.
+- 🎭 **Proactive memes** — the AI picks a meme that fits the conversation's mood without waiting to be asked; choose a proactive-meme level (off / by mood / active / every turn) or edit the prompt in settings.
 - 📱 **IM / mobile** — through dsh-im, QQ / WeChat / Feishu and other IM chats send memes as native images with no text marker; on a phone or tablet, open DSH Web over your computer's LAN IP and turn on “Allow LAN access” (off by default). QQ tends to render large images as photos (stretched full-screen on tablets); turn on “QQ send size” in settings to send a 200–450 px copy while Web keeps the original.
 - 🧠 **Learn new images** — upload an image and ask to save it; the AI identifies its category and caption. You can also drop image files into a pack folder and click “扫描新增 (Scan)” — the original bytes (including animated GIFs) are kept, and renamed/deleted files have their stale index rows cleaned up.
 - 🗂️ **Organize packs** — ask the AI to “list my memes”, “find duplicates” or “recategorize this one” — the `meme_list` / `meme_update` tools handle it (deleting stays in the panel to avoid accidents).
@@ -76,7 +76,7 @@ Open **设置 (Settings) → 表情包 (Memes)**:
 
 - **图库 (Packs)** — cards show image count and disk size; click a card to manage images. The category dropdown filters by real categories; “扫描新增 (Scan)” indexes images you copied into the folder and cleans up stale rows. Each switch controls whether the AI can use that pack; several can be enabled. Create, import/export ZIPs, submit, delete and update.
 - **发现 (Discover)** — preview marketplace packs and install them (Release ZIPs verify SHA-256).
-- **设置 (Settings)** — scan directory, proactive memes, prompt, send mode (automatic / text-only / image), send chance (toggle + 0/10/20/30/50/70/100%), QQ send size (toggle + 200/300/400/450 px long edge), layout (side-by-side / full-width row), LAN access, `AGENTS.md`.
+- **设置 (Settings)** — scan directory, proactive memes (off / by mood / active / every turn), prompt, send mode (automatic / text-only / image), QQ send size (toggle + 200/300/400/450 px long edge), layout (side-by-side / full-width row), LAN access, `AGENTS.md`.
 
 <details>
 <summary>Settings screenshots (expand)</summary>
@@ -93,17 +93,17 @@ Open **设置 (Settings) → 表情包 (Memes)**:
   <img src="./docs/panel-discover.png" alt="Discover page with marketplace pack previews" width="631" />
 </p>
 
-**Settings: send mode, send chance and pack directory**
+**Settings: send mode, proactive memes and pack directory**
 
 <p align="center">
-  <img src="./docs/panel-settings.png" alt="Settings page with send mode, send chance and pack directory" width="631" />
+  <img src="./docs/panel-settings.png" alt="Settings page with send mode, proactive memes and pack directory" width="631" />
 </p>
 
 </details>
 
 The default scan directory is `~/.dsh/meme-packs`; settings live in `~/.dsh/dsh-expression.json` and survive upgrades. ZIP imports accept standard compression and plain image folders.
 
-**Send mode** only affects the AI: automatic follows the channel (Web marker, IM native image), text-only never sends images, image requires a real send every time. **Send chance** is off by default; when enabled, each turn rolls the selected chance to decide whether the AI proactively sends an image (automatic mode only), and a direct request for a meme always bypasses the roll. **QQ send size** is off by default; when enabled, QQ/IM sends a copy scaled to the selected long edge (300 px default), Web keeps the original, and GIF frames are preserved — the official QQ bot has no sticker message type, and smaller images are more likely to render as stickers instead of being stretched full-screen on tablets. **Layout** only affects rendering: side-by-side (default) or a full-width image row.
+**Send mode** only affects the AI: automatic follows the channel (Web marker, IM native image), text-only never sends images, image requires a real send every time. **Proactive memes** has four levels: off (only when you ask for one), by mood (default, the AI decides), active (most suitable turns), and every turn (the prompt requires one); they apply only in automatic send mode, take effect in a new session, and a direct request always bypasses the level. **QQ send size** is off by default; when enabled, QQ/IM sends a copy scaled to the selected long edge (300 px default), Web keeps the original, and GIF frames are preserved — the official QQ bot has no sticker message type, and smaller images are more likely to render as stickers instead of being stretched full-screen on tablets. **Layout** only affects rendering: side-by-side (default) or a full-width image row.
 
 ## Troubleshooting
 
