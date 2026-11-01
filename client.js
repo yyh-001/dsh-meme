@@ -1953,7 +1953,8 @@ window.__ModuleLoader__.load({
       '.meme-picker .mp-hover-file{font-size:10px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       // 输入框里的「将发送」表情条(issue #61):选图先落草稿,这条把草稿里的
       // [表情: x] 画成缩略图,让用户看见自己挑了哪张;× 直接从草稿里删掉那一段。
-      '.meme-draft{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px 0;font-size:11px;color:var(--dsw-alias-label-secondary)}',
+      // 挂 conversation.input.dock(输入框上方的 list 槽):自成一张小卡片,和上面的 todo / 待发消息队列并列
+      '.meme-draft{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 10px;font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px}',
       '.meme-draft-label{flex:none;opacity:.8;user-select:none}',
       '.meme-draft-chip{position:relative;width:46px;height:46px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background-color:var(--dsw-alias-bg-base);background-size:contain;background-position:center center;background-repeat:no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center}',
       '.meme-draft-chip img{width:100%;height:100%;object-fit:contain;display:block}',
@@ -3501,10 +3502,15 @@ window.__ModuleLoader__.load({
           getConversation: () => ctx.get('conversation'),
         }),
       ))
-      // 输入框里的「将发送」表情条(issue #61):选图只进草稿,这条让用户看得见挑了哪张,
-      // 也能直接从草稿里移除。没有标记时组件返回 null,不占输入框位置。
-      slots.inject('conversation.input.attachments', () => slots.register(
-        { name: 'conversation.input.attachments', id: 'meme-draft', order: 5, label: '表情包' },
+      // 输入框上方的「将发送」表情条(issue #61):选图只进草稿,这条让用户看得见挑了哪张,
+      // 也能直接从草稿里移除。没有标记时组件返回 null,不占位置。
+      //
+      // 必须挂 conversation.input.dock(list 槽),不能挂 conversation.input.attachments:
+      // 后者是宿主的 **single 槽**,宿主自己的附件条已经占了 priority 0,同优先级再注册
+      // 会直接抛「single slot ... already has a registration」,整个客户端模块加载报错、
+      // 表情条也永远不渲染(issue #62)。dock 是 list 槽,按 id 区分,和 todo / 待发队列共存。
+      slots.inject('conversation.input.dock', () => slots.register(
+        { name: 'conversation.input.dock', id: 'meme-draft', order: 10, label: '表情包' },
         (props) => React.createElement(MemeDraftStrip, {
           inputActions: props.inputActions,
           useInput: props.useInput,

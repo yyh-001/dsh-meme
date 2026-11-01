@@ -251,8 +251,8 @@ test('从草稿删标记：独占一行时把空行收掉，夹在正文里只�
 test('表情条：草稿为空时不渲染，有标记时渲染缩略图/描述和移除按钮', async () => {
   const useInput = (selector) => selector({ draft: '' })
   const { find, inputActions, calls } = await openPicker(useInput)
-  const reg = find('conversation.input.attachments', 'meme-draft')
-  assert.ok(reg, '应注册 conversation.input.attachments')
+  const reg = find('conversation.input.dock', 'meme-draft')
+  assert.ok(reg, '应注册 conversation.input.dock(list 槽,issue #62)')
   passIndex = 0
   assert.equal(run(reg.render({ inputActions, useInput })), null, '空草稿不该占位置')
 
