@@ -104,6 +104,29 @@ test('索引 GET 响应带 layoutMode:设置页不开,装饰器也能拿到排�
   setSettings({})
 })
 
+test('快捷发图设置:pickerSendOnClick 默认 true;关闭后 payload 与索引响应都带 false', async () => {
+  setSettings({})
+  const initial = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  assert.equal(initial.pickerSendOnClick, true, '默认点图直接发送')
+
+  const off = JSON.parse((await post({ op: 'setPickerSendOnClick', enabled: false })).body)
+  assert.equal(off.ok, true)
+  assert.equal(off.pickerSendOnClick, false)
+  assert.match(off.message, /只放进输入框/)
+  const after = JSON.parse((await post({ op: 'getMemeRoot' })).body)
+  assert.equal(after.pickerSendOnClick, false, '保存持久化到设置文件')
+
+  // 面板打开时拉的是索引接口,设置要跟着一起下发
+  const all = JSON.parse((await get('/dsh-memes-api?packId=all')).body)
+  assert.equal(all.pickerSendOnClick, false)
+  const single = JSON.parse((await get('/dsh-memes-api')).body)
+  assert.equal(single.pickerSendOnClick, false)
+
+  const on = JSON.parse((await post({ op: 'setPickerSendOnClick', enabled: true })).body)
+  assert.equal(on.pickerSendOnClick, true)
+  setSettings({})
+})
+
 // ---------- 前端侧(假 DOM,装饰路径) ----------
 
 const { installFakeDom, mountPlugin } = await import('./fake-dom.mjs')

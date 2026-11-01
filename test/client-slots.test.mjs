@@ -56,9 +56,3 @@ test('conversation.input.overlay 的组件类型跨 render 稳定', () => {
   assert.ok(reg, '应注册 conversation.input.overlay')
   assert.equal(reg.render({}).type, reg.render({}).type)
 })
-
-test('conversation.input.dock 的「将发送」表情条跨 render 稳定(issue #61/#62)', () => {
-  const reg = find('conversation.input.dock', 'meme-draft')
-  assert.ok(reg, '应注册 conversation.input.dock(list 槽),不能抢宿主的 attachments(single 槽)')
-  assert.equal(reg.render({}).type, reg.render({}).type)
-})

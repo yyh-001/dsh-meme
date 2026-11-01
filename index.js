@@ -608,11 +608,10 @@ export function apply(ctx, config) {
    * 「主动斗图、发图优先于纯文字」,两句冲突时模型很容易照样发。所以未命中
    * 直接换成「本轮只回文字」的版本,并保留用户明确要图时的投递方式。
    */
-  const SEND_CHANCE_HIT_RULE = '发图概率抽签:本轮命中,可以按聊天气氛主动发表情包(没有合适的图就正常聊天,不用硬凑)。'
-  // 100% 的语义是「每轮都发」,不能沿用「可以/不用硬凑」——那条会让模型觉得不发也行,
-  // 用户设了 100% 仍然经常收到纯文字(实测反馈)。
-  const SEND_CHANCE_ALWAYS_RULE = '发图概率抽签:本轮命中(100%)。这一轮必须主动发一张表情包:先用 send_meme 按当前气氛挑图,挑到后按渠道规则发出去(Web 回复里写 [表情: 描述],IM 把候选 path 交给 dsh_im_return_file);只有图库完全不可用、确实没有能用的图时,才允许只回文字。'
-  const chanceHitRule = (chance) => (Number(chance) >= 100 ? SEND_CHANCE_ALWAYS_RULE : SEND_CHANCE_HIT_RULE)
+  // 抽签是程序决定的,但「发不发」最终由模型调用 send_meme 执行。命中若只写「可以发」,
+  // 模型经常选择不发,实际发图率会明显低于设置值(用户设 100% 仍收到纯文字)。
+  // 所以命中一律写成「这一轮要发一张」,只给「图库完全不可用」一个出口。
+  const SEND_CHANCE_HIT_RULE = '发图概率抽签:本轮命中。这一轮要主动发一张表情包:先用 send_meme 按当前气氛挑图,挑到后按渠道规则发出去(Web 回复里写 [表情: 描述],IM 把候选 path 交给 dsh_im_return_file);只有图库完全不可用、确实没有能用的图时,才允许只回文字。'
   const SEND_CHANCE_MISS_RULE = '发图概率抽签:本轮未命中——这一轮不要主动发表情图片:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file / qqbot_send_file,也不要在回复里贴图片路径或 markdown 图片;用文字接梗、吐槽、卖萌即可。只有用户明确要求发表情/发图/斗图时,才照常发。'
   const chanceMissPrompt = (channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
@@ -645,6 +644,11 @@ export function apply(ctx, config) {
    */
   const sendChanceOn = () => readSettings().sendChanceEnabled === true
   const sendChanceOf = () => normalizeSendChance(readSettings().sendChance)
+  /**
+   * 快捷面板点图行为(issue #61):默认「点一张直接发送」(老习惯);
+   * 设置里关闭后只把 [表情: 描述] 插进输入框,由用户自己按回车发。
+   */
+  const pickerSendOnClickOf = () => readSettings().pickerSendOnClick !== false
   // 抽签结果按「会话 + 最后一条用户消息」缓存:system-prompt/assemble 每模型步都会跑,
   // 同一轮不能重掷;新消息 seq 变了才是新一轮。Map 只留最近若干轮,防止长会话涨内存。
   const chanceRolls = new Map()
@@ -707,7 +711,6 @@ export function apply(ctx, config) {
     const custom = settingsNow.companionPrompt
     // 发图概率只在「自动」下抽签;纯文字/图片模式的语义是确定的,不掺随机
     const chanceOn = settingsNow.sendChanceEnabled === true && sendMode === 'auto'
-    const chance = sendChanceOf()
     const chanceAllowed = chanceOn ? chanceAllowedFor(context?.agent?.session) : true
     let text
     if (custom) {
@@ -716,7 +719,7 @@ export function apply(ctx, config) {
       if (sendMode === 'text') text += '\n\n' + TEXT_MODE_RULE
       else if (channel) text += '\n\n' + imCompanionRules(channel)
       if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
-      else if (chanceOn) text += '\n\n' + (chanceAllowed ? chanceHitRule(chance) : SEND_CHANCE_MISS_RULE)
+      else if (chanceOn) text += '\n\n' + (chanceAllowed ? SEND_CHANCE_HIT_RULE : SEND_CHANCE_MISS_RULE)
     } else if (sendMode === 'text') {
       // 纯文字:默认提示词里的发图指令全部压掉(仍保留斗图语气),也不追加 IM 投递规则
       text = DEFAULT_COMPANION_PROMPT + '\n\n' + TEXT_MODE_RULE
@@ -728,7 +731,7 @@ export function apply(ctx, config) {
       // IM 会话:默认提示词整段换成 IM 版([表情:] 那条在 IM 里是错的)
       text = channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT
       if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
-      else if (chanceOn) text += '\n\n' + chanceHitRule(chance)
+      else if (chanceOn) text += '\n\n' + SEND_CHANCE_HIT_RULE
     }
     assembled.sections.push({ name: 'dsh-expression:companion', text })
     return assembled
@@ -1248,6 +1251,8 @@ export function apply(ctx, config) {
         // 发图概率:默认关;打开后每轮按概率决定是否主动发图(仅「自动」发送方式)
         sendChanceEnabled: s.sendChanceEnabled === true,
         sendChance: normalizeSendChance(s.sendChance),
+        // 点图行为:true = 直接发送(默认);false = 只放进输入框
+        pickerSendOnClick: s.pickerSendOnClick !== false,
         // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
         layoutMode: normalizeLayoutMode(s.layoutMode),
         // 局域网访问图库(issue #54):默认关;打开后手机/平板经局域网 IP 才能看到表情包
@@ -2319,7 +2324,7 @@ export function apply(ctx, config) {
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode) })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode), pickerSendOnClick: pickerSendOnClickOf() })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -2349,6 +2354,7 @@ export function apply(ctx, config) {
             remoteSubs: remoteSubs(),
             remoteDirUrl: remoteDirUrlList(),
             layoutMode: normalizeLayoutMode(readSettings().layoutMode),
+            pickerSendOnClick: pickerSendOnClickOf(),
           })
           return
         }
@@ -2739,6 +2745,16 @@ export function apply(ctx, config) {
                   : '已开启发图概率:每轮约 ' + chance + '% 概率主动发图(仅「自动」发送方式生效)')
               : '已关闭发图概率:AI 按提示词自由决定是否发图'
             json(res, { ok: true, ...packPayload(), message })
+          } else if (op === 'setPickerSendOnClick') {
+            // 快捷面板点图行为:开 = 点一张直接发送;关 = 只把标记放进输入框(issue #61)
+            const enabled = body.enabled === true
+            writeSettings({ pickerSendOnClick: enabled })
+            json(res, {
+              ok: true, ...packPayload(),
+              message: enabled
+                ? '已开启:点表情直接发送'
+                : '已关闭:点表情只放进输入框,按回车和文字一起发送',
+            })
           } else if (op === 'setLayoutMode') {
             // 表情排布:inline = 图与正文并排(默认);stacked = 图独占一行、正文铺开(issue #50)
             const mode = String(body.layoutMode == null ? '' : body.layoutMode).trim()

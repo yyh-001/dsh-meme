@@ -72,15 +72,12 @@ test('宿主的 single 槽 attachments 已被占用时,apply 不再抛错(issue 
     () => slots.register({ name: 'conversation.input.attachments', id: 'meme-draft', order: 5 }, () => null),
     /single slot .* already has a registration/,
   )
-  // 修复后 apply 不应再往 single 槽挤,自然也不会抛
+  // 草稿表情条已整体移除;apply 不应再往宿主的 single 槽(或任何槽)挤
   assert.doesNotThrow(() => {
     globalThis.__dshMeme.apply({ get: (name) => (name === 'slots' ? slots : undefined), effect: () => {} })
   })
-  const dock = slots.entries.find((e) => e.meta.name === 'conversation.input.dock' && e.meta.id === 'meme-draft')
-  assert.ok(dock, '表情条应改挂 conversation.input.dock(list 槽)')
-  assert.equal(dock.meta.order, 10, 'todo(0) 之后、待发队列(20) 之前')
   assert.ok(
-    !slots.entries.some((e) => e.meta.name === 'conversation.input.attachments' && e.meta.id === 'meme-draft'),
-    '不应再注册到宿主的 single 槽',
+    !slots.entries.some((e) => e.meta.id === 'meme-draft'),
+    '不应再注册表情条(之前挂在 attachments 导致整个客户端模块启动失败)',
   )
 })

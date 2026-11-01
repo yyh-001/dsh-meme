@@ -27,7 +27,7 @@
 
 ## Features
 
-- 😊 **Click to send** — open 😊 beside the composer, search or filter by pack and mood; picking an image drops it into the draft at your caret (with a preview above the composer), so text and sticker go out together on Enter. `Shift+click` sends immediately.
+- 😊 **Click to send** — open 😊 beside the composer, search or filter by pack and mood, and pick an image to send it. Turn off “Click to send” in settings and picking only inserts the marker at your caret, so text and sticker go out together on Enter without accidental sends.
 - 🎭 **Proactive memes** — the AI picks a meme that fits the conversation's mood without waiting to be asked; toggle “Proactive memes”, set a send chance (0–100%; 100% sends a meme every turn), or edit the prompt in settings.
 - 📱 **IM / mobile** — through dsh-im, QQ / WeChat / Feishu and other IM chats send memes as native images with no text marker; on a phone or tablet, open DSH Web over your computer's LAN IP and turn on “Allow LAN access” (off by default). QQ tends to render large images as photos (stretched full-screen on tablets); turn on “QQ send size” in settings to send a 200–450 px copy while Web keeps the original.
 - 🧠 **Learn new images** — upload an image and ask to save it; the AI identifies its category and caption. You can also drop image files into a pack folder and click “扫描新增 (Scan)” — the original bytes (including animated GIFs) are kept, and renamed/deleted files have their stale index rows cleaned up.

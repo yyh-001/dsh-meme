@@ -81,10 +81,14 @@ const rows = [
 const packs = [{ id: 'p1', name: '包一', count: 3 }, { id: 'p2', name: '包二', count: 2 }]
 
 const fetched = []
+// 「点图直接发送」设置随面板数据下发;每个用例自己指定开/关
+let mockPickerSendOnClick = true
 globalThis.fetch = async (url) => {
   fetched.push(String(url))
   const reply = (data) => ({ ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) })
-  if (String(url).includes('/dsh-memes-api')) return reply({ ok: true, packId: 'p1', packs, memes: rows, tags: [] })
+  if (String(url).includes('/dsh-memes-api')) {
+    return reply({ ok: true, packId: 'p1', packs, memes: rows, tags: [], pickerSendOnClick: mockPickerSendOnClick })
+  }
   return reply({ ok: false, error: 'unexpected ' + url })
 }
 
@@ -363,7 +367,8 @@ const ensureFilters = (tree, repaint, want = true) => {
 }
 
 /** 装一遍插件并打开面板,返回当前这棵树 + 重绘函数 + setDraft 记录 */
-const openBoard = async () => {
+const openBoard = async ({ sendOnClick = true } = {}) => {
+  mockPickerSendOnClick = sendOnClick
   stateCells = []
   passIndex = 0
   pendingEffects = []
@@ -477,18 +482,22 @@ test('情绪 chip 多选 + 搜索框:两层取交集,清空一键复位', async 
   assert.equal(byClass(tree, 'mp-clear').length, 0, '没有筛选条件就不显示清空')
 })
 
-test('点图格只把标记放进草稿,不直接发送(issue #61);Shift+点 才照旧直发', async () => {
-  const { board, calls } = await openBoard()
-  byClass(board, 'mp-cell')[0].props.onClick()
+test('点图行为跟随设置:开启=直接发送;关闭=只放进草稿(issue #61)', async () => {
+  // 开启(默认):保持老的一键发图
+  const on = await openBoard({ sendOnClick: true })
+  byClass(on.board, 'mp-cell')[0].props.onClick()
   await new Promise((ok) => setTimeout(ok, 0))
-  const drafted = calls.filter((c) => c.kind === 'setDraft')
-  assert.equal(drafted.length, 1)
-  assert.equal(drafted[0].text, '先说两句\n[表情: 开心猫]', '草稿带上原有文字(跨图库也不变)')
-  assert.ok(!calls.some((c) => c.kind === 'submit'), '选图不能自动提交')
-  // Shift+点 是明确要立刻发,保留旧的一键直发
-  calls.length = 0
-  byClass(board, 'mp-cell')[0].props.onClick({ shiftKey: true })
+  const onDraft = on.calls.filter((c) => c.kind === 'setDraft')
+  assert.equal(onDraft.length, 1)
+  assert.equal(onDraft[0].text, '先说两句\n[表情: 开心猫]', '草稿带上原有文字(跨图库也不变)')
+  assert.ok(on.calls.some((c) => c.kind === 'submit'), '开启时点一张直接发送')
+
+  // 关闭:只放草稿,不提交
+  const off = await openBoard({ sendOnClick: false })
+  byClass(off.board, 'mp-cell')[0].props.onClick()
   await new Promise((ok) => setTimeout(ok, 0))
-  assert.equal(calls.filter((c) => c.kind === 'setDraft').length, 1)
-  assert.ok(calls.some((c) => c.kind === 'submit'))
+  const offDraft = off.calls.filter((c) => c.kind === 'setDraft')
+  assert.equal(offDraft.length, 1)
+  assert.equal(offDraft[0].text, '先说两句\n[表情: 开心猫]')
+  assert.ok(!off.calls.some((c) => c.kind === 'submit'), '关闭时不能自动提交')
 })
