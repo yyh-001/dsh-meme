@@ -609,6 +609,10 @@ export function apply(ctx, config) {
    * 直接换成「本轮只回文字」的版本,并保留用户明确要图时的投递方式。
    */
   const SEND_CHANCE_HIT_RULE = '发图概率抽签:本轮命中,可以按聊天气氛主动发表情包(没有合适的图就正常聊天,不用硬凑)。'
+  // 100% 的语义是「每轮都发」,不能沿用「可以/不用硬凑」——那条会让模型觉得不发也行,
+  // 用户设了 100% 仍然经常收到纯文字(实测反馈)。
+  const SEND_CHANCE_ALWAYS_RULE = '发图概率抽签:本轮命中(100%)。这一轮必须主动发一张表情包:先用 send_meme 按当前气氛挑图,挑到后按渠道规则发出去(Web 回复里写 [表情: 描述],IM 把候选 path 交给 dsh_im_return_file);只有图库完全不可用、确实没有能用的图时,才允许只回文字。'
+  const chanceHitRule = (chance) => (Number(chance) >= 100 ? SEND_CHANCE_ALWAYS_RULE : SEND_CHANCE_HIT_RULE)
   const SEND_CHANCE_MISS_RULE = '发图概率抽签:本轮未命中——这一轮不要主动发表情图片:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file / qqbot_send_file,也不要在回复里贴图片路径或 markdown 图片;用文字接梗、吐槽、卖萌即可。只有用户明确要求发表情/发图/斗图时,才照常发。'
   const chanceMissPrompt = (channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
@@ -703,6 +707,7 @@ export function apply(ctx, config) {
     const custom = settingsNow.companionPrompt
     // 发图概率只在「自动」下抽签;纯文字/图片模式的语义是确定的,不掺随机
     const chanceOn = settingsNow.sendChanceEnabled === true && sendMode === 'auto'
+    const chance = sendChanceOf()
     const chanceAllowed = chanceOn ? chanceAllowedFor(context?.agent?.session) : true
     let text
     if (custom) {
@@ -711,7 +716,7 @@ export function apply(ctx, config) {
       if (sendMode === 'text') text += '\n\n' + TEXT_MODE_RULE
       else if (channel) text += '\n\n' + imCompanionRules(channel)
       if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
-      else if (chanceOn) text += '\n\n' + (chanceAllowed ? SEND_CHANCE_HIT_RULE : SEND_CHANCE_MISS_RULE)
+      else if (chanceOn) text += '\n\n' + (chanceAllowed ? chanceHitRule(chance) : SEND_CHANCE_MISS_RULE)
     } else if (sendMode === 'text') {
       // 纯文字:默认提示词里的发图指令全部压掉(仍保留斗图语气),也不追加 IM 投递规则
       text = DEFAULT_COMPANION_PROMPT + '\n\n' + TEXT_MODE_RULE
@@ -723,7 +728,7 @@ export function apply(ctx, config) {
       // IM 会话:默认提示词整段换成 IM 版([表情:] 那条在 IM 里是错的)
       text = channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT
       if (sendMode === 'image') text += '\n\n' + IMAGE_MODE_RULE
-      else if (chanceOn) text += '\n\n' + SEND_CHANCE_HIT_RULE
+      else if (chanceOn) text += '\n\n' + chanceHitRule(chance)
     }
     assembled.sections.push({ name: 'dsh-expression:companion', text })
     return assembled

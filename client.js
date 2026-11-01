@@ -250,6 +250,19 @@ window.__ModuleLoader__.load({
     // 管理页和气泡装饰共享变更通知,避免发图面板已看到新库而气泡仍查旧索引(#39)。
     let memeLibraryRevision = 0
     const memeIndexListeners = new Set()
+    // 草稿表情条也要跟着索引「迟到」重渲染:刷新后草稿里有 [表情: x],但索引要等
+    // /dsh-memes-api 回来才查得到图;没有这个订阅就只能一直显示描述文字(实测很难看)。
+    let memeIndexVersion = 0
+    const memeIndexVersionListeners = new Set()
+    const bumpMemeIndexVersion = () => {
+      memeIndexVersion++
+      for (const fn of memeIndexVersionListeners) { try { fn() } catch (e) { /* 单个订阅者出错不连坐 */ } }
+    }
+    const subscribeMemeIndexVersion = (fn) => {
+      memeIndexVersionListeners.add(fn)
+      return () => memeIndexVersionListeners.delete(fn)
+    }
+    const getMemeIndexVersion = () => memeIndexVersion
     // 表情排布模式(issue #50):inline = 图与正文并排(默认,行为同旧版);stacked = 图
     // 独占一行在上、正文按正常宽度铺开在下。设置页(排布下拉框)和 host 的索引/设置
     // 响应都会回写这里;翻转只改行元素上的 data-meme-layout 属性,排布交给 CSS,
@@ -1694,7 +1707,9 @@ window.__ModuleLoader__.load({
             ? '默认不限制:AI 按提示词自己决定发不发图'
             : sendChance === 0
               ? '每轮都不主动发图,只在你明确要图时才发'
-              : '每轮按 ' + sendChance + '% 概率决定是否主动发图;你明确要图时不受概率限制。仅在「发送方式 = 自动」且开启陪伴提示词时生效'),
+              : sendChance >= 100
+                ? '每轮都主动发一张(会挑贴合气氛的图;图库完全不可用时才回文字)。仅在「发送方式 = 自动」且开启陪伴提示词时生效'
+                : '每轮按 ' + sendChance + '% 概率决定是否主动发图;你明确要图时不受概率限制。仅在「发送方式 = 自动」且开启陪伴提示词时生效'),
         // 表情排布:图文同条时怎么排,只影响前端渲染,默认并排不改已有观感(issue #50)
         h('div', { className: 'section-title' }, '表情排布'),
         h('div', { className: 'row', style: { width: '100%' } },
@@ -1953,15 +1968,16 @@ window.__ModuleLoader__.load({
       '.meme-picker .mp-hover-file{font-size:10px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
       // 输入框里的「将发送」表情条(issue #61):选图先落草稿,这条把草稿里的
       // [表情: x] 画成缩略图,让用户看见自己挑了哪张;× 直接从草稿里删掉那一段。
-      // 挂 conversation.input.dock(输入框上方的 list 槽):自成一张小卡片,和上面的 todo / 待发消息队列并列
-      '.meme-draft{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 10px;font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px}',
-      '.meme-draft-label{flex:none;opacity:.8;user-select:none}',
-      '.meme-draft-chip{position:relative;width:46px;height:46px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background-color:var(--dsw-alias-bg-base);background-size:contain;background-position:center center;background-repeat:no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center}',
+      // 挂 conversation.input.dock(输入框上方的 list 槽)。外观尽量贴近宿主原生附件缩略图:
+      // 不加卡片边框/标题,只留一排圆角缩略图,和输入框左侧对齐。
+      '.meme-draft{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:0 4px}',
+      '.meme-draft-chip{position:relative;width:52px;height:52px;border-radius:10px;border:1px solid var(--dsw-alias-border-l1);background-color:var(--dsw-alias-bg-base);background-size:contain;background-position:center center;background-repeat:no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center}',
       '.meme-draft-chip img{width:100%;height:100%;object-fit:contain;display:block}',
       '.meme-draft-miss{font-size:10px;line-height:1.25;text-align:center;padding:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}',
-      // × 常驻但压暗,悬停才完全显出来:触摸屏没有 hover,不能做成隐藏按钮
-      '.meme-draft-x{position:absolute;top:0;right:0;width:16px;height:16px;padding:0;line-height:15px;border:none;border-radius:0 8px 0 8px;background:rgba(0,0,0,.45);color:#fff;font-size:12px;cursor:pointer;opacity:.62;transition:opacity .12s,background .12s;text-align:center}',
-      '.meme-draft-chip:hover .meme-draft-x{opacity:1;background:rgba(0,0,0,.7)}',
+      // × 像原生附件那样悬停才出现;触摸屏没有 hover,用媒体查询常驻压暗,保证能点
+      '.meme-draft-x{position:absolute;top:0;right:0;width:17px;height:17px;padding:0;line-height:16px;border:none;border-radius:0 9px 0 9px;background:rgba(0,0,0,.55);color:#fff;font-size:12px;cursor:pointer;opacity:0;transition:opacity .12s,background .12s;text-align:center}',
+      '.meme-draft-chip:hover .meme-draft-x,.meme-draft-chip:focus-within .meme-draft-x{opacity:1;background:rgba(0,0,0,.75)}',
+      '@media (hover:none){.meme-draft-x{opacity:.7}}',
     ].join('')
 
     /**
@@ -2833,7 +2849,14 @@ window.__ModuleLoader__.load({
       const readDraft = (s) => (s && typeof s.draft === 'string' ? s.draft : '')
       const useInput = typeof props.useInput === 'function' ? props.useInput : (selector) => selector(null)
       const draft = useInput(readDraft)
+      // 索引晚到时重渲染:刷新页面后草稿里已有标记,图库索引还在路上,没这个订阅
+      // 会一直显示描述文字。ensure 只在有标记时触发一次加载,不会重复发请求。
+      React.useSyncExternalStore(subscribeMemeIndexVersion, getMemeIndexVersion)
       const items = extractDraftMemes(draft)
+      const ensureIndex = typeof props.ensureMemeIndex === 'function' ? props.ensureMemeIndex : null
+      React.useEffect(() => {
+        if (items.length > 0 && ensureIndex) ensureIndex()
+      }, [draft])
       if (items.length === 0) return null
       const actions = props.inputActions
       const resolve = typeof props.resolveMemeUrl === 'function' ? props.resolveMemeUrl : () => null
@@ -2841,7 +2864,6 @@ window.__ModuleLoader__.load({
         try { if (actions && actions.setDraft) actions.setDraft(removeDraftMarker(draft, item.start, item.end)) } catch (e) {}
       }
       return h('div', { className: 'meme-draft', 'data-meme-draft': '1' },
-        h('span', { className: 'meme-draft-label' }, '将发送'),
         ...items.map((item, i) => {
           let url = null
           try { url = resolve(item.desc) } catch (e) { url = null }
@@ -3030,6 +3052,7 @@ window.__ModuleLoader__.load({
         memeSearch = buildMemeSearch(rows, (row) => absMemeUrl(row.url, row.path))
         memeIndexAttempts = 0
         memeIndexRetryAfter = 0
+        bumpMemeIndexVersion() // 草稿表情条:索引到了,把描述文字换成缩略图
         decorateMemeText()
       }
       const loadMemeIndex = () => {
@@ -3081,6 +3104,7 @@ window.__ModuleLoader__.load({
         memeSearch = []
         memeIndexAttempts = 0
         memeIndexRetryAfter = 0
+        bumpMemeIndexVersion() // 索引换了:草稿表情条按新索引重查
         if (Array.isArray(rows)) setMemeIndex(rows)
         else loadMemeIndex()
       }
@@ -3515,6 +3539,7 @@ window.__ModuleLoader__.load({
           inputActions: props.inputActions,
           useInput: props.useInput,
           resolveMemeUrl: findMemeUrl,
+          ensureMemeIndex: loadMemeIndex,
         }),
       ))
     }

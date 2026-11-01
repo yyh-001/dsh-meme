@@ -143,14 +143,33 @@ test('开启 + 0%:默认提示词整段换成只回文字版,用户明确要图�
   assert.doesNotMatch(im, /主动用 send_meme/)
 })
 
-test('开启 + 100%:保留主动斗图规则并标注命中', async () => {
+test('开启 + 50%:命中后是「可以发」,仍允许按气氛判断', async () => {
+  setSettings({ sendChanceEnabled: true, sendChance: 50 })
+  const original = Math.random
+  Math.random = () => 0.1 // 10 < 50,命中
+  try {
+    const web = await promptOf(webSession())
+    assert.match(web, /发图概率抽签:本轮命中/)
+    assert.match(web, /可以按聊天气氛主动发表情包/)
+    assert.doesNotMatch(web, /必须主动发一张/, '非 100% 不强制')
+    assert.doesNotMatch(web, /抽签未命中/)
+    const im = await promptOf(imSession())
+    assert.match(im, /发图概率抽签:本轮命中/)
+    assert.match(im, /dsh_im_return_file/)
+  } finally {
+    Math.random = original
+  }
+})
+
+test('开启 + 100%:命中规则改成「这一轮必须发」', async () => {
   setSettings({ sendChanceEnabled: true, sendChance: 100 })
   const web = await promptOf(webSession())
-  assert.match(web, /发图概率抽签:本轮命中/)
+  assert.match(web, /发图概率抽签:本轮命中\(100%\)/)
+  assert.match(web, /必须主动发一张表情包/, '100% 不能再说「可以 / 不用硬凑」')
   assert.match(web, /主动斗图/)
   assert.doesNotMatch(web, /抽签未命中/)
   const im = await promptOf(imSession())
-  assert.match(im, /发图概率抽签:本轮命中/)
+  assert.match(im, /发图概率抽签:本轮命中\(100%\)/)
   assert.match(im, /dsh_im_return_file/)
 })
 
