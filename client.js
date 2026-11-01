@@ -2827,9 +2827,11 @@ window.__ModuleLoader__.load({
      */
     function MemeDraftStrip(props) {
       const h = React.createElement
-      const useInput = typeof props.useInput === 'function' ? props.useInput : (() => null)
-      const input = useInput((s) => s)
-      const draft = input && typeof input.draft === 'string' ? input.draft : ''
+      // 只订阅草稿文本:宿主输入状态里还有光标/phase 等字段,整份订阅会让每次敲键都重渲染。
+      // 钩子固定调用一次(React 的规则),老宿主没有这个钩子时用假实现兜底。
+      const readDraft = (s) => (s && typeof s.draft === 'string' ? s.draft : '')
+      const useInput = typeof props.useInput === 'function' ? props.useInput : (selector) => selector(null)
+      const draft = useInput(readDraft)
       const items = extractDraftMemes(draft)
       if (items.length === 0) return null
       const actions = props.inputActions
