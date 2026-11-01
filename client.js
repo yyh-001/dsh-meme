@@ -1951,6 +1951,16 @@ window.__ModuleLoader__.load({
       '.meme-picker .mp-hover-tag{align-self:flex-start;font-size:10px;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);border-radius:999px;padding:1px 8px}',
       '.meme-picker .mp-hover-cap{font-size:12px;line-height:1.45;max-height:3.9em;overflow:hidden;word-break:break-word}',
       '.meme-picker .mp-hover-file{font-size:10px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+      // 输入框里的「将发送」表情条(issue #61):选图先落草稿,这条把草稿里的
+      // [表情: x] 画成缩略图,让用户看见自己挑了哪张;× 直接从草稿里删掉那一段。
+      '.meme-draft{display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 8px 0;font-size:11px;color:var(--dsw-alias-label-secondary)}',
+      '.meme-draft-label{flex:none;opacity:.8;user-select:none}',
+      '.meme-draft-chip{position:relative;width:46px;height:46px;border-radius:9px;border:1px solid var(--dsw-alias-border-l1);background-color:var(--dsw-alias-bg-base);background-size:contain;background-position:center center;background-repeat:no-repeat;overflow:hidden;display:flex;align-items:center;justify-content:center}',
+      '.meme-draft-chip img{width:100%;height:100%;object-fit:contain;display:block}',
+      '.meme-draft-miss{font-size:10px;line-height:1.25;text-align:center;padding:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-word}',
+      // × 常驻但压暗,悬停才完全显出来:触摸屏没有 hover,不能做成隐藏按钮
+      '.meme-draft-x{position:absolute;top:0;right:0;width:16px;height:16px;padding:0;line-height:15px;border:none;border-radius:0 8px 0 8px;background:rgba(0,0,0,.45);color:#fff;font-size:12px;cursor:pointer;opacity:.62;transition:opacity .12s,background .12s;text-align:center}',
+      '.meme-draft-chip:hover .meme-draft-x{opacity:1;background:rgba(0,0,0,.7)}',
     ].join('')
 
     /**
@@ -2378,6 +2388,41 @@ window.__ModuleLoader__.load({
       })
     }
 
+    /**
+     * 草稿里的表情标记(issue #61):选图后插进输入框的是 `[表情: 描述]` 文本,
+     * 输入框上方那条缩略图要按草稿实时派生 —— 带位置,删的时候才能精确删掉这一段。
+     * 兼容旧格式 `[表情: 描述](url)`(整段都算一次标记,别把尾巴留在输入框里)。
+     */
+    const DRAFT_MEME_RE = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g
+    function extractDraftMemes(draft) {
+      const text = String(draft || '')
+      const out = []
+      DRAFT_MEME_RE.lastIndex = 0
+      let m
+      while ((m = DRAFT_MEME_RE.exec(text))) {
+        out.push({
+          desc: String(m[1] || '').trim(),
+          raw: m[0],
+          start: m.index,
+          end: m.index + m[0].length,
+        })
+      }
+      return out
+    }
+    /**
+     * 从草稿里删掉某一段标记。标记通常独占一行(选图时是追加的),删完把留下的空行
+     * 一并收掉;夹在正文中间时就只删标记本身。
+     */
+    function removeDraftMarker(draft, start, end) {
+      const text = String(draft || '')
+      let before = text.slice(0, start)
+      let after = text.slice(end)
+      if (/\r?\n$/.test(before) && /^\r?\n/.test(after)) after = after.replace(/^\r?\n/, '')
+      else if (start === 0 && /^\r?\n/.test(after)) after = after.replace(/^\r?\n/, '')
+      else if (/\r?\n$/.test(before) && after === '') before = before.replace(/\r?\n$/, '')
+      return before + after
+    }
+
     function makeMemeStore() {
       let open = false
       const subs = new Set()
@@ -2598,17 +2643,52 @@ window.__ModuleLoader__.load({
 
       if (!open) return null
 
-      // 点击:发 [表情: 描述] 文本,前端按描述配图。
-      const send = async (m) => {
-        if (!m) return
-        // 纯文本:[表情: 描述] —— 模型只看到文字;前端按描述配图。
-        const setText = (text) => { try { if (actions && actions.setDraft) actions.setDraft(text) } catch (e) {} }
+      // 点一张:默认把 [表情: 描述] 插进输入框,由用户自己发送(issue #61)。
+      // 旧行为是「拼草稿 + 立即 submit」,手滑点一下就发出去了,而且会把正在打的字一起发走;
+      // 现在插入草稿,用户能接着写、能改顺序,按回车才发。Shift+点保留旧的一键直发。
+      // 纯文本标记:模型只看到文字,前端按描述配图 —— 与 AI 侧发送的约定一致。
+      const setText = (text) => { try { if (actions && actions.setDraft) actions.setDraft(text) } catch (e) {} }
+      const markerOf = (m) => {
         const desc = (m.caption || m.keywords || m.tag || '表情包').slice(0, 80)
-        const text = '[表情: ' + desc + ']'
-        const cur = inputState && typeof inputState.draft === 'string' ? inputState.draft : ''
-        setText(cur.trim() ? cur + '\n' + text : text)
+        return '[表情: ' + desc + ']'
+      }
+      const draftOf = () => (inputState && typeof inputState.draft === 'string' ? inputState.draft : '')
+      // 光标处插入优先:宿主公开的 insertText 需要同一轮拿到的插入锚点(captureInsertion),
+      // 不会覆盖草稿,也不会把已有的 quote chip 清掉。拿不到这套 API、或者当前 phase 冻结
+      // (模型还在输出)时插入会失败,退回 setDraft 追加 —— 与旧版拼法一致,至少不丢草稿。
+      const insert = (m) => {
+        if (!m) return
+        const marker = markerOf(m)
+        let inserted = false
+        try {
+          if (actions && typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+            inserted = actions.insertText(marker, actions.captureInsertion()) === true
+          }
+        } catch (e) { inserted = false }
+        if (!inserted) {
+          const cur = draftOf()
+          setText(cur.trim() ? cur + '\n' + marker : marker)
+        }
+        store.set(false)
+        // 面板一关焦点就掉到 body 了,直接敲回车不会发;顺手把焦点还给输入框,
+        // 让「选图 → 接着打字 → 回车」一串动作不用再点一下。宿主结构变了就静默跳过。
+        try {
+          const editor = document.querySelector('[data-composer-card] [contenteditable="true"]')
+          if (editor && typeof editor.focus === 'function') editor.focus()
+        } catch (e) { /* 纯增强 */ }
+      }
+      // 旧行为:拼草稿并立即发送(Shift+点)
+      const sendNow = (m) => {
+        if (!m) return
+        const cur = draftOf()
+        const marker = markerOf(m)
+        setText(cur.trim() ? cur + '\n' + marker : marker)
         try { if (actions && actions.submit) actions.submit() } catch (e) {}
         store.set(false)
+      }
+      const pick = (m, ev) => {
+        if (ev && ev.shiftKey) sendNow(m)
+        else insert(m)
       }
 
       // 多选 chip:点一下选中(只看它),再点取消;一个都不选 = 不筛
@@ -2640,7 +2720,7 @@ window.__ModuleLoader__.load({
         className: 'mp-cell',
         // 刻意不给 title:原生 tooltip 要等一会儿才冒出来,正好压在悬浮预览上面,两个提示重着显示
         // (描述、文件名预览里都有,不用再来一份)
-        onClick: () => send(m),
+        onClick: (e) => pick(m, e),
         onPointerEnter: (e) => {
           try { setHover({ meme: m, cellRect: e.currentTarget.getBoundingClientRect() }) } catch (err) { setHover(null) }
         },
@@ -2710,6 +2790,10 @@ window.__ModuleLoader__.load({
           : (rows.length === 0
             ? h('div', { className: 'mp-empty' }, '没有匹配的表情包')
             : h('div', { className: 'mp-grid' }, gridCells)),
+        // 选图规则提示(issue #61):点一下只放进输入框,不会立刻发出去
+        rows.length > 0
+          ? h('div', { className: 'mp-hint' }, '点一张放进输入框，按回车一起发送；Shift+点 直接发送')
+          : null,
         rows.length > cells.length
           ? h('div', { className: 'mp-hint' },
             '只画了前 ' + cells.length + ' 张,还有 ' + (rows.length - cells.length) + ' 张——用搜索或筛选取一部分')
@@ -2727,6 +2811,54 @@ window.__ModuleLoader__.load({
           h('div', { className: 'mp-hover-cap' }, hover.meme.caption || hover.meme.file_name),
           hover.meme.caption ? h('div', { className: 'mp-hover-file' }, hover.meme.file_name) : null,
         ) : null,
+      )
+    }
+
+    /**
+     * 输入框上方的「将发送」表情条(issue #61)。
+     *
+     * 选图不再直接发出去,而是把 `[表情: 描述]` 标记插进草稿;光看标记文字分不清是哪张,
+     * 这条把草稿里现存的标记解析出来画成缩略图,点 × 就从草稿里删掉对应那一段。
+     *
+     * 不带自己的 state:内容完全由草稿派生 —— 用户改字、删标记、宿主发送后清空草稿,
+     * 这条都自动跟着变,不会出现「已经发了条还在」。
+     * `resolveMemeUrl` 用 apply 里那份索引(悬停面板打开过一次就有);冷启动时索引还没到,
+     * 退化成描述文字,不影响删除。
+     */
+    function MemeDraftStrip(props) {
+      const h = React.createElement
+      const useInput = typeof props.useInput === 'function' ? props.useInput : (() => null)
+      const input = useInput((s) => s)
+      const draft = input && typeof input.draft === 'string' ? input.draft : ''
+      const items = extractDraftMemes(draft)
+      if (items.length === 0) return null
+      const actions = props.inputActions
+      const resolve = typeof props.resolveMemeUrl === 'function' ? props.resolveMemeUrl : () => null
+      const remove = (item) => {
+        try { if (actions && actions.setDraft) actions.setDraft(removeDraftMarker(draft, item.start, item.end)) } catch (e) {}
+      }
+      return h('div', { className: 'meme-draft', 'data-meme-draft': '1' },
+        h('span', { className: 'meme-draft-label' }, '将发送'),
+        ...items.map((item, i) => {
+          let url = null
+          try { url = resolve(item.desc) } catch (e) { url = null }
+          return h('span', {
+            key: item.start + ':' + i,
+            className: 'meme-draft-chip',
+            title: item.desc,
+          },
+            url
+              ? h('img', { src: url, alt: item.desc })
+              : h('span', { className: 'meme-draft-miss' }, item.desc || '表情'),
+            h('button', {
+              type: 'button',
+              className: 'meme-draft-x',
+              title: '从输入框移除',
+              'aria-label': '移除表情',
+              onClick: (e) => { e.preventDefault(); e.stopPropagation(); remove(item) },
+            }, '×'),
+          )
+        }),
       )
     }
 
@@ -3367,6 +3499,16 @@ window.__ModuleLoader__.load({
           getConversation: () => ctx.get('conversation'),
         }),
       ))
+      // 输入框里的「将发送」表情条(issue #61):选图只进草稿,这条让用户看得见挑了哪张,
+      // 也能直接从草稿里移除。没有标记时组件返回 null,不占输入框位置。
+      slots.inject('conversation.input.attachments', () => slots.register(
+        { name: 'conversation.input.attachments', id: 'meme-draft', order: 5, label: '表情包' },
+        (props) => React.createElement(MemeDraftStrip, {
+          inputActions: props.inputActions,
+          useInput: props.useInput,
+          resolveMemeUrl: findMemeUrl,
+        }),
+      ))
     }
 
     exports.apply = apply
@@ -3378,6 +3520,8 @@ window.__ModuleLoader__.load({
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
       packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, previewClampOffset, clampPreviewElement, inKeepZone, uniqueKeys,
+      // 草稿表情条(issue #61):标记解析与删除是纯函数,单独钉住边界
+      extractDraftMemes, removeDraftMarker,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }

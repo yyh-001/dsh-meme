@@ -477,12 +477,18 @@ test('情绪 chip 多选 + 搜索框:两层取交集,清空一键复位', async 
   assert.equal(byClass(tree, 'mp-clear').length, 0, '没有筛选条件就不显示清空')
 })
 
-test('点图格照旧把草稿带上一并发送(跨图库也不变)', async () => {
+test('点图格只把标记放进草稿,不直接发送(issue #61);Shift+点 才照旧直发', async () => {
   const { board, calls } = await openBoard()
   byClass(board, 'mp-cell')[0].props.onClick()
   await new Promise((ok) => setTimeout(ok, 0))
   const drafted = calls.filter((c) => c.kind === 'setDraft')
   assert.equal(drafted.length, 1)
-  assert.equal(drafted[0].text, '先说两句\n[表情: 开心猫]')
+  assert.equal(drafted[0].text, '先说两句\n[表情: 开心猫]', '草稿带上原有文字(跨图库也不变)')
+  assert.ok(!calls.some((c) => c.kind === 'submit'), '选图不能自动提交')
+  // Shift+点 是明确要立刻发,保留旧的一键直发
+  calls.length = 0
+  byClass(board, 'mp-cell')[0].props.onClick({ shiftKey: true })
+  await new Promise((ok) => setTimeout(ok, 0))
+  assert.equal(calls.filter((c) => c.kind === 'setDraft').length, 1)
   assert.ok(calls.some((c) => c.kind === 'submit'))
 })

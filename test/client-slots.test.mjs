@@ -40,7 +40,7 @@ const slots = {
 }
 globalThis.__dshMeme.apply({ get: (name) => (name === 'slots' ? slots : undefined), effect: () => {} })
 
-const find = (name) => slots.registered.find((entry) => entry.meta.name === name && entry.meta.id === 'meme-picker')
+const find = (name, id = 'meme-picker') => slots.registered.find((entry) => entry.meta.name === name && entry.meta.id === id)
 
 test('conversation.input.left 的组件类型跨 render 稳定(issue #15)', () => {
   const reg = find('conversation.input.left')
@@ -54,5 +54,11 @@ test('conversation.input.left 的组件类型跨 render 稳定(issue #15)', () =
 test('conversation.input.overlay 的组件类型跨 render 稳定', () => {
   const reg = find('conversation.input.overlay')
   assert.ok(reg, '应注册 conversation.input.overlay')
+  assert.equal(reg.render({}).type, reg.render({}).type)
+})
+
+test('conversation.input.attachments 的「将发送」表情条跨 render 稳定(issue #61)', () => {
+  const reg = find('conversation.input.attachments', 'meme-draft')
+  assert.ok(reg, '应注册 conversation.input.attachments')
   assert.equal(reg.render({}).type, reg.render({}).type)
 })
