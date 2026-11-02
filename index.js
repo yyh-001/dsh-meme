@@ -2309,7 +2309,10 @@ export function apply(ctx, config) {
               let store = null
               try {
                 store = new MemesStore(p.path)
-                for (const m of store.list().memes) all.push({ ...urlFor(m, p.id), size: sizeOf(p.path, m.path) })
+                // path 与 url 保持同一形态:都带 packId 前缀。搜索结果分支一直是
+                // id + '/' + row.path(带前缀),这里原样透传 m.path 会让任何按 path
+                // 拼地址的消费者落到 /dsh-memes/<rel> → 404。
+                for (const m of store.list().memes) all.push({ ...urlFor(m, p.id), path: p.id + '/' + m.path, size: sizeOf(p.path, m.path) })
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
