@@ -2010,7 +2010,6 @@ window.__ModuleLoader__.load((() => {
       '.meme-picker .mp-cell{width:76px;height:76px;flex:0 0 76px;border:1px solid var(--dsw-alias-border-l1);border-radius:11px;overflow:hidden;cursor:pointer;background-color:var(--dsw-alias-bg-layer-2);background-size:cover;background-position:center center;background-repeat:no-repeat;padding:0;display:block;transition:border-color .12s,transform .12s,box-shadow .12s}',
       '.meme-picker .mp-cell:hover{border-color:var(--dsw-alias-brand-primary);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.15)}',
       '.meme-picker .mp-empty{color:var(--dsw-alias-label-secondary);text-align:center;padding:28px 0}',
-      '.meme-picker .mp-hint{flex:none;font-size:11px;color:var(--dsw-alias-label-secondary);text-align:center}',
       // 悬浮预览(issue #30 第 2 条):fixed + pointer-events:none,浮在格子旁边不挡点击;
       // 位置在 layout effect 里按实测尺寸算(右侧放不下翻左边、垂直钳制),见 MemeBoard。
       '.meme-picker .mp-hover{position:fixed;z-index:60;width:176px;pointer-events:none;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:8px;box-shadow:0 12px 32px rgba(0,0,0,.32);display:flex;flex-direction:column;gap:6px}',
@@ -2814,17 +2813,6 @@ window.__ModuleLoader__.load((() => {
           : (rows.length === 0
             ? h('div', { className: 'mp-empty' }, '没有匹配的表情包')
             : h('div', { className: 'mp-grid' }, gridCells)),
-        // 选图规则提示(issue #61):文案跟随「点图直接发送」设置
-        rows.length > 0
-          ? h('div', { className: 'mp-hint' },
-            data.pickerSendOnClick !== false
-              ? '点一张直接发送；可在设置里关闭「点图直接发送」改成先放进输入框'
-              : '点一张放进输入框，按回车和文字一起发送')
-          : null,
-        rows.length > cells.length
-          ? h('div', { className: 'mp-hint' },
-            '只画了前 ' + cells.length + ' 张,还有 ' + (rows.length - cells.length) + ' 张——用搜索或筛选取一部分')
-          : null,
         // 悬浮预览:大图(contain 不裁切)+ 情绪 + 描述 + 文件名;pointer-events:none 不挡点击
         hover ? h('div', {
           className: 'mp-hover', ref: previewRef,
