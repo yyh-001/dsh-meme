@@ -75,6 +75,18 @@
 </div>
 <script>
 'use strict'
+// 子路径部署(issue #64):独立管理页挂在 <前缀>/memes-panel 下,API 与图片也要带同一前缀。
+// 从自身 pathname 反推;根路径部署时前缀为空串,行为与旧版一致。
+const APP_BASE = (() => {
+  const path = location.pathname.replace(/\/+$/, '')
+  return path.slice(-'/memes-panel'.length) === '/memes-panel' ? path.slice(0, -'/memes-panel'.length) : ''
+})()
+function absAppPath(u) {
+  const s = String(u == null ? '' : u)
+  if (!s || s[0] !== '/' || s[1] === '/') return s
+  if (!APP_BASE || s === APP_BASE || s.indexOf(APP_BASE + '/') === 0) return s
+  return APP_BASE + s
+}
 const $ = (id) => document.getElementById(id)
 let memes = [], tags = [], editing = null
 
@@ -88,11 +100,11 @@ async function apiGet(params) {
   const qs = new URLSearchParams()
   if (params.tag) qs.set('tag', params.tag)
   if (params.q) qs.set('q', params.q)
-  const res = await fetch('/dsh-memes-api?' + qs.toString())
+  const res = await fetch(absAppPath('/dsh-memes-api?' + qs.toString()))
   return res.json()
 }
 async function apiPost(payload) {
-  const res = await fetch('/dsh-memes-api', {
+  const res = await fetch(absAppPath('/dsh-memes-api'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
@@ -123,7 +135,7 @@ function render() {
     const card = document.createElement('div')
     card.className = 'card'
     const img = document.createElement('img')
-    img.src = m.url || ''; img.alt = m.path; img.loading = 'lazy'
+    img.src = absAppPath(m.url || ''); img.alt = m.path; img.loading = 'lazy'
     card.appendChild(img)
     const meta = document.createElement('div')
     meta.className = 'meta'

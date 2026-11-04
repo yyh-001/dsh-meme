@@ -110,7 +110,7 @@
 - **QQ 发表情被当大图拉伸** — QQ 官方机器人没有表情消息类型，大图会按图片消息渲染。设置页打开「QQ 发图尺寸」，选 300px（经验区间 200–450）后，QQ/IM 会发送缩小副本，Web 仍用原图；缩放需要 sharp，dsh-im 已自带，未安装时自动按原图发送。
 - **更新失败 / 插件消失** — 先在市场点「重试」；仍失败就完全退出 DSH 后再更新。更早版本或仍失败，退出 DSH 后在 profile 目录执行 `pnpm add dsh-meme@latest`。图库和设置都在 `~/.dsh`，重装不丢。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
 - **国内网络 / 市场拉不到** — 默认多镜像竞速 + 磁盘缓存，通常无需配置；拉不到时先在发现页点「重试」，再把「图库目录源」切到「镜像源」。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
-- **手机 / 局域网 / 反向代理** — 局域网 IP 访问在设置页打开「局域网访问图库」；反代域名需显式声明可信 Host（`DSH_MEME_TRUSTED_HOSTS` 或 `allowedHosts`）。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
+- **手机 / 局域网 / 反向代理 / 子路径** — 局域网 IP 访问在设置页打开「局域网访问图库」；反代域名需显式声明可信 Host（`DSH_MEME_TRUSTED_HOSTS` 或 `allowedHosts`）；子路径部署（fnOS `/app/<id>/`、Nginx `location /dsh/` 等）从 0.1.77 起自动适配，无需配置。详见 [排障手册](https://github.com/yyh-001/dsh-meme/blob/main/docs/troubleshooting.md)。
 
 ## 分享自己的图库
 

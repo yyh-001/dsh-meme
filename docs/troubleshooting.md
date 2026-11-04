@@ -67,3 +67,5 @@ DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
 ```
 
 只做精确主机名匹配（大小写、端口、末尾点不敏感，不支持通配符）；没写进名单的域名仍然拒绝，DNS rebinding 防线不变。插件本身没有鉴权，反代域名务必由代理层做登录/访问控制。
+
+**子路径部署**（fnOS 应用中心 `/app/<id>/`、Nginx `location /dsh/` 等把 DSH 挂在二级目录下）：0.1.77 起插件会从加载自身的 `<script src>` 反推应用前缀，API 与图片请求自动带上同一前缀，无需额外配置。若升级后仍出现「图库目录暂不可用」且网络面板里请求落到站点根（如 `/dsh-memes-api` 而非 `/app/<id>/dsh-memes-api`），先确认浏览器缓存的是旧版 `client.js`，刷新或重启 DSH 后再试。

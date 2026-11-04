@@ -235,12 +235,17 @@ export function installFakeDom(options = {}) {
     nav: options.nav || null,             // decorateNavIcon 用 document.querySelector('[role="dialog"] nav') 取
     fetch: options.fetch || defaultFetch,
     querySelector: options.querySelector || null,
+    // 子路径部署(issue #64):插件从 document.currentScript / document.baseURI 反推应用前缀
+    baseURI: options.baseURI || undefined,
+    currentScript: options.currentScript || null,
   }
   const walkerRoots = () => walkerStats.records.map((r) => r.root)
 
   globalThis.document = {
     head: headEl,
     body: bodyEl,
+    baseURI: options.baseURI,
+    currentScript: options.currentScript || null,
     createElement: (tag) => new Element(tag),
     createElementNS: (_ns, tag) => new Element(tag),
     createDocumentFragment: () => { const f = new Element('#fragment'); f.nodeType = 11; return f },

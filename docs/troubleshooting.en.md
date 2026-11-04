@@ -61,3 +61,5 @@ DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
 ```
 
 Matching is exact (case/port/trailing dot insensitive, no wildcards); hosts not on the list are still rejected, so the DNS-rebinding defence is unchanged. The plugin has no authentication of its own — put login/access control in front of the proxy domain.
+
+**Sub-path deployment** (DSH mounted under `/app/<id>/` by the fnOS app centre, or an Nginx `location /dsh/`, etc.): since 0.1.77 the plugin derives the app prefix from the `<script src>` that loaded it, so API and image requests automatically carry the same prefix — no extra configuration. If after upgrading you still see “图库目录暂不可用” and the network panel shows requests at the site root (`/dsh-memes-api` instead of `/app/<id>/dsh-memes-api`), make sure the browser is not running a cached old `client.js`; reload or restart DSH.

@@ -7,7 +7,60 @@
  * 注册 id 必须等于 loader entry 名(dsh-meme),否则 ModuleLoader 报
  * "loaded without registering dsh-meme"。
  */
-window.__ModuleLoader__.load({
+window.__ModuleLoader__.load((() => {
+  /**
+   * 子路径部署前缀(issue #64):DSH 挂在反代子路径(如 fnOS 的 /app/<id>/)下时,
+   * 插件自己的 HTTP 路由(/dsh-memes-api、/dsh-memes/...)也必须带同一前缀;否则请求
+   * 落到反代的 SPA 兜底上,拿回 index.html,前端 r.json() 直接炸在 "Unexpected token '<'"。
+   *
+   * 前缀从加载本 bundle 的 <script src> 反推:模块地址形如
+   * `<前缀>/plugins/dsh-meme/client.js?rev=...`,根路径部署时前缀是空串。
+   * 只在脚本执行时算一次 —— 工厂函数是延迟执行的,那时 script 元素已经被 loader 摘掉了。
+   */
+  const detectAppBase = (doc, href) => {
+    const strip = (p) => String(p || '').replace(/\/+$/, '')
+    const fromPath = (p) => {
+      const m = /^(.*?)\/plugins\//.exec(String(p || ''))
+      return m ? strip(m[1]) : null
+    }
+    if (!doc) return ''
+    try {
+      const src = doc.currentScript && doc.currentScript.src
+      if (src) {
+        const base = fromPath(new URL(src, doc.baseURI || href).pathname)
+        if (base !== null) return base
+      }
+    } catch (e) { /* 非浏览器 / 非脚本方式加载 */ }
+    try {
+      for (const el of doc.querySelectorAll('script[src]')) {
+        const base = fromPath(new URL(el.src, doc.baseURI || href).pathname)
+        if (base !== null) return base
+      }
+    } catch (e) { /* 极简 DOM 没有完整查询能力 */ }
+    // 兜底:页面本身就在应用根(DSH 的会话选择走 query/hash,pathname 不会深入)
+    try {
+      const path = new URL(doc.baseURI).pathname
+      if (path.endsWith('/')) return strip(path)
+    } catch (e) { /* 无 document.baseURI */ }
+    return ''
+  }
+  const APP_BASE = detectAppBase(
+    typeof document === 'undefined' ? null : document,
+    typeof location === 'undefined' ? '' : location.href,
+  )
+
+  /** 站内根绝对路径补应用前缀;外部 URL、协议相对、blob:/data: 原样返回。 */
+  const absAppPath = (u) => {
+    const s = String(u == null ? '' : u)
+    if (!s || s[0] !== '/' || s[1] === '/') return s
+    if (!APP_BASE || s === APP_BASE || s.indexOf(APP_BASE + '/') === 0) return s
+    return APP_BASE + s
+  }
+
+  // 整个 bundle 包一层 IIFE:宿主把多个插件的源码拼进同一个 <script>,顶层 const
+  // 会进全局词法作用域,和别的插件重名就直接 SyntaxError;作用域收在这里最稳。
+  return {
+  id: 'dsh-meme',
   id: 'dsh-meme',
   factory: (require) => {
     var module = { exports: {} }
@@ -245,7 +298,7 @@ window.__ModuleLoader__.load({
       if (params.tag) qs.set('tag', params.tag)
       if (params.q) qs.set('q', params.q)
       if (params.remoteDir) qs.set('remoteDir', '1')
-      return (await fetch('/dsh-memes-api?' + qs.toString())).json()
+      return (await fetch(absAppPath('/dsh-memes-api?' + qs.toString()))).json()
     }
     // 管理页和气泡装饰共享变更通知,避免发图面板已看到新库而气泡仍查旧索引(#39)。
     let memeLibraryRevision = 0
@@ -280,7 +333,7 @@ window.__ModuleLoader__.load({
       for (const listener of memeIndexListeners) listener()
     }
     async function apiPost(payload) {
-      const res = await (await fetch('/dsh-memes-api', {
+      const res = await (await fetch(absAppPath('/dsh-memes-api'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -635,7 +688,7 @@ window.__ModuleLoader__.load({
       const onExportPack = async (id, name) => {
         try {
           setRootNotice('正在导出…')
-          const response = await fetch('/dsh-memes-export?packId=' + encodeURIComponent(id))
+          const response = await fetch(absAppPath('/dsh-memes-export?packId=' + encodeURIComponent(id)))
           if (!response.ok) throw new Error((await response.text()) || '导出失败')
           const blob = await response.blob()
           const url = URL.createObjectURL(blob)
@@ -702,7 +755,7 @@ window.__ModuleLoader__.load({
           return
         }
         try {
-          const res = await fetch('/dsh-memes-api?packId=' + encodeURIComponent(row.packId)).then((r) => r.json())
+          const res = await fetch(absAppPath('/dsh-memes-api?packId=' + encodeURIComponent(row.packId))).then((r) => r.json())
           const urls = (res && Array.isArray(res.memes)) ? res.memes.map((m) => m.url).filter(Boolean) : []
           if (urls.length) {
             setPreviewPack((cur) => (cur && cur.packId === row.packId
@@ -942,7 +995,7 @@ window.__ModuleLoader__.load({
         setMarketResult('')
         setRootNotice('正在导出投稿 ZIP…')
         try {
-          const response = await fetch('/dsh-memes-export?packId=' + encodeURIComponent(pack.id))
+          const response = await fetch(absAppPath('/dsh-memes-export?packId=' + encodeURIComponent(pack.id)))
           if (!response.ok) throw new Error(await response.text() || '导出失败')
           const blob = await response.blob()
           const url = URL.createObjectURL(blob)
@@ -1226,7 +1279,7 @@ window.__ModuleLoader__.load({
       const curPack = packs.find((p) => p.id === packId) || null
       const cards = memes.map((m) => h('div', { key: m.path, className: 'meme-card' },
         // 用背景层而不是 <img>:宿主对 img 的全局样式会把图挤到左边(封面那次踩过)
-        h('div', { className: 'meme-thumb', style: { backgroundImage: 'url("' + m.url + '")' }, title: m.caption || m.file_name }),
+        h('div', { className: 'meme-thumb', style: { backgroundImage: 'url("' + absAppPath(m.url) + '")' }, title: m.caption || m.file_name }),
         h('div', { className: 'meta' },
           h('div', { className: 'tag' }, tagZh(m.tag)),
           h('div', { className: 'cap' }, m.caption || m.file_name),
@@ -1432,7 +1485,7 @@ window.__ModuleLoader__.load({
             h('h3', null, '编辑表情包'),
             h('div', {
               className: 'meme-shot',
-              style: { backgroundImage: 'url("' + (memes.find((m) => m.path === edit.path)?.url || '') + '")' },
+              style: { backgroundImage: 'url("' + absAppPath(memes.find((m) => m.path === edit.path)?.url || '') + '")' },
             }),
             h('div', { className: 'field' },
               h('label', null, '分类'),
@@ -2005,7 +2058,7 @@ window.__ModuleLoader__.load({
     function imageCandidates(u) {
       const raw = String(u || '')
       const m = /^https:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/.exec(raw)
-      if (!m) return raw ? [raw] : []
+      if (!m) return raw ? [absAppPath(raw)] : []
       const gh = m[1] + '/' + m[2] + '@' + m[3] + '/' + m[4]
       return [...new Set([
         'https://cdn.jsdmirror.com/gh/' + gh,
@@ -2450,7 +2503,7 @@ window.__ModuleLoader__.load({
         if (!open) return
         let alive = true
         const revision = memeLibraryRevision
-        fetch('/dsh-memes-api?packId=all')
+        fetch(absAppPath('/dsh-memes-api?packId=all'))
           .then((r) => r.json())
           .then((res) => {
             if (!alive || revision !== memeLibraryRevision || !res || !res.ok) return
@@ -2699,7 +2752,7 @@ window.__ModuleLoader__.load({
         onPointerLeave: (e) => {
           if (!inKeepZone(keepRef.current, e.clientX, e.clientY)) setHover(null)
         },
-        style: { backgroundImage: 'url("' + m.url + '")' },
+        style: { backgroundImage: 'url("' + absAppPath(m.url) + '")' },
       }))
 
       return h('div', {
@@ -2780,7 +2833,7 @@ window.__ModuleLoader__.load({
             top: (hover.cellRect ? hover.cellRect.top - 2 : 0) + 'px',
           },
         },
-          h('div', { className: 'mp-hover-img', style: { backgroundImage: 'url("' + hover.meme.url + '")' } }),
+          h('div', { className: 'mp-hover-img', style: { backgroundImage: 'url("' + absAppPath(hover.meme.url) + '")' } }),
           hover.meme.tag ? h('span', { className: 'mp-hover-tag' }, tagZh(hover.meme.tag)) : null,
           h('div', { className: 'mp-hover-cap' }, hover.meme.caption || hover.meme.file_name),
           hover.meme.caption ? h('div', { className: 'mp-hover-file' }, hover.meme.file_name) : null,
@@ -2945,7 +2998,7 @@ window.__ModuleLoader__.load({
       const absMemeUrl = (u, path) => {
         if (u && /^https?:\/\//.test(u)) return u
         const rel = u || (path ? '/dsh-memes/' + path : '')
-        try { return new URL(rel, window.location.origin).href } catch (e) { return rel }
+        try { return new URL(absAppPath(rel), window.location.origin).href } catch (e) { return rel }
       }
       const findMemeUrl = (desc) => matchDesc(desc, memeIndex, memeSearch)
       const setMemeIndex = (rows) => {
@@ -2966,7 +3019,7 @@ window.__ModuleLoader__.load({
         const generation = memeIndexGeneration
         const timeoutTimer = controller ? setTimeout(() => controller.abort(), MEME_INDEX_TIMEOUT) : 0
         // 拉全部包(带包前缀 URL),任意组的 [表情: 描述] 都能配图
-        fetch('/dsh-memes-api?packId=all', controller ? { signal: controller.signal } : undefined)
+        fetch(absAppPath('/dsh-memes-api?packId=all'), controller ? { signal: controller.signal } : undefined)
           .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
           .then((res) => {
             if (disposed || generation !== memeIndexGeneration) return
@@ -3431,7 +3484,9 @@ window.__ModuleLoader__.load({
     exports.inject = inject
     // 辅助入口仅用于回归测试(node --test),宿主不消费
     exports.__test = {
-      apiPost,
+      apiGet, apiPost,
+      // 子路径部署(issue #64):前缀推导与站内路径补全
+      APP_BASE, absAppPath, detectAppBase,
       foldCaption, looseCaption, splitDescTokens, buildMemeIndex, buildMemeSearch, matchDesc, compareVersions,
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
@@ -3441,4 +3496,5 @@ window.__ModuleLoader__.load({
     }
     return module.exports
   },
-})
+  }
+})())
