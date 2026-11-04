@@ -132,7 +132,11 @@ test('② 列表里能切到嵌套子库(packId=all 也会带上它的图)', asy
   const list = JSON.parse((await getJson()).body)
   assert.ok(list.packs.some((p) => p.id === 'sub-pack'), '设置页应能看到子库: ' + list.packs.map((p) => p.id).join(','))
   const all = JSON.parse((await getJson('?packId=all')).body)
-  assert.ok(all.memes.some((m) => m.url === '/dsh-memes/sub-pack/memes/happy/sub.jpg'), '子库的图应进前端配图索引')
+  const sub = all.memes.find((m) => m.url === '/dsh-memes/sub-pack/memes/happy/sub.jpg')
+  assert.ok(sub, '子库的图应进前端配图索引')
+  // path 必须和 url 同形(带 packId 前缀):多包合并后响应里的 packId 只是「当前激活库」,
+  // 前端拿 path 兜底拼 /dsh-memes/<path> 时,缺前缀会落到 /dsh-memes/memes/... → 404(PR #63)
+  assert.equal(sub.path, 'sub-pack/memes/happy/sub.jpg', 'packId=all 的 path 要带包前缀')
 })
 
 test('packDeleteDir:嵌套包可删(仍在扫描目录子树内),越界与扫描目录本身拒绝', () => {
