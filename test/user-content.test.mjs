@@ -239,6 +239,20 @@ test('learn_meme:真 GIF 字节(URL 分支下载原始字节)不提示压平', a
   assert.doesNotMatch(r.message, /压成单帧/)
 })
 
+test('learn_meme:固定写入独立「AI 学图」库并自动启用,不混进当前图库', async () => {
+  attachment = { data: PNG, ref: { mediaType: 'image/png', name: 'learned.png' } }
+  const exec = { agent: { inbox: { nextTurn: [{ content: [{ type: 'image', attachment: { attachmentId: 'att-learn' } }] }] } } }
+  const r = await learn.execute({ tag: 'happy' }, exec)
+  assert.equal(r.ok, true, r.message)
+  assert.match(r.message, /AI 学图/, '结果里说明落点')
+  assert.match(r.url, /\/dsh-memes\/dsh-meme-learned\//, 'URL 指向 AI 学图库')
+  const learnedDir = join(home, '.dsh', 'meme-packs', 'dsh-meme-learned')
+  assert.ok(existsSync(join(learnedDir, r.path)), '文件落在 AI 学图库: ' + r.path)
+  assert.equal(existsSync(join(home, 'api-pack', r.path)), false, '不写当前图库')
+  const settings = JSON.parse(readFileSync(join(home, '.dsh', 'dsh-expression.json'), 'utf8'))
+  assert.ok((settings.enabledPacks || []).includes('dsh-meme-learned'), JSON.stringify(settings.enabledPacks))
+})
+
 test('upload:当前图库在插件包内时改写「我的收藏」并自动启用(升级不清空收藏)', async () => {
   // 在插件包目录里造一个临时图库(模拟内置图库的位置),上传必须落到包外。
   // 清理都带重试并容错:Windows 上刚写完的 index.db 常被杀软/索引器瞬时锁住,
