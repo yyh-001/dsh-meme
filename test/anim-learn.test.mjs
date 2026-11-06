@@ -76,8 +76,8 @@ const ctx = {
 const mod = await import('../index.js')
 mod.apply(ctx, { memeRoot: root })
 
-// AI 学图固定落独立的「AI 学图」库(与上传收藏分开),不再写当前图库
-const learnRoot = join(home, '.dsh', 'meme-packs', 'dsh-meme-learned')
+// AI 学图固定落「我的收藏」稳定库(与上传同库),不再写当前图库
+const learnRoot = join(home, '.dsh', 'meme-packs', 'dsh-meme-user')
 
 const learn = tools.find((t) => t.name === 'learn_meme')
 assert.ok(learn, 'learn_meme 工具应注册')
@@ -122,7 +122,7 @@ test('learn_meme:自动识图给 GIF 动图抽帧成胶片条,图库仍落盘原
   const r = await learn.execute({}, execWith('att-gif'))
   assert.equal(r.ok, true, r.message)
   assert.match(r.path, /\.gif$/, '图库应保留 GIF 原图')
-  assert.match(r.url, /\/dsh-memes\/dsh-meme-learned\//, 'URL 指向「AI 学图」库')
+  assert.match(r.url, /\/dsh-memes\/dsh-meme-user\//, 'URL 指向「我的收藏」库')
   assert.deepEqual(readFileSync(join(learnRoot, r.path)), gifBuf, '落盘字节应与原图一致')
   assert.match(r.message, /动图 2 帧/)
   assert.match(r.message, /已抽帧给模型/)

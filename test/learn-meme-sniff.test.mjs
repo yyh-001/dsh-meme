@@ -51,8 +51,8 @@ const ctx = {
 const mod = await import('../index.js')
 mod.apply(ctx, { memeRoot: root })
 
-// AI 学图固定落独立的「AI 学图」库(与上传收藏分开),不再写当前图库
-const learnRoot = join(home, '.dsh', 'meme-packs', 'dsh-meme-learned')
+// AI 学图固定落「我的收藏」稳定库(与上传同库),不再写当前图库
+const learnRoot = join(home, '.dsh', 'meme-packs', 'dsh-meme-user')
 
 const learn = tools.find((t) => t.name === 'learn_meme')
 assert.ok(learn, 'learn_meme 工具应注册')
@@ -89,11 +89,11 @@ test('issue #36:附件元数据说是 gif、字节是 PNG → 落盘 .png,路由
   const r = await learn.execute({ tag: 'happy' }, exec)
   assert.equal(r.ok, true, r.message)
   assert.match(r.path, /\.png$/, '扩展名必须由字节决定,而不是元数据/文件名')
-  assert.match(r.url, /\/dsh-memes\/dsh-meme-learned\//, 'URL 指向「AI 学图」库')
+  assert.match(r.url, /\/dsh-memes\/dsh-meme-user\//, 'URL 指向「我的收藏」库')
   assert.deepEqual(readFileSync(join(learnRoot, r.path)), PNG, '落盘内容应与附件字节一致')
 
   // 图片路由按落盘扩展名查 MIME 表:修复前是 .gif → image/gif,修复后是 .png → image/png
-  const served = callRoute('/dsh-memes/dsh-meme-learned/' + r.path)
+  const served = callRoute('/dsh-memes/dsh-meme-user/' + r.path)
   assert.equal(served.status, 200)
   assert.equal(served.headers['Content-Type'], 'image/png')
 })
@@ -122,7 +122,7 @@ test('issue #36:imageUrl 响应头说 gif、字节是 JPEG → 落盘 .jpg', asy
   }
 })
 
-test('「AI 学图」库里不应出现按错误元数据落盘的 .gif(整轮下来的总检查)', () => {
+test('「我的收藏」库里不应出现按错误元数据落盘的 .gif(整轮下来的总检查)', () => {
   const files = readdirSync(join(learnRoot, 'memes', 'happy'))
   assert.ok(files.length >= 3)
   assert.ok(!files.some((f) => f.endsWith('.gif')), '没有一张图是 GIF 字节,不应有 .gif 落盘:' + files.join(','))

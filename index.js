@@ -823,7 +823,7 @@ export function apply(ctx, config) {
   }
 
   // ---- 模型可用的图库:设置页每张卡片一个开关,可以同时开多个 ----
-  // 管理相关的 memes.* 仍只作用于「当前图库」(上传/改/删;AI 学图固定写「AI 学图」库),
+  // 管理相关的 memes.* 仍只作用于「当前图库」(上传/改/删;AI 学图固定写「我的收藏」),
   // send_meme 抽候选则跨所有打开的图库——这里包一层 sampler 给工具用。
   const packRows = () => {
     try { return listAllPacks() } catch { return [] }
@@ -1199,8 +1199,8 @@ export function apply(ctx, config) {
     return isManagedPackRoot(root) ? 'subscribed' : ''
   }
   const isVolatileRoot = (root) => volatileReason(root) !== ''
-  // 程序化维护的稳定图库(包外、自动启用)。上传收藏和 AI 学图分开:
-  // 用户上传/扫描默认「我的收藏」,AI 学图固定「AI 学图」,互不混库。
+  // 程序化维护的稳定图库(包外、自动启用)。上传、扫描新增与 AI 学图都落
+  // 「我的收藏」:内置包升级、订阅库更新都碰不到它,不会丢收藏。
   const stablePack = (id, name, description) => {
     const dir = join(packsDirNow(), id)
     ensurePackAt(dir, { id, name, description })
@@ -1213,10 +1213,7 @@ export function apply(ctx, config) {
     } catch (e) { /* 自动启用失败不阻塞写入 */ }
     return dir
   }
-  const ensureUserPack = () => stablePack(USER_PACK_ID, USER_PACK_NAME, '上传与扫描新增的默认落点;内置图库升级、订阅图库更新都会整目录替换,收藏统一存这里')
-  const LEARN_PACK_ID = 'dsh-meme-learned'
-  const LEARN_PACK_NAME = 'AI 学图'
-  const learnTarget = () => stablePack(LEARN_PACK_ID, LEARN_PACK_NAME, 'AI 学图的固定落点;与上传收藏分开,插件升级和订阅更新都不会清空')
+  const ensureUserPack = () => stablePack(USER_PACK_ID, USER_PACK_NAME, '上传、扫描新增与 AI 学图的默认落点;内置图库升级、订阅图库更新都会整目录替换,收藏统一存这里')
   /** 收藏写入目标:当前图库是内置包(升级清空)或订阅图库(更新整目录替换)时改写「我的收藏」 */
   const writeTarget = () => (isVolatileRoot(memes.root) ? ensureUserPack() : memes.root)
   /** 重定向提示文案:区分内置包升级与订阅更新,别把订阅库说成「内置图库」 */
@@ -1359,7 +1356,7 @@ export function apply(ctx, config) {
       description: '把一张图片收录进表情包图库(自动学图)。' +
         '仅当用户明确要求收藏/收录/保存这张图时使用(如「收藏这个表情」「收进图库」)。' +
         '用户发表情/发图是斗图,不是收藏请求——不要自动收录,正常回应即可。' +
-        '插件会自动识别图片内容(分类/描述/关键词)后存入独立的「AI 学图」图库;tag/caption/keywords 可选,手动指定优先。' +
+        '插件会自动识别图片内容(分类/描述/关键词)后存入「我的收藏」图库;tag/caption/keywords 可选,手动指定优先。' +
         '用户刚发的图片附件:直接调用即可,不必传 attachmentId(id 不会出现在 prompt 里,默认收录最近一张用户图)。也可用 attachmentId 或 http(s) imageUrl。',
       parameters: {
         attachmentId: { type: 'string', description: '可选。对话附件 id;不传则收录最近一张用户图片' },
@@ -1436,9 +1433,9 @@ export function apply(ctx, config) {
             if (!keywords) keywords = r.keywords
           }
           if (!tag || !validTagRe.test(tag)) return { ok: false, message: '分类无效(tag 只能小写字母/数字/-/_),请手动指定 tag' }
-          // 落点固定「AI 学图」稳定库(与上传收藏分开),不受当前图库是内置包/订阅包/自建库影响。
+          // 落点固定「我的收藏」稳定库:内置包升级、订阅库更新都碰不到它。
           // 附件是 GIF 但字节已不是 GIF → 宿主聊天通道把它压成了单帧,结果里要给用户保真路径。
-          const targetRoot = learnTarget()
+          const targetRoot = ensureUserPack()
           const redirected = resolve(targetRoot) !== resolve(memes.root)
           const gifFlattened = !imageUrl && /\.gif$/i.test(refName) && mime !== 'image/gif'
           const name = Date.now() + '_' + Math.floor(Math.random() * 1000) + ext
@@ -1456,8 +1453,8 @@ export function apply(ctx, config) {
               .run(rel, tag, name, caption, keywords, Date.now(), Date.now())
           }
           memes.refresh()
-          return { ok: true, path: rel, tag, url: ROUTE + '/' + (redirected ? LEARN_PACK_ID + '/' : '') + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别' + (animInfo ? ',动图 ' + animInfo.frameCount + ' 帧' + (animInfo.filmstrip ? ',已抽帧给模型' : '') : '') + ')' : '') + ' → ' + rel
-            + ';已存入「' + LEARN_PACK_NAME + '」图库'
+          return { ok: true, path: rel, tag, url: ROUTE + '/' + (redirected ? USER_PACK_ID + '/' : '') + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别' + (animInfo ? ',动图 ' + animInfo.frameCount + ' 帧' + (animInfo.filmstrip ? ',已抽帧给模型' : '') : '') + ')' : '') + ' → ' + rel
+            + ';已存入「' + USER_PACK_NAME + '」图库'
             + (gifFlattened ? ';注意:这张 GIF 在聊天上传时已被压成单帧,想保留动画请用设置面板上传,或把 GIF 文件放进图库目录后点「扫描新增」' : '') }
         } catch (error) {
           return { ok: false, message: '收录失败: ' + (error instanceof Error ? error.message : String(error)) }
