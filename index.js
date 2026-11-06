@@ -31,6 +31,10 @@ import {
 import { ANIM_DEFAULT_FRAMES, detectAnimation, buildAnimationFilmstrip, animationModelNote } from './anim.js'
 import { normalizeQqSendEdge, resizeForQq, loadSharp, sharpStatus } from './qq-resize.js'
 
+// 远程安装/订阅图库的来源标记(写在图库目录根部)。更新订阅会整目录替换这个目录,
+// 里面的来源标记也是判断「这个图库会不会被更新清空」的依据(issue #65)。
+const SIDECAR_NAME = '.dsh-remote.json'
+
 // ---- 极简 ZIP(store 无压缩)读写:零依赖导出/导入图库包 ----
 const CRC_TABLE = (() => {
   const t = new Int32Array(256)
@@ -830,6 +834,14 @@ export function apply(ctx, config) {
     return s.packId || (packs.find((p) => resolve(p.path) === resolve(memes.root)) || {}).id || ''
   }
   const enabledIds = () => enabledPackIds(readSettings(), packRows(), activePackId())
+  // 打开某个图库的开关(安装/建包后调用)。写前把当前开关再并一次:两次安装先后
+  // 完成时,后写的那个不会用安装开始时的旧列表把对方刚打开的包覆盖掉(issue #65)。
+  // enabledBefore 是切换当前图库前取的快照——enabledPacks 尚未显式设置时,
+  // 它带着「原来的当前图库」,不能丢。
+  const enablePack = (id, enabledBefore) => {
+    const current = enabledPackIds(readSettings(), packRows(), id)
+    writeSettings({ enabledPacks: [...new Set([...enabledBefore, ...current, id])] })
+  }
   // 给单库快路径的行补上图库标注(跨库合并路径在下面就地标):候选带 library,
   // 模型答得出「这图哪个库的」(issue #53)。不改 path,只加字段。
   const annotatePack = (rows, pack) => rows.map((row) => ({ ...row, packId: pack.id, packName: pack.name }))
@@ -1152,18 +1164,44 @@ export function apply(ctx, config) {
     }
     return packs
   }
-  // ---- 用户收藏的稳定落点(修复:插件升级清空收藏) ----
+  // ---- 用户收藏的稳定落点(修复:插件升级/订阅更新清空收藏) ----
   // 内置图库随插件包分发,包目录在 npm/pnpm 更新时会被整个替换——写进内置库的收藏
-  // (上传/AI 学图/手动拷贝)一起消失。收藏一律落 packsDir 下的「我的收藏」图库
-  // (默认在 ~/.dsh 下,包外,升级不动),并自动启用:send_meme 跨启用图库取图,
-  // 不切换当前图库也能发。内置库从此只读。
+  // (上传/AI 学图/手动拷贝)一起消失。订阅/远程安装的图库同理:updateRemotePack 和
+  // 清单更新都会把 `~/.dsh/meme-packs/<id>` 整目录换成新下载的内容(issue #65)。
+  // 收藏一律落 packsDir 下的「我的收藏」图库(默认在 ~/.dsh 下,两种更新都碰不到),
+  // 并自动启用:send_meme 跨启用图库取图,不切换当前图库也能发。
   const USER_PACK_ID = 'dsh-meme-user'
   const USER_PACK_NAME = '我的收藏(升级不丢)'
   const userPackPath = () => join(packsDirNow(), USER_PACK_ID)
-  const isVolatileRoot = (root) => isInsidePluginPackage(root)
+  /**
+   * 订阅/远程安装的图库目录。判据两种,任一成立即可:
+   * ① 目录里有插件写的远程来源标记(.dsh-remote.json,归档安装与清单订阅都会写);
+   * ② settings.remoteSubs 里有对应包 id(来源标记被手动删掉时兜底)。
+   */
+  const isManagedPackRoot = (root) => {
+    const dir = resolve(root)
+    try {
+      const sc = JSON.parse(readFileSync(join(dir, SIDECAR_NAME), 'utf8'))
+      if (sc && (sc.manifestUrl || sc.archiveUrl)) return true
+    } catch { /* 没有来源标记:内置包或手工图库 */ }
+    try {
+      const subs = readSettings().remoteSubs
+      if (!Array.isArray(subs) || subs.length === 0) return false
+      const ids = new Set(subs.filter((s) => s && s.id).map((s) => String(s.id)))
+      if (ids.size === 0) return false
+      const hit = listAllPacks().find((p) => resolve(p.path) === dir)
+      return !!(hit && ids.has(String(hit.id)))
+    } catch { return false }
+  }
+  /** 图库更新时会不会被整目录替换:'' = 不会,'bundled' = 插件包升级,'subscribed' = 订阅更新 */
+  const volatileReason = (root) => {
+    if (isInsidePluginPackage(root)) return 'bundled'
+    return isManagedPackRoot(root) ? 'subscribed' : ''
+  }
+  const isVolatileRoot = (root) => volatileReason(root) !== ''
   const ensureUserPack = () => {
     const dir = userPackPath()
-    ensurePackAt(dir, { id: USER_PACK_ID, name: USER_PACK_NAME, description: '上传与 AI 学图的默认落点;内置图库随插件升级会被清空,收藏统一存这里' })
+    ensurePackAt(dir, { id: USER_PACK_ID, name: USER_PACK_NAME, description: '上传与 AI 学图的默认落点;内置图库升级、订阅图库更新都会整目录替换,收藏统一存这里' })
     try {
       const packs = listAllPacks()
       const enabled = enabledPackIds(readSettings(), packs, activePackId())
@@ -1173,8 +1211,12 @@ export function apply(ctx, config) {
     } catch (e) { /* 自动启用失败不阻塞写入 */ }
     return dir
   }
-  /** 收藏写入目标:当前图库在插件包内(升级会被清空)时改写「我的收藏」,否则原样 */
+  /** 收藏写入目标:当前图库是内置包(升级清空)或订阅图库(更新整目录替换)时改写「我的收藏」 */
   const writeTarget = () => (isVolatileRoot(memes.root) ? ensureUserPack() : memes.root)
+  /** 重定向提示文案:区分内置包升级与订阅更新,别把订阅库说成「内置图库」 */
+  const volatileNote = (root) => (volatileReason(root) === 'subscribed'
+    ? '订阅图库更新时会整目录替换'
+    : '内置图库随插件升级会被清空')
   const packPaths = (path) => {
     let store = null
     try {
@@ -1388,8 +1430,8 @@ export function apply(ctx, config) {
             if (!keywords) keywords = r.keywords
           }
           if (!tag || !validTagRe.test(tag)) return { ok: false, message: '分类无效(tag 只能小写字母/数字/-/_),请手动指定 tag' }
-          // 落点:当前图库在插件包内(升级会被清空)时改写「我的收藏」。附件是 GIF
-          // 但字节已不是 GIF → 宿主聊天通道把它压成了单帧,结果里要给用户保真路径。
+          // 落点:当前图库是内置包(升级清空)或订阅图库(更新整目录替换)时改写「我的收藏」。
+          // 附件是 GIF 但字节已不是 GIF → 宿主聊天通道把它压成了单帧,结果里要给用户保真路径。
           const targetRoot = writeTarget()
           const redirected = resolve(targetRoot) !== resolve(memes.root)
           const gifFlattened = !imageUrl && /\.gif$/i.test(refName) && mime !== 'image/gif'
@@ -1409,7 +1451,7 @@ export function apply(ctx, config) {
           }
           memes.refresh()
           return { ok: true, path: rel, tag, url: ROUTE + '/' + (redirected ? USER_PACK_ID + '/' : '') + rel, message: '已收录: [' + tag + '] ' + (caption || name) + (auto ? ' (AI 自动识别' + (animInfo ? ',动图 ' + animInfo.frameCount + ' 帧' + (animInfo.filmstrip ? ',已抽帧给模型' : '') : '') + ')' : '') + ' → ' + rel
-            + (redirected ? ';已存入「我的收藏」(内置图库随插件升级会被清空)' : '')
+            + (redirected ? ';已存入「我的收藏」(' + volatileNote(memes.root) + ')' : '')
             + (gifFlattened ? ';注意:这张 GIF 在聊天上传时已被压成单帧,想保留动画请用设置面板上传,或把 GIF 文件放进图库目录后点「扫描新增」' : '') }
         } catch (error) {
           return { ok: false, message: '收录失败: ' + (error instanceof Error ? error.message : String(error)) }
@@ -1601,7 +1643,6 @@ export function apply(ctx, config) {
     const REMOTE_CONCURRENCY = 4
     const REMOTE_MAX_ITEMS = 500
     const PREVIEW_MAX = 60      // 预览弹窗最多列这么多张(清单包里可能上百张)
-    const SIDECAR_NAME = '.dsh-remote.json'
     // 图库目录源:settings.remoteDirUrl > patch config.remoteDirUrl > 内置默认。
     // 每次请求现读 settings:改配置文件即刻生效,不用重启。
     // 设置值:''/'auto' = 自动多镜像;'official'/'mirror' = 预设;自定义 http(s) URL。
@@ -2035,7 +2076,7 @@ export function apply(ctx, config) {
         }
         rmSync(backupAbs, { recursive: true, force: true })
         reloadMemeStore(targetAbs, id)
-        writeSettings({ enabledPacks: [...new Set([...enabledBefore, id])] })
+        enablePack(id, enabledBefore)
         return targetAbs
       } finally {
         rmSync(stageAbs, { recursive: true, force: true })
@@ -2210,7 +2251,7 @@ export function apply(ctx, config) {
           // 初次订阅下载完也默认直接可用:切过去 + 打开开关
           const enabledBefore = enabledPackIds(readSettings(), listAllPacks(), activePackId())
           reloadMemeStore(finalDir, manifest.id)
-          writeSettings({ enabledPacks: [...new Set([...enabledBefore, manifest.id])] })
+          enablePack(manifest.id, enabledBefore)
           job.message = '完成:下载 ' + job.added + '/' + job.total + ' 张并已切换到「' + manifest.name + '」'
             + (job.failed ? '(失败 ' + job.failed + ' 张,可稍后再点一次更新补齐)' : '')
         } else {
@@ -2386,7 +2427,7 @@ export function apply(ctx, config) {
             // 保留已有开关状态,再把新建的图库打开(模型立即可用)
             const wasEnabled = enabledPackIds(readSettings(), listAllPacks(), activePackId())
             reloadMemeStore(dir, id)
-            writeSettings({ enabledPacks: [...new Set([...wasEnabled, id])] })
+            enablePack(id, wasEnabled)
             json(res, { ok: true, ...packPayload() })
           } else if (op === 'recognize') {
             // 上传弹窗的 AI 识别:只返回识别结果,不写入图库(用户确认后走 upload)
@@ -2412,8 +2453,8 @@ export function apply(ctx, config) {
             const ext = fileName.includes('.') ? '.' + fileName.split('.').pop().toLowerCase() : ''
             if (!IMAGE_EXTS.includes(ext)) throw new Error('仅支持 jpg/png/gif/webp')
             if (!data) throw new Error('缺少图片数据')
-            // 落点:当前图库在插件包内(升级会被清空)时改写「我的收藏」,原始字节
-            // 原样落盘——动图 GIF 从这里上传可保动画,聊天附件通道才会压成单帧。
+            // 落点:当前图库是内置包(升级清空)或订阅图库(更新整目录替换)时改写「我的收藏」,
+            // 原始字节原样落盘——动图 GIF 从这里上传可保动画,聊天附件通道才会压成单帧。
             const targetRoot = writeTarget()
             const redirected = resolve(targetRoot) !== resolve(memes.root)
             const name = Date.now() + '_' + Math.floor(Math.random() * 1000) + ext
@@ -2436,12 +2477,12 @@ export function apply(ctx, config) {
               meme: { path: rel, tag, file_name: name, caption, keywords, url: ROUTE + '/' + (redirected ? USER_PACK_ID + '/' : '') + rel },
               // 重定向时带完整 payload:客户端要拿到「我的收藏」出现在图库列表且已启用
               ...(redirected ? packPayload() : {}),
-              message: redirected ? '已上传到「' + USER_PACK_NAME + '」图库:内置图库随插件升级会被清空,收藏统一存包外' : '',
+              message: redirected ? '已上传到「' + USER_PACK_NAME + '」图库:' + volatileNote(memes.root) + ',收藏统一存这里' : '',
             })
           } else if (op === 'scanPack') {
             // 扫描图库目录:把手动拷进去、还没进索引的图片收进来。动图 GIF 走这条路
-            // 保真——磁盘文件原始字节入库。扫描内置图库时新收的文件顺手搬去
-            // 「我的收藏」(内置图库随插件升级会被清空)。
+            // 保真——磁盘文件原始字节入库。扫描易失图库(内置包/订阅库)时新收的文件
+            // 顺手搬去「我的收藏」:前者插件升级清空,后者订阅更新整目录替换。
             // 同时清理失效行:文件被改名/删除后旧行永远留着,面板里就是一张永远
             // 加载不出缩略图的死条目(用户反馈「只有添加没有删除/修改」)。
             const wanted = String(body.packId || '').trim()
@@ -2477,7 +2518,7 @@ export function apply(ctx, config) {
             const parts = []
             if (fresh.length) parts.push('新增 ' + fresh.length + ' 张')
             if (stale.length) parts.push('清理 ' + stale.length + ' 条失效记录(文件已改名或删除)')
-            if (relocated) parts.push('已搬入「我的收藏」(内置图库随插件升级会被清空)')
+            if (relocated) parts.push('已搬入「我的收藏」(' + volatileNote(pack.path) + ')')
             json(res, {
               ok: true, added: fresh.length, pruned: stale.length, relocated, ...packPayload(),
               message: parts.length
