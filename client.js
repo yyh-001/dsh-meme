@@ -1193,9 +1193,9 @@ window.__ModuleLoader__.load((() => {
               fileName: file.name,
               dataBase64: data,
             })
-            setNotice(res && res.ok && res.meme
+            const message = res && res.ok && res.meme
               ? '已上传: ' + res.meme.path + (res.message ? '(' + res.message + ')' : '')
-              : '上传失败: ' + (res && res.error || ''))
+              : '上传失败: ' + (res && res.error || '')
             if (res && res.ok) {
               setUploadOpen(false)
               setUpFile(null)
@@ -1206,6 +1206,9 @@ window.__ModuleLoader__.load((() => {
               setUpKeywords('')
               await load(q, tagFilter)
             }
+            // load() 成功后会清空 notice,上传结果必须最后写,否则用户看不到
+            // 「已存入我的收藏 / 订阅图库更新会整目录替换」这类落点说明
+            setNotice(message)
           } catch (error) {
             setNotice('上传失败: ' + (error && error.message ? error.message : String(error)))
           }
