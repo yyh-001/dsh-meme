@@ -45,11 +45,11 @@ Plugin HTTP routes accept loopback hosts only (`localhost` / `127.0.0.1` / `[::1
 
 **Phone / tablet (LAN IP)**: turn on **“局域网访问图库 (Allow LAN access)”** in the plugin settings (off by default). Only IP literals are allowed (loopback, RFC1918 private ranges, link-local). Remember to open the DSH Web port in your firewall.
 
-**Reverse proxy** (browser → `https://your.domain` → nginx/frp → `127.0.0.1:2233`): the Host is your own domain, so declare it explicitly (issue [#56](https://github.com/yyh-001/dsh-meme/issues/56); the list is empty by default and behaviour is unchanged):
+**Reverse proxy / temporary tunnel** (browser → `https://your.domain` → nginx/frp/cloudflared → `127.0.0.1:2233`): the Host is your own domain, so declare it explicitly (issue [#56](https://github.com/yyh-001/dsh-meme/issues/56); the list is empty by default and behaviour is unchanged):
 
 ```bash
-# Environment variable: no profile edits needed for containers/reverse proxies
-DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
+# Environment variable: no profile edits needed for containers/reverse proxies; comma-separated
+DSH_MEME_TRUSTED_HOSTS=feiyu.example.com,*.trycloudflare.com
 ```
 
 ```yaml
@@ -58,8 +58,15 @@ DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
   config:
     allowedHosts:
       - feiyu.example.com
+      - '*.trycloudflare.com'   # Cloudflare quick tunnel: hostname changes every start
 ```
 
-Matching is exact (case/port/trailing dot insensitive, no wildcards); hosts not on the list are still rejected, so the DNS-rebinding defence is unchanged. The plugin has no authentication of its own — put login/access control in front of the proxy domain.
+Matching rules:
+
+- Plain entries are **exact host** matches (case/port/trailing dot insensitive);
+- A `*.` prefix is a **suffix wildcard** (issue [#66](https://github.com/yyh-001/dsh-meme/issues/66)) and matches **one** subdomain label only: `*.trycloudflare.com` matches `abc.trycloudflare.com`, but not bare `trycloudflare.com` or `a.b.trycloudflare.com`. Comparison uses the full `.` + suffix boundary, so confusions like `evil.trycloudflare.com.attacker.net` do not pass;
+- Hosts not on the list are still rejected, so the DNS-rebinding defence is unchanged.
+
+Use wildcards only for suffixes whose DNS is controlled by a trusted platform (`*.trycloudflare.com`, `*.ngrok-free.app`, etc.), never for your own domain suffix. The plugin has no authentication of its own — put login/access control in front of the proxy/tunnel domain.
 
 **Sub-path deployment** (DSH mounted under `/app/<id>/` by the fnOS app centre, or an Nginx `location /dsh/`, etc.): since 0.1.77 the plugin derives the app prefix from the `<script src>` that loaded it, so API and image requests automatically carry the same prefix — no extra configuration. If after upgrading you still see “图库目录暂不可用” and the network panel shows requests at the site root (`/dsh-memes-api` instead of `/app/<id>/dsh-memes-api`), make sure the browser is not running a cached old `client.js`; reload or restart DSH.

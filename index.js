@@ -64,6 +64,10 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
 // 完全不变;只信任显式写死的域名/主机名。DNS rebinding 时 Host 一定是攻击者的
 // 域名,只要白名单里没有它,防线照样成立。
 const TRUSTED_HOSTS = new Set()
+// 后缀通配(issue #66):Cloudflare quick tunnel 的域名每次启动重新分配,写死必然失效。
+// `*.trycloudflare.com` 只匹配**一级**子域,且用「. + 后缀」整体边界比较,
+// 裸后缀与 `a.b.trycloudflare.com` 都不匹配。只应对解析由可信平台控制的后缀使用。
+const TRUSTED_SUFFIXES = new Set()
 
 /**
  * 归一化 Host/白名单项:小写、去掉误写的 scheme 与路径、去掉端口、去掉末尾点。
@@ -81,22 +85,46 @@ function hostNameOf(value) {
 
 /**
  * 追加可信 Host(反代部署,issue #56)。value 支持逗号分隔字符串或数组;
- * 端口/大小写/末尾点不敏感,只做精确主机名匹配(不支持通配符)。
+ * 端口/大小写/末尾点不敏感。`*.example.com` 是后缀通配(issue #66),只匹配一级
+ * 子域;其余项照旧按精确主机名匹配。含 `*` 但不是合法 `*.` 前缀的项直接忽略。
  */
 export function addTrustedHosts(value) {
   const list = Array.isArray(value) ? value : String(value || '').split(',')
   for (const item of list) {
     const name = hostNameOf(item)
-    if (name) TRUSTED_HOSTS.add(name)
+    if (!name) continue
+    if (name.startsWith('*.')) {
+      const suffix = name.slice(2)
+      // 后缀自身不能再带 * 或空标签;通配只支持一级子域,`**.` 之类一律不认。
+      if (suffix && !suffix.includes('*') && !suffix.startsWith('.') && !suffix.endsWith('.')) {
+        TRUSTED_SUFFIXES.add(suffix)
+      }
+      continue
+    }
+    if (name.includes('*')) continue
+    TRUSTED_HOSTS.add(name)
   }
   return TRUSTED_HOSTS
+}
+
+function hostMatchesTrustedSuffix(name) {
+  for (const suffix of TRUSTED_SUFFIXES) {
+    const tail = '.' + suffix
+    if (!name.endsWith(tail)) continue
+    const label = name.slice(0, -tail.length)
+    // 一级子域:`a.trycloudflare.com` 命中;`trycloudflare.com`(裸后缀)、
+    // `a.b.trycloudflare.com`(多级)、`evil-trycloudflare.com` 都不命中。
+    if (label && !label.includes('.')) return true
+  }
+  return false
 }
 
 /** 请求的 Host 是否在显式可信名单里(默认空名单 → 永远 false)。 */
 export function hostIsTrusted(req) {
   const raw = String((req && req.headers && req.headers.host) || '')
   if (!raw) return false
-  return TRUSTED_HOSTS.has(hostNameOf(raw))
+  const name = hostNameOf(raw)
+  return TRUSTED_HOSTS.has(name) || hostMatchesTrustedSuffix(name)
 }
 
 /** 私有网段 IPv4(10/8、172.16/12、192.168/16、169.254/16) */

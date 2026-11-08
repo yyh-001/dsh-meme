@@ -51,11 +51,11 @@ curl -o /dev/null -w '%{http_code}\n' https://gh-proxy.com/https://raw.githubuse
 
 **手机 / 平板（局域网 IP）**：在插件设置页打开 **「局域网访问图库」**（默认关），只放行 IP 字面量（回环 / RFC1918 私有网段 / 链路本地）。记得系统防火墙放行 DSH Web 端口。
 
-**反向代理**（浏览器 → `https://你的域名` → nginx/frp → `127.0.0.1:2233`）：Host 是运维自己的域名，需要显式声明可信域名（issue [#56](https://github.com/yyh-001/dsh-meme/issues/56)；默认空名单，行为完全不变）：
+**反向代理 / 临时隧道**（浏览器 → `https://你的域名` → nginx/frp/cloudflared → `127.0.0.1:2233`）：Host 是运维自己的域名，需要显式声明可信域名（issue [#56](https://github.com/yyh-001/dsh-meme/issues/56)；默认空名单，行为完全不变）：
 
 ```bash
-# 环境变量：容器/反代场景不用改 profile
-DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
+# 环境变量：容器/反代场景不用改 profile；逗号分隔可写多项
+DSH_MEME_TRUSTED_HOSTS=feiyu.example.com,*.trycloudflare.com
 ```
 
 ```yaml
@@ -64,8 +64,15 @@ DSH_MEME_TRUSTED_HOSTS=feiyu.example.com
   config:
     allowedHosts:
       - feiyu.example.com
+      - '*.trycloudflare.com'   # Cloudflare quick tunnel：域名每次启动都变
 ```
 
-只做精确主机名匹配（大小写、端口、末尾点不敏感，不支持通配符）；没写进名单的域名仍然拒绝，DNS rebinding 防线不变。插件本身没有鉴权，反代域名务必由代理层做登录/访问控制。
+匹配规则：
+
+- 普通项是**精确主机名**匹配（大小写、端口、末尾点不敏感）；
+- `*.` 开头是**后缀通配**（issue [#66](https://github.com/yyh-001/dsh-meme/issues/66)），只匹配**一级**子域：`*.trycloudflare.com` 命中 `abc.trycloudflare.com`，不命中裸 `trycloudflare.com`，也不命中 `a.b.trycloudflare.com`；比较按「`. + 后缀`」整体边界做，`evil.trycloudflare.com.attacker.net` 这类混淆不放过；
+- 没写进名单的域名仍然拒绝，DNS rebinding 防线不变。
+
+通配只用于**解析由可信平台控制**的后缀（`*.trycloudflare.com`、`*.ngrok-free.app` 等），不要对自有域名后缀开 `*`。插件本身没有鉴权，反代/隧道域名务必由代理层做登录/访问控制。
 
 **子路径部署**（fnOS 应用中心 `/app/<id>/`、Nginx `location /dsh/` 等把 DSH 挂在二级目录下）：0.1.77 起插件会从加载自身的 `<script src>` 反推应用前缀，API 与图片请求自动带上同一前缀，无需额外配置。若升级后仍出现「图库目录暂不可用」且网络面板里请求落到站点根（如 `/dsh-memes-api` 而非 `/app/<id>/dsh-memes-api`），先确认浏览器缓存的是旧版 `client.js`，刷新或重启 DSH 后再试。
