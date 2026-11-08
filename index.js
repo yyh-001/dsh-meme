@@ -114,7 +114,8 @@ function hostMatchesTrustedSuffix(name) {
     const label = name.slice(0, -tail.length)
     // 一级子域:`a.trycloudflare.com` 命中;`trycloudflare.com`(裸后缀)、
     // `a.b.trycloudflare.com`(多级)、`evil-trycloudflare.com` 都不命中。
-    if (label && !label.includes('.')) return true
+    // 字面量 `*` 作为标签也不认(浏览器不会发这种 Host,防御性排除)。
+    if (label && !label.includes('.') && !label.includes('*')) return true
   }
   return false
 }

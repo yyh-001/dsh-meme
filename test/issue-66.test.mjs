@@ -98,6 +98,7 @@ test('边界匹配:前后缀混淆不放过', async () => {
     'trycloudflare.com.attacker.net',
     'evil.trycloudflare.com.attacker.net',
     'attacker.net?x=.trycloudflare.com',
+    '*.trycloudflare.com',
   ]) {
     const res = await apiGet(host)
     assert.equal(res.statusCode, 403, host + ' 不应命中白名单')
