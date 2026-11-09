@@ -38,6 +38,24 @@ function createHost() {
   const tools = []
   const webServer = { host: '127.0.0.1', port: 3999, register(r) { handlers.push(r) }, tapIndex() {} }
   const llm = {
+    listProviders() {
+      return [
+        { id: 'default-provider', name: '默认提供方' },
+        { id: 'broken-provider', name: '列不出模型的提供方' },
+      ]
+    },
+    async listModels(provider) {
+      // 单个 provider 目录拉取失败不能拖垮其它 provider(设置页下拉照样能用)
+      if (provider === 'broken-provider') throw new Error('network down')
+      if (provider === 'default-provider') {
+        return [
+          { id: 'default-model', name: '默认模型', inputModalities: ['text', 'image'] },
+          { id: 'text-only', name: '纯文本模型', inputModalities: ['text'] },
+          { id: 'unknown-cap', name: '' },
+        ]
+      }
+      return []
+    },
     async resolveModelInfo() { return { inputModalities: ['text', 'image'] } },
     async resolveCallConfig(cfg) { return cfg },
     prepareCall(cfg) {
@@ -106,6 +124,21 @@ test('payload 默认不带识图模型:两个字段都是空串(跟随部署默�
   assert.equal(initial.sendMode, 'auto', '原有设置字段不受影响')
 })
 
+test('getRecognizeCatalog:列出宿主 provider/model 和图片能力,单 provider 失败跳过', async () => {
+  setSettings({})
+  const cat = JSON.parse((await post({ op: 'getRecognizeCatalog' })).body)
+  assert.equal(cat.ok, true)
+  assert.deepEqual(cat.providers.map((p) => p.id), ['default-provider'], '拉不到模型目录的 provider 跳过')
+  const group = cat.providers[0]
+  assert.equal(group.name, '默认提供方')
+  assert.deepEqual(group.models, [
+    { id: 'default-model', name: '默认模型', image: true },
+    { id: 'text-only', name: '纯文本模型', image: false },
+    { id: 'unknown-cap', name: 'unknown-cap', image: null },
+  ], '下拉框要能标注支持/不支持图片,未知就不标注')
+  assert.deepEqual(cat.defaultSelection, { provider: DEFAULT_SEL.provider, model: DEFAULT_SEL.model }, '跟随默认时展示实际默认模型')
+})
+
 test('未配置识图模型时,识别回退到部署默认模型(行为与旧版一致)', async () => {
   setSettings({})
   recognizeCalls.length = 0
@@ -140,6 +173,16 @@ test('配置生效后,识别这一次调用改用配置的 provider/model', asyn
   assert.equal(r.status, 200)
   assert.equal(r.body.ok, true)
   assert.deepEqual(recognizeCalls, [{ provider: 'my-provider', model: 'vision-model' }], '只换识别这一步的模型')
+})
+
+test('完整链路:保存设置后,紧接着的识图调用就用新模型(不重启、不缓存旧值)', async () => {
+  setSettings({})
+  const savedRes = await post({ op: 'setRecognizeModel', provider: 'deepseek-official', model: 'deepseek-flash' })
+  assert.equal(savedRes.statusCode, 200)
+  recognizeCalls.length = 0
+  const r = await recognize()
+  assert.equal(r.body.ok, true)
+  assert.deepEqual(recognizeCalls, [{ provider: 'deepseek-official', model: 'deepseek-flash' }], '设置页保存的就是下一次识图实际用的模型')
 })
 
 test('只填一个字段会被拒绝(避免存下半配置)', async () => {

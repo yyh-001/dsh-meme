@@ -433,6 +433,11 @@ window.__ModuleLoader__.load((() => {
       // 识图模型(可选):provider + model 同时填写才生效;留空 = 跟随部署默认模型
       const [recognizeProvider, setRecognizeProvider] = React.useState('')
       const [recognizeModel, setRecognizeModel] = React.useState('')
+      // 最近一次保存成功的值:输入框只是草稿,保存失败要回到已保存值而不是草稿
+      const recognizeSavedRef = React.useRef({ provider: '', model: '' })
+      // 识图模型下拉目录:宿主的 provider/model 与图片能力;拉不到就退回纯文字提示
+      const [recognizeProviders, setRecognizeProviders] = React.useState([])
+      const [recognizeDefault, setRecognizeDefault] = React.useState(null)
       const [pluginVersion, setPluginVersion] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -454,6 +459,10 @@ window.__ModuleLoader__.load((() => {
         setAllowLan(res.allowLanAccess === true)
         setRecognizeProvider(String(res.recognizeProvider || ''))
         setRecognizeModel(String(res.recognizeModel || ''))
+        recognizeSavedRef.current = {
+          provider: String(res.recognizeProvider || ''),
+          model: String(res.recognizeModel || ''),
+        }
         setPluginVersion(res.pluginVersion || '')
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
@@ -620,6 +629,14 @@ window.__ModuleLoader__.load((() => {
       }
       React.useEffect(() => {
         apiPost({ op: 'getMemeRoot' }).then(applyRoot).catch(() => {})
+      }, [])
+      // 识图模型的两个下拉框:provider/model 由宿主列出,避免让用户手敲 id
+      React.useEffect(() => {
+        apiPost({ op: 'getRecognizeCatalog' }).then((res) => {
+          if (!res || !res.ok) return
+          setRecognizeProviders(Array.isArray(res.providers) ? res.providers : [])
+          setRecognizeDefault(res.defaultSelection && res.defaultSelection.provider ? res.defaultSelection : null)
+        }).catch(() => {})
       }, [])
       // 图库目录:挂载时拉一次。失败可在发现页点「重试」,设置里保存目录源后也会重拉。
       React.useEffect(() => { loadRemoteDir() }, [])
@@ -869,8 +886,7 @@ window.__ModuleLoader__.load((() => {
       // 识图模型:两个字段同时填写才生效,同时清空 = 恢复跟随默认模型。
       // 只作用于 AI 学图/上传识图的单次模型调用,不改会话模型。
       const onSaveRecognizeModel = async (provider, model) => {
-        const prevP = recognizeProvider
-        const prevM = recognizeModel
+        const prev = recognizeSavedRef.current
         setRecognizeProvider(provider)
         setRecognizeModel(model)
         try {
@@ -879,15 +895,52 @@ window.__ModuleLoader__.load((() => {
             applyRoot(res)
             setRootNotice(res.message || '已更新识图模型')
           } else {
-            setRecognizeProvider(prevP)
-            setRecognizeModel(prevM)
+            setRecognizeProvider(prev.provider)
+            setRecognizeModel(prev.model)
             setRootNotice('保存失败: ' + ((res && res.error) || ''))
           }
         } catch (e) {
-          setRecognizeProvider(prevP)
-          setRecognizeModel(prevM)
+          setRecognizeProvider(prev.provider)
+          setRecognizeModel(prev.model)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
+      }
+      // 识图模型下拉:provider 换成新值后,旧 model 不在新 provider 下就清掉,
+      // 免得存下一个宿主认不出的组合。空 provider = 跟随默认,model 一并清空。
+      const onPickRecognizeProvider = (provider) => {
+        setRecognizeProvider(provider)
+        if (!provider) { setRecognizeModel(''); return }
+        const group = recognizeProviders.find((p) => p.id === provider)
+        const ids = group ? group.models.map((m) => m.id) : []
+        if (recognizeModel && !ids.includes(recognizeModel)) setRecognizeModel('')
+      }
+      const recognizeProviderOptions = () => {
+        const opts = [h('option', { key: '', value: '' }, recognizeDefault
+          ? '跟随默认（' + recognizeDefault.provider + ' / ' + recognizeDefault.model + '）'
+          : '跟随默认')]
+        for (const p of recognizeProviders) {
+          opts.push(h('option', { key: p.id, value: p.id }, p.name && p.name !== p.id ? p.name + '（' + p.id + '）' : p.id))
+        }
+        // 已保存但当前目录里没有(provider 被移除/目录拉取失败):也给它一项,否则下拉框显示错位
+        if (recognizeProvider && !recognizeProviders.some((p) => p.id === recognizeProvider)) {
+          opts.push(h('option', { key: 'saved:' + recognizeProvider, value: recognizeProvider }, recognizeProvider + '（当前不可用）'))
+        }
+        return opts
+      }
+      const recognizeModelOptions = () => {
+        const group = recognizeProviders.find((p) => p.id === recognizeProvider)
+        const models = group ? group.models : []
+        const opts = [h('option', { key: '', value: '' }, recognizeProvider ? '请选择模型' : '先选 provider')]
+        for (const m of models) {
+          const name = m.name && m.name !== m.id ? m.name + '（' + m.id + '）' : m.id
+          // 能力放最前:下拉框窄的时候,后面的 id 可以截断,「支持图片」不能被截掉
+          const cap = m.image === true ? '支持图片 · ' : m.image === false ? '不支持图片 · ' : ''
+          opts.push(h('option', { key: m.id, value: m.id }, cap + name))
+        }
+        if (recognizeModel && !models.some((m) => m.id === recognizeModel)) {
+          opts.push(h('option', { key: 'saved:' + recognizeModel, value: recognizeModel }, recognizeModel + '（当前不可用）'))
+        }
+        return opts
       }
       // 主动发图档位:三档各配固定提示词,立即保存,失败回滚
       const onPickSendGear = async (gear) => {
@@ -1758,32 +1811,35 @@ window.__ModuleLoader__.load((() => {
         // 识图模型(可选):只影响 AI 学图/上传识图的模型调用,不影响会话模型与发图
         h('div', { className: 'section-title' }, '识图模型'),
         h('div', { className: 'row', style: { width: '100%' } },
-          h('input', {
-            type: 'text',
+          h('select', {
             value: recognizeProvider,
-            onChange: (e) => setRecognizeProvider(e.target.value),
-            placeholder: 'provider(留空 = 跟随默认)',
-            title: '模型提供方(provider),例如 my-provider',
-            style: { flex: 1, minWidth: 120 },
-          }),
-          h('input', {
-            type: 'text',
+            onChange: (e) => onPickRecognizeProvider(e.target.value),
+            title: '识图模型提供方(provider);「跟随默认」= 用部署的默认模型',
+            style: { flex: 1, minWidth: 0 },
+          }, recognizeProviderOptions()),
+        ),
+        // model 单独一行:模型名 + id + 能力标记比 provider 长,挤在同一行会被截断
+        h('div', { className: 'row', style: { width: '100%', marginTop: 6 } },
+          h('select', {
             value: recognizeModel,
             onChange: (e) => setRecognizeModel(e.target.value),
-            placeholder: 'model',
-            title: '模型 id(model),例如 vision-model',
-            style: { flex: 1, minWidth: 120, marginLeft: 8 },
-          }),
+            title: '识图使用的模型;标「支持图片」的模型才能识图',
+            disabled: !recognizeProvider,
+            style: { flex: 1, minWidth: 0 },
+          }, recognizeModelOptions()),
           h('button', {
             className: 'btn-primary',
             onClick: () => onSaveRecognizeModel(recognizeProvider, recognizeModel),
-            style: { marginLeft: 8 },
+            style: { marginLeft: 8, flexShrink: 0 },
           }, '保存'),
         ),
         h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
           recognizeProvider && recognizeModel
-            ? 'AI 学图与上传识图使用 ' + recognizeProvider + '/' + recognizeModel + ';清空两个输入框再保存即恢复默认'
-            : '留空 = 跟随当前默认模型。填一个支持图片输入的模型可以改善分类/描述/关键词质量(例如一个视觉模型)'),
+            ? 'AI 学图与上传识图使用 ' + recognizeProvider + '/' + recognizeModel + ';两个都选「跟随默认」再保存即恢复默认'
+            : recognizeProvider
+              ? '再选一个模型后保存;标注「支持图片」的识图效果更好'
+              : '跟随当前默认模型' + (recognizeDefault ? ': ' + recognizeDefault.provider + ' / ' + recognizeDefault.model : '')
+                + '。选支持图片的模型,识图更准'),
         // 主动发图三档:每档一套固定提示词,不再让用户调概率
         h('div', { className: 'section-title' }, '主动发图'),
         h('div', { className: 'row', style: { width: '100%' } },

@@ -616,6 +616,35 @@ export function apply(ctx, config) {
     recognizeProvider: String(readSettings().recognizeProvider || ''),
     recognizeModel: String(readSettings().recognizeModel || ''),
   })
+  /**
+   * 识图模型下拉用的目录:宿主的 provider 与各自模型,带图片输入能力。
+   * 单个 provider 列不出来不影响其它 provider;没有 llm 服务时返回空目录。
+   */
+  const recognizeCatalog = async () => {
+    const llm = ctx.get('llm')
+    const listProviders = llm && typeof llm.listProviders === 'function' ? llm.listProviders() : []
+    const providers = []
+    for (const p of Array.isArray(listProviders) ? listProviders : []) {
+      const id = String((p && p.id) || '').trim()
+      if (!id) continue
+      let models = []
+      try {
+        const list = typeof llm.listModels === 'function' ? await llm.listModels(id) : []
+        models = (Array.isArray(list) ? list : []).map((m) => ({
+          id: String((m && m.id) || '').trim(),
+          name: String((m && m.name) || (m && m.id) || '').trim(),
+          // 三态:true/false = 宿主明确说支持/不支持图片;null = 未知,不标注
+          image: Array.isArray(m && m.inputModalities) ? m.inputModalities.includes('image') : null,
+        })).filter((m) => m.id)
+      } catch (e) { /* 这个 provider 的模型目录拉不到,跳过 */ }
+      if (models.length) providers.push({ id, name: String((p && p.name) || id).trim() || id, models })
+    }
+    const def = defaultRecognizeSelection()
+    return {
+      providers,
+      defaultSelection: def && def.provider && def.model ? { provider: String(def.provider), model: String(def.model) } : null,
+    }
+  }
   // 陪伴模式提示词:模型主动斗图。设置页可编辑覆盖(settings.companionPrompt)。
   const DEFAULT_COMPANION_PROMPT = '斗图规则:氛围合适就主动发一张表情包,不用等用户开口;对方说正事时克制。\n' +
     '- 先调 send_meme 拿候选,[表情: 描述] 必须抄候选原文,别自己编;\n' +
@@ -2819,6 +2848,9 @@ export function apply(ctx, config) {
                   ? '已关闭 QQ 表情尺寸缩放:按原图发送'
                   : changedEdge ? 'QQ 发图长边已设为 ' + edge + 'px' : 'QQ 表情尺寸缩放保持关闭')
             json(res, { ok: true, ...packPayload(), message })
+          } else if (op === 'getRecognizeCatalog') {
+            // 设置页「识图模型」两个下拉框的数据源:宿主的 provider/model 与图片能力
+            json(res, { ok: true, ...(await recognizeCatalog()) })
           } else if (op === 'setRecognizeModel') {
             // 识图模型:只作用于 AI 学图与设置页上传识图;两个字段同时为空 = 跟随部署默认模型
             const provider = String(body.provider == null ? '' : body.provider).trim()
