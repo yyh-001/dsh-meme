@@ -430,6 +430,9 @@ window.__ModuleLoader__.load((() => {
       const [layoutMode, setLayoutMode] = React.useState('inline')
       // 局域网访问图库(issue #54):默认仅本机;打开后手机/平板经局域网 IP 才能加载表情包
       const [allowLan, setAllowLan] = React.useState(false)
+      // 识图模型(可选):provider + model 同时填写才生效;留空 = 跟随部署默认模型
+      const [recognizeProvider, setRecognizeProvider] = React.useState('')
+      const [recognizeModel, setRecognizeModel] = React.useState('')
       const [pluginVersion, setPluginVersion] = React.useState('')
       const applyRoot = (res) => {
         if (!res || !res.ok) return
@@ -449,6 +452,8 @@ window.__ModuleLoader__.load((() => {
         setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
         setMemeLayoutMode(res.layoutMode)
         setAllowLan(res.allowLanAccess === true)
+        setRecognizeProvider(String(res.recognizeProvider || ''))
+        setRecognizeModel(String(res.recognizeModel || ''))
         setPluginVersion(res.pluginVersion || '')
         setPacksDir(res.packsDir || '')
         setPacksDirInput(res.packsDir || '')
@@ -858,6 +863,29 @@ window.__ModuleLoader__.load((() => {
           }
         } catch (e) {
           setQqSendEdge(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // 识图模型:两个字段同时填写才生效,同时清空 = 恢复跟随默认模型。
+      // 只作用于 AI 学图/上传识图的单次模型调用,不改会话模型。
+      const onSaveRecognizeModel = async (provider, model) => {
+        const prevP = recognizeProvider
+        const prevM = recognizeModel
+        setRecognizeProvider(provider)
+        setRecognizeModel(model)
+        try {
+          const res = await apiPost({ op: 'setRecognizeModel', provider, model })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || '已更新识图模型')
+          } else {
+            setRecognizeProvider(prevP)
+            setRecognizeModel(prevM)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setRecognizeProvider(prevP)
+          setRecognizeModel(prevM)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
@@ -1727,6 +1755,35 @@ window.__ModuleLoader__.load((() => {
             : qqSendResize
               ? 'QQ/IM 发图前把长边缩到 ' + qqSendEdge + 'px,Web 聊天仍用原图;GIF 保留动画。QQ 更容易按表情渲染,平板端不会拉伸满屏'
               : '保持原图发送。QQ 官方机器人没有表情类型,大图会被当图片消息;打开后缩到 200-450px 更容易被识别成表情'),
+        // 识图模型(可选):只影响 AI 学图/上传识图的模型调用,不影响会话模型与发图
+        h('div', { className: 'section-title' }, '识图模型'),
+        h('div', { className: 'row', style: { width: '100%' } },
+          h('input', {
+            type: 'text',
+            value: recognizeProvider,
+            onChange: (e) => setRecognizeProvider(e.target.value),
+            placeholder: 'provider(留空 = 跟随默认)',
+            title: '模型提供方(provider),例如 my-provider',
+            style: { flex: 1, minWidth: 120 },
+          }),
+          h('input', {
+            type: 'text',
+            value: recognizeModel,
+            onChange: (e) => setRecognizeModel(e.target.value),
+            placeholder: 'model',
+            title: '模型 id(model),例如 vision-model',
+            style: { flex: 1, minWidth: 120, marginLeft: 8 },
+          }),
+          h('button', {
+            className: 'btn-primary',
+            onClick: () => onSaveRecognizeModel(recognizeProvider, recognizeModel),
+            style: { marginLeft: 8 },
+          }, '保存'),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          recognizeProvider && recognizeModel
+            ? 'AI 学图与上传识图使用 ' + recognizeProvider + '/' + recognizeModel + ';清空两个输入框再保存即恢复默认'
+            : '留空 = 跟随当前默认模型。填一个支持图片输入的模型可以改善分类/描述/关键词质量(例如一个视觉模型)'),
         // 主动发图三档:每档一套固定提示词,不再让用户调概率
         h('div', { className: 'section-title' }, '主动发图'),
         h('div', { className: 'row', style: { width: '100%' } },

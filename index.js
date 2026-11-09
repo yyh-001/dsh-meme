@@ -596,6 +596,26 @@ export function apply(ctx, config) {
       writeFileSync(settingsFile, JSON.stringify({ ...readSettings(), ...patch }, null, 2))
     } catch (e) {}
   }
+  /**
+   * 识图模型(可选):provider 与 model 同时非空才生效,留空 = 跟随部署默认模型。
+   * 只影响 AI 学图与设置页上传识图的这一次调用,不改会话模型、不影响发图。
+   */
+  const recognizeModelOf = () => {
+    const s = readSettings()
+    const provider = String(s.recognizeProvider || '').trim()
+    const model = String(s.recognizeModel || '').trim()
+    return provider && model ? { provider, model } : null
+  }
+  /** 未配置识图模型时的回退:部署默认模型(原有行为)。 */
+  const defaultRecognizeSelection = () => (ctx.agentDefaultModel && typeof ctx.agentDefaultModel.currentSelection === 'function'
+    ? ctx.agentDefaultModel.currentSelection() : null)
+  /** 识图调用实际使用的 provider/model。 */
+  const recognizeSelection = () => recognizeModelOf() || defaultRecognizeSelection()
+  /** 设置页与索引响应共用的原始设置(未配置时为空串)。 */
+  const recognizeSettingsPayload = () => ({
+    recognizeProvider: String(readSettings().recognizeProvider || ''),
+    recognizeModel: String(readSettings().recognizeModel || ''),
+  })
   // 陪伴模式提示词:模型主动斗图。设置页可编辑覆盖(settings.companionPrompt)。
   const DEFAULT_COMPANION_PROMPT = '斗图规则:氛围合适就主动发一张表情包,不用等用户开口;对方说正事时克制。\n' +
     '- 先调 send_meme 拿候选,[表情: 描述] 必须抄候选原文,别自己编;\n' +
@@ -1320,6 +1340,8 @@ export function apply(ctx, config) {
         layoutMode: normalizeLayoutMode(s.layoutMode),
         // 局域网访问图库(issue #54):默认关;打开后手机/平板经局域网 IP 才能看到表情包
         allowLanAccess: s.allowLanAccess === true,
+        // 识图模型(可选):空 = 跟随部署默认模型,只作用于 AI 学图/上传识图
+        ...recognizeSettingsPayload(),
         pluginVersion,
         remoteSubs: remoteSubs(),
         remoteDirUrl: remoteDirUrlList(),
@@ -1452,8 +1474,7 @@ export function apply(ctx, config) {
           let auto = false
           let animInfo = null
           if (!tag) {
-            const sel = ctx.agentDefaultModel && typeof ctx.agentDefaultModel.currentSelection === 'function'
-              ? ctx.agentDefaultModel.currentSelection() : null
+            const sel = recognizeSelection()
             const r = await recognizeImageBytes(ctx.get('llm'), sel, buf, mime, fileName)
             auto = true
             animInfo = r.animation
@@ -2389,7 +2410,7 @@ export function apply(ctx, config) {
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode), pickerSendOnClick: pickerSendOnClickOf() })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode), pickerSendOnClick: pickerSendOnClickOf(), ...recognizeSettingsPayload() })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -2420,6 +2441,7 @@ export function apply(ctx, config) {
             remoteDirUrl: remoteDirUrlList(),
             layoutMode: normalizeLayoutMode(readSettings().layoutMode),
             pickerSendOnClick: pickerSendOnClickOf(),
+            ...recognizeSettingsPayload(),
           })
           return
         }
@@ -2470,8 +2492,7 @@ export function apply(ctx, config) {
             if (buf.byteLength === 0 || buf.byteLength > 8 * 1024 * 1024) throw new Error('图片大小超限(≤8MB)')
             const ext = fileName.includes('.') ? '.' + fileName.split('.').pop().toLowerCase() : ''
             if (!IMAGE_EXTS.includes(ext)) throw new Error('仅支持 jpg/png/gif/webp')
-            const sel = ctx.agentDefaultModel && typeof ctx.agentDefaultModel.currentSelection === 'function'
-              ? ctx.agentDefaultModel.currentSelection() : null
+            const sel = recognizeSelection()
             const r = await recognizeImageBytes(ctx.get('llm'), sel, buf, MIME[ext.slice(1)] || 'image/jpeg', fileName)
             if (!r.tag || !validTagRe.test(r.tag)) throw new Error('AI 未识别出有效分类,请手动选择')
             json(res, { ok: true, tag: r.tag, caption: r.caption, keywords: r.keywords, animation: r.animation || null })
@@ -2798,6 +2819,20 @@ export function apply(ctx, config) {
                   ? '已关闭 QQ 表情尺寸缩放:按原图发送'
                   : changedEdge ? 'QQ 发图长边已设为 ' + edge + 'px' : 'QQ 表情尺寸缩放保持关闭')
             json(res, { ok: true, ...packPayload(), message })
+          } else if (op === 'setRecognizeModel') {
+            // 识图模型:只作用于 AI 学图与设置页上传识图;两个字段同时为空 = 跟随部署默认模型
+            const provider = String(body.provider == null ? '' : body.provider).trim()
+            const model = String(body.model == null ? '' : body.model).trim()
+            if ((provider && !model) || (!provider && model)) throw new Error('provider 与 model 需要同时填写,或同时留空')
+            if (provider && !/^[A-Za-z0-9._-]{1,64}$/.test(provider)) throw new Error('provider 含非法字符')
+            if (model && !/^[A-Za-z0-9._:/-]{1,120}$/.test(model)) throw new Error('model 含非法字符')
+            writeSettings({ recognizeProvider: provider, recognizeModel: model })
+            json(res, {
+              ok: true, ...packPayload(),
+              message: provider && model
+                ? '识图模型已设为 ' + provider + '/' + model + ',下次学图/上传识图生效'
+                : '识图模型已重置为跟随当前默认模型',
+            })
           } else if (op === 'setSendGear') {
             // 主动发图三档:off=不主动 / auto=看气氛 / always=每轮都发。
             // 三档各一套固定提示词,不掷骰子、不注入消息,只影响「自动」发送方式。
