@@ -7,7 +7,11 @@
  * 注册 id 必须等于 loader entry 名(dsh-meme),否则 ModuleLoader 报
  * "loaded without registering dsh-meme"。
  */
-window.__ModuleLoader__.load((() => {
+// 注册 id 必须留在 load() 的实参对象字面量里:静态检查器(如 dsh-unlag 的注册名扫描)
+// 只从实参位读 { id, factory };id 藏进 IIFE 返回值里就读不出来,插件更新后会被拒绝
+// 重建页面(issue #69)。factory 仍由 IIFE 提供:宿主把多个插件源码拼进同一个 <script>,
+// 顶层 const 会进全局词法作用域,和别的插件重名直接 SyntaxError;作用域收在里面最稳。
+window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
   /**
    * 子路径部署前缀(issue #64):DSH 挂在反代子路径(如 fnOS 的 /app/<id>/)下时,
    * 插件自己的 HTTP 路由(/dsh-memes-api、/dsh-memes/...)也必须带同一前缀;否则请求
@@ -59,10 +63,8 @@ window.__ModuleLoader__.load((() => {
 
   // 整个 bundle 包一层 IIFE:宿主把多个插件的源码拼进同一个 <script>,顶层 const
   // 会进全局词法作用域,和别的插件重名就直接 SyntaxError;作用域收在这里最稳。
-  return {
-  id: 'dsh-meme',
-  id: 'dsh-meme',
-  factory: (require) => {
+  // IIFE 只负责「脚本执行时算一次 APP_BASE」并把 factory 交出去,注册 id 留在上面的实参里。
+  return (require) => {
     var module = { exports: {} }
     var exports = module.exports
     Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' })
@@ -3599,6 +3601,6 @@ window.__ModuleLoader__.load((() => {
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }
     return module.exports
-  },
   }
-})())
+})(),
+})
