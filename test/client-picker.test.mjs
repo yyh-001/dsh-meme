@@ -95,7 +95,7 @@ globalThis.fetch = async (url) => {
 await import('../client.js')
 
 const {
-  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, previewClampOffset, clampPreviewElement, inKeepZone, uniqueKeys,
+  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, alignPreviewElement, inKeepZone, uniqueKeys,
 } = globalThis.__dshMeme.__test
 
 // ---------- ① 多选筛选:范围 / 计数 / 交集 ----------
@@ -225,38 +225,20 @@ test('悬浮预览:换内容后变高,按新的实测高度往上收', () => {
   assert.equal(previewPosition({ left: 10, top: 700, right: 86, bottom: 776 }, { width: 176, height: 260 }, { width: 900, height: 800 }).top, 532)
 })
 
-// ---------- ②-1 issue #55:浮层按「写下去之后的真实矩形」钳制 ----------
-
-test('悬浮预览:算出来的位置越界 → 按真实矩形减回去', () => {
-  const vp = { width: 900, height: 800 }
-  // 已经放得下:一个像素都不动
-  assert.deepEqual(previewClampOffset({ left: 100, top: 100, right: 276, bottom: 284 }, vp), { dx: 0, dy: 0, done: true })
-  // 右缘 1000 越过 892(900 - 8):整体往左收 108
-  assert.deepEqual(previewClampOffset({ left: 824, top: 100, right: 1000, bottom: 284 }, vp), { dx: -108, dy: 0, done: false })
-  // 左缘跑到窗口外:往右推回 8
-  assert.deepEqual(previewClampOffset({ left: -40, top: 100, right: 136, bottom: 284 }, vp), { dx: 48, dy: 0, done: false })
-  // 下缘 900 越过 792:往上一块
-  assert.deepEqual(previewClampOffset({ left: 100, top: 716, right: 276, bottom: 900 }, vp), { dx: 0, dy: -108, done: false })
-  // 比视口还高的内容:上缘贴边,不再往下推(否则会跟下缘来回抖)
-  assert.deepEqual(previewClampOffset({ left: 100, top: 300, right: 276, bottom: 1500 }, vp), { dx: 0, dy: -292, done: false })
-  // 尺寸窗口都量不到:不动也不炸
-  assert.deepEqual(previewClampOffset(null, vp), { dx: 0, dy: 0, done: true })
-  assert.deepEqual(previewClampOffset({ left: 900, top: 900, right: 1000, bottom: 1000 }, { width: 0, height: 0 }), { dx: 0, dy: 0, done: true })
-  // 全 0 矩形 = 还没进布局,别当成「贴左上角」去挪
-  assert.deepEqual(previewClampOffset({ left: 0, top: 0, right: 0, bottom: 0 }, vp), { dx: 0, dy: 0, done: true })
-})
+// ---------- ②-1 issue #55:浮层按「实测坐标 → 目标坐标」反解(不能只钳边界) ----------
 
 // 假预览:真实矩形 = 写进去的 left/top × 祖先 zoom 的缩放 + 祖先 transform 造成的整体偏移。
-// 两种失真叠在一起,就是 issue #55 里「越靠右越飘出去」的现场。
+// 两种失真叠在一起,就是宿主里「预览跑到窗口右下角、离格子很远」的现场。
 const fakePreview = ({ width = 176, height = 184, offsetX = 0, offsetY = 0, scale = 1 }) => {
   const box = { left: 0, top: 0 }
-  return {
+  const el = {
     box,
+    writes: 0,
     style: {
       get left() { return box.left + 'px' },
-      set left(v) { box.left = parseFloat(v) },
+      set left(v) { box.left = parseFloat(v); el.writes++ },
       get top() { return box.top + 'px' },
-      set top(v) { box.top = parseFloat(v) },
+      set top(v) { box.top = parseFloat(v); el.writes++ },
     },
     getBoundingClientRect() {
       const left = box.left * scale + offsetX
@@ -264,51 +246,55 @@ const fakePreview = ({ width = 176, height = 184, offsetX = 0, offsetY = 0, scal
       return { left, top, right: left + width * scale, bottom: top + height * scale }
     },
   }
+  return el
 }
 
-test('悬浮预览:最右一列被祖先 transform 推出窗口,迭代后收进视口', () => {
-  const vp = { width: 600, height: 700 }
-  // 算出来的 left=560(贴着右缘),祖先又整体往右推 320 → 实际右缘 1056,几乎全在窗口外
-  const el = fakePreview({ offsetX: 320 })
-  el.style.left = '560px'
-  el.style.top = '120px'
-  clampPreviewElement(el, vp, 3)
+test('悬浮预览:祖先整体平移时按实测反解,预览仍贴着格子', () => {
+  // 宿主把输入区放在带 transform 的容器里:写 505,屏幕上出现在 785(偏 280/84)
+  const target = { left: 505, top: 250 }
+  const el = fakePreview({ offsetX: 280, offsetY: 84 })
+  el.style.left = '505px'
+  el.style.top = '250px'
+  alignPreviewElement(el, target, 2)
   const r = el.getBoundingClientRect()
-  assert.ok(r.right <= 600 - 8, '右缘要收进视口,实际 ' + r.right)
-  assert.ok(r.left >= 8, '左缘不能跑出去,实际 ' + r.left)
+  assert.ok(Math.abs(r.left - target.left) <= 1, '左缘要对准格子右侧,实际 ' + r.left)
+  assert.ok(Math.abs(r.top - target.top) <= 1, '上缘要对准格子顶,实际 ' + r.top)
+  assert.ok(el.box.left < target.left, '写进去的值要把祖先偏移减掉,实际 ' + el.box.left)
 })
 
-test('悬浮预览:右下角那一格(又矮又靠右)上下左右都收进视口', () => {
-  const vp = { width: 600, height: 400 }
-  const el = fakePreview({ height: 260, offsetX: 40, offsetY: 30 })
-  el.style.left = '520px'
-  el.style.top = '330px'   // 算位置时按 184 高算的,实际换成 260 高的内容
-  clampPreviewElement(el, vp, 3)
-  const r = el.getBoundingClientRect()
-  assert.ok(r.right <= 600 - 8 && r.left >= 8, '水平方向收进视口:' + r.left + '~' + r.right)
-  assert.ok(r.bottom <= 400 - 8 && r.top >= 8, '垂直方向收进视口:' + r.top + '~' + r.bottom)
-})
-
-test('悬浮预览:祖先带 zoom 把坐标系放大,写进去的值和量到的位置不等价也能收进视口', () => {
-  const vp = { width: 600, height: 700 }
-  // zoom 1.25:left=560 在屏幕上变成 700(右缘 920),比视口还宽出去一大截
-  const el = fakePreview({ scale: 1.25 })
-  el.style.left = '560px'
-  el.style.top = '120px'
+test('悬浮预览:祖先 zoom 缩放坐标系,反解后仍贴着格子', () => {
+  const target = { left: 505, top: 250 }
+  // zoom 1.25:写 505 → 屏幕 671,整体再偏移 40/30
+  const el = fakePreview({ scale: 1.25, offsetX: 40, offsetY: 30 })
+  el.style.left = '505px'
+  el.style.top = '250px'
   const before = el.getBoundingClientRect()
-  assert.ok(before.right > 600, '先确认这个坐标确实在窗口外')
-  clampPreviewElement(el, vp, 3)
+  assert.ok(before.left > target.left + 100, '先确认这个坐标确实被放大了')
+  alignPreviewElement(el, target, 2)
   const r = el.getBoundingClientRect()
-  assert.ok(r.right <= 600 - 8 && r.left >= 8, '缩放坐标系下也要收进视口:' + r.left + '~' + r.right)
+  assert.ok(Math.abs(r.left - target.left) <= 1, '缩放坐标系下左缘也要归位:' + r.left)
+  assert.ok(Math.abs(r.top - target.top) <= 1, '缩放坐标系下上缘也要归位:' + r.top)
 })
 
-test('悬浮预览:已经在视口内就不动(不引入抖动)', () => {
-  const vp = { width: 900, height: 800 }
+test('悬浮预览:目标本来就在正确位置时不再写样式(不引入抖动)', () => {
+  const target = { left: 186, top: 98 }
   const el = fakePreview({})
   el.style.left = '186px'
   el.style.top = '98px'
-  const out = clampPreviewElement(el, vp, 3)
-  assert.deepEqual(out, { left: 186, top: 98 })
+  const writes = el.writes
+  const out = alignPreviewElement(el, target, 2)
+  assert.equal(el.writes, writes, '已经对准就不该再写 left/top')
+  assert.deepEqual({ left: out.left, top: out.top }, target)
+})
+
+test('悬浮预览:还没进布局(全 0 矩形)时原样退回,不炸也不乱挪', () => {
+  const el = {
+    style: { left: '12px', top: '34px' },
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 0, bottom: 0 }),
+  }
+  const out = alignPreviewElement(el, { left: 200, top: 300 }, 2)
+  assert.deepEqual({ left: out.left, top: out.top }, { left: 12, top: 34 })
+  assert.deepEqual(el.style, { left: '12px', top: '34px' })
 })
 
 test('停留区 = 当前格子 ∪ 预览框,带 4px 容差', () => {

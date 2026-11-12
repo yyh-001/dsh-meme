@@ -2472,67 +2472,55 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
     }
 
     /**
-     * 悬浮预览的视口钳制(issue #55):fixed 浮层的屏幕坐标不一定等于写进去的 left/top ——
-     * 祖先带 transform / zoom / filter / contain 时,fixed 改为相对那一层定位,整体产生偏移,
-     * 而且越靠窗口右边累积越多(「最右两列出问题、左边没事」就是这条);另外换内容那一帧量到
-     * 的尺寸也未必是最新的,按它算 maxTop 会偏大。
+     * 把悬浮预览摆到 target(视口坐标)。
      *
-     * 所以不拿「算出来的位置」判断越界:写下去之后量真实矩形(视口坐标),把越出视口的部分
-     * 算成修正量,由调用方加到 left/top 上、迭代几轮收敛。量到的就是真实屏幕位置,不需要知道
-     * 外面有没有 transform。返回 { dx, dy, done },done 为真表示已经在视口内。
+     * fixed 浮层的屏幕位置不一定等于写进去的 left/top:宿主把输入区包在带 transform / zoom
+     * 的容器里时,fixed 会改成相对那一层定位,整块平移(zoom 下还会按比例放大)。旧做法只按
+     * 实测矩形把越出视口的部分钳回来 —— 结果是预览确实还在视口里,却被整体推到了右下角,
+     * 离格子很远(issue #55 的后续反馈)。所以不能只判断「越没越界」,要把实测位置对准目标位置。
+     *
+     * 不猜祖先链:先写一次探针(left/top 各 +PROBE),用两次实测的差反解出「写 1px、屏幕上
+     * 走几 px」的系数 k,再按 k 把目标位置反解成该写的 left/top。平移和缩放都能一步归位,
+     * 第二轮只用来吃掉取整误差。k 为 0(元素还没进布局 / 不随 left/top 移动)时原样退回。
+     * 返回 { left, top, rect },rect 是最后一次实测的矩形(视口坐标),调用方拿去记停留区。
      */
-    function previewClampOffset(rect, viewport, margin) {
-      const vw = Number(viewport && viewport.width) || 0
-      const vh = Number(viewport && viewport.height) || 0
-      const gap = Number.isFinite(Number(margin)) ? Math.max(0, Number(margin)) : 8
-      const out = { dx: 0, dy: 0, done: true }
-      if (!rect || (!vw && !vh)) return out
-      const left = Number(rect.left) || 0
-      const top = Number(rect.top) || 0
-      // 全 0 的矩形 = 还没进布局(挂载那一帧):别拿它当「贴着左上角」去挪,等下一帧再量
-      const rw = (Number(rect.right) || 0) - left
-      const rh = (Number(rect.bottom) || 0) - top
-      if (!(rw > 0) && !(rh > 0)) return out
-      if (vw) {
-        let dx = 0
-        const overR = (Number(rect.right) || 0) - (vw - gap)
-        if (overR > 0) dx = -overR
-        else if (gap - left > 0) dx = gap - left
-        // 比视口还宽:左缘贴边就够了,再往右推只会把右边挤出去
-        if (left + dx < gap) dx = gap - left
-        out.dx = Math.round(dx)
-      }
-      if (vh) {
-        let dy = 0
-        const overB = (Number(rect.bottom) || 0) - (vh - gap)
-        if (overB > 0) dy = -overB
-        else if (gap - top > 0) dy = gap - top
-        // 比视口还高:上缘贴边,优先保住大图那一头
-        if (top + dy < gap) dy = gap - top
-        out.dy = Math.round(dy)
-      }
-      out.done = !out.dx && !out.dy
-      return out
-    }
-
-    /**
-     * 把「量真实矩形 → 减掉越界量」迭代到收敛。写进去的 left/top 只是起点,最终位置完全由
-     * 实测矩形决定;返回收敛后的 left/top。
-     * 默认三轮:坐标系没被缩放时第一轮就 break;祖先带 zoom(写进去的值按比例放大/缩小)时,
-     * 每轮残差按比例缩一截,两轮还会剩几个像素,三轮基本归零。
-     * 单独抽出来是为了能直接回归测试:假 el 按「写进去的值 × 缩放 + 祖先偏移」算矩形,就能验证
-     * 「越靠右偏移越大」「换内容后变高」「zoom 缩放坐标系」三种情况都能收进视口(issue #55)。
-     */
-    function clampPreviewElement(el, viewport, rounds) {
-      const n = Number(rounds) > 0 ? Math.floor(Number(rounds)) : 3
+    function alignPreviewElement(el, target, rounds) {
       const px = (v) => { const x = parseFloat(v); return Number.isFinite(x) ? x : 0 }
-      for (let k = 0; k < n; k++) {
-        const off = previewClampOffset(el.getBoundingClientRect(), viewport, 8)
-        if (off.done) break
-        if (off.dx) el.style.left = (px(el.style.left) + off.dx) + 'px'
-        if (off.dy) el.style.top = (px(el.style.top) + off.dy) + 'px'
+      const measure = () => el.getBoundingClientRect()
+      const put = (x, y) => { el.style.left = x + 'px'; el.style.top = y + 'px' }
+      const tx = Number(target && target.left) || 0
+      const ty = Number(target && target.top) || 0
+      let x = px(el.style.left)
+      let y = px(el.style.top)
+      let rect = measure()
+      // 全 0 矩形 = 还没进布局(挂载那一帧):别拿它当「贴着左上角」去挪,等下一帧再量
+      if (!((Number(rect.right) || 0) - (Number(rect.left) || 0) > 0)
+        && !((Number(rect.bottom) || 0) - (Number(rect.top) || 0) > 0)) {
+        return { left: x, top: y, rect }
       }
-      return { left: px(el.style.left), top: px(el.style.top) }
+      const closeEnough = () => Math.abs(tx - rect.left) < 0.5 && Math.abs(ty - rect.top) < 0.5
+      if (closeEnough()) return { left: x, top: y, rect }
+      // 探针走 32px:足够压过取整误差,又不会把浮层甩出视口太远
+      const PROBE = 32
+      put(x + PROBE, y + PROBE)
+      const probed = measure()
+      const kx = (probed.left - rect.left) / PROBE
+      const ky = (probed.top - rect.top) / PROBE
+      if (!(Math.abs(kx) > 0.05) || !(Math.abs(ky) > 0.05)) {
+        put(x, y)
+        return { left: x, top: y, rect: measure() }
+      }
+      x += PROBE
+      y += PROBE
+      rect = probed
+      const n = Number(rounds) > 0 ? Math.floor(Number(rounds)) : 2
+      for (let k = 0; k < n && !closeEnough(); k++) {
+        x += (tx - rect.left) / kx
+        y += (ty - rect.top) / ky
+        put(x, y)
+        rect = measure()
+      }
+      return { left: x, top: y, rect }
     }
 
     /**
@@ -2671,13 +2659,13 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           const vp = { width: viewport('w'), height: viewport('h') }
           const rect = el.getBoundingClientRect()
           const pos = previewPosition(hover.cellRect, rect, vp)
-          el.style.left = pos.left + 'px'
-          el.style.top = pos.top + 'px'
-          // 上面用的 rect 是上一帧的尺寸,而 fixed 浮层在带 transform/zoom 的祖先下坐标还会
-          // 整体偏移(issue #55,越靠窗口右边偏得越多)。所以不再用算出来的值判断越界:写下去
-          // 之后量真实矩形,把越出视口的那部分减回来,迭代收敛(坐标系没被缩放时第一轮就够)。
-          clampPreviewElement(el, vp, 3)
-          keepRef.current = [hover.cellRect, el.getBoundingClientRect()]
+          // 写下去的位置不一定等于屏幕位置(祖先带 transform/zoom 时会整体平移或缩放);
+          // 只把越界部分钳回来会让预览贴在窗口边上、离格子很远,所以按实测反解到目标位置。
+          const placed = alignPreviewElement(el, pos, 2)
+          // 对齐后再按最终矩形复核一次:预览变高(描述换行)时竖直钳制要按新高度重算
+          const fit = previewPosition(hover.cellRect, placed.rect, vp)
+          const final = (fit.left === pos.left && fit.top === pos.top) ? placed : alignPreviewElement(el, fit, 2)
+          keepRef.current = [hover.cellRect, final.rect]
         } catch (e) { keepRef.current = null }
       }
       const useLayout = typeof React.useLayoutEffect === 'function' ? React.useLayoutEffect : React.useEffect
@@ -3596,7 +3584,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       foldCaption, looseCaption, splitDescTokens, buildMemeIndex, buildMemeSearch, matchDesc, compareVersions,
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
-      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, previewClampOffset, clampPreviewElement, inKeepZone, uniqueKeys,
+      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, alignPreviewElement, inKeepZone, uniqueKeys,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }
