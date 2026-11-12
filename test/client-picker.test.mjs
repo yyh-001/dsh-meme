@@ -95,7 +95,7 @@ globalThis.fetch = async (url) => {
 await import('../client.js')
 
 const {
-  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, alignPreviewElement, inKeepZone, uniqueKeys,
+  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
 } = globalThis.__dshMeme.__test
 
 // ---------- ① 多选筛选:范围 / 计数 / 交集 ----------
@@ -200,6 +200,41 @@ test('面板可见起点:宿主顶栏盖住的那段不算可用高度(issue #33
   assert.equal(fitPanelHeight(3928, 60 - panelVisibleTop(16, 60, () => false)), 180, '全被盖住就兜最小高度,不出负数')
   // 退化区间(底边不高于顶边)不炸
   assert.equal(panelVisibleTop(80, 60, () => true), 60)
+})
+
+// ---------- ② issue #70:侧栏开合 / 逐格悬停不再引发面板抖动 ----------
+
+test('量顶栏时的临时高度按最终上限封顶,不把整屏格子展开', () => {
+  // 窗口 900 高:最终上限 46% = 414;底边 800 时旧写法会撑到 784
+  assert.equal(topProbeHeight(800, 900), 414)
+  // 面板本来就矮:按自身可用高度撑,不硬拉高
+  assert.equal(topProbeHeight(120, 900), 104)
+  // 退化输入不炸,也不出负数
+  assert.equal(topProbeHeight(0, 900), 0)
+  assert.equal(topProbeHeight(800, 0), 0)
+  assert.equal(topProbeHeight('', ''), 0)
+})
+
+test('resize 失效键只看竖向几何:侧栏开合(只改宽度)不会作废顶栏缓存', () => {
+  // 同一个视口高度 + 宿主高度:键一样 → 不重测
+  assert.equal(fitResizeKey(900, 0), fitResizeKey(900, 0))
+  // 窗口变高 / 输入框变高(宿主高度变) → 键变 → 作废重测
+  assert.notEqual(fitResizeKey(900, 0), fitResizeKey(901, 0))
+  assert.notEqual(fitResizeKey(900, 0), fitResizeKey(900, 44))
+  // 宽度根本不参与键:侧栏动画逐帧改宽度不会产生新键
+  assert.equal(fitResizeKey(900, 0), '900x0')
+})
+
+test('悬停格子的位置取实时矩形,不再用 pointerenter 的快照(issue #70)', () => {
+  const stale = { left: 100, top: 100, right: 176, bottom: 176 }
+  const fresh = { left: 300, top: 260, right: 376, bottom: 336 }
+  const cellEl = { isConnected: true, getBoundingClientRect: () => fresh }
+  assert.deepEqual(liveCellRect({ meme: {}, cellEl, cellRect: stale }), fresh, '格子挪了要按现读的来')
+  // 格子被过滤掉:元素不在 DOM 了 → null(调用方收掉预览),不能退回旧位置
+  assert.equal(liveCellRect({ meme: {}, cellEl: { isConnected: false }, cellRect: stale }), null)
+  // 没有元素(旧状态)才退回快照
+  assert.deepEqual(liveCellRect({ meme: {}, cellRect: stale }), stale)
+  assert.equal(liveCellRect(null), null)
 })
 
 // ---------- ② 悬浮预览定位 / 关闭时机 ----------

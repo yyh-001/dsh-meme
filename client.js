@@ -2426,6 +2426,26 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
     }
 
     /**
+     * measureTopLimit 临时把面板撑到多高(issue #70)。最终高度被 PICKER_MAX_VH 封顶,量的时候
+     * 撑到接近满屏只会让 240 个格子全部展开、每次打开都白重排一遍;撑到最终上限就够命中顶栏。
+     */
+    function topProbeHeight(bottom, viewportHeight) {
+      const b = Math.max(0, Number(bottom) || 0)
+      const cap = Math.max(0, Math.floor((Number(viewportHeight) || 0) * PICKER_MAX_VH))
+      return Math.max(0, Math.min(b - 16, cap))
+    }
+
+    /**
+     * 「顶栏下沿」缓存的失效键(issue #70):只由竖向几何决定。侧栏开合只改容器宽度,顶栏
+     * 下沿不会动;把宽度算进键里会让侧栏动画的每一帧都重新二分测量,量出来的值还会逐帧抖。
+     */
+    function fitResizeKey(viewportHeight, hostHeight) {
+      const vh = Math.max(0, Math.round(Number(viewportHeight) || 0))
+      const hh = Math.max(0, Math.round(Number(hostHeight) || 0))
+      return vh + 'x' + hh
+    }
+
+    /**
      * 面板实际可见的第一行(issue #33 后续)。面板锚在输入框上方、向上生长,而宿主自己的
      * 顶栏(标题行 / 页签)是后画的,会长在面板上面 —— 窗口一高,面板就长进顶栏底下,搜索框
      * 和筛选开关正好被盖住,用户看到的就是「顶部没了」。
@@ -2524,6 +2544,22 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
     }
 
     /**
+     * 悬停期间格子的真实位置(issue #70):pointerenter 时存下来的只是快照,侧栏开合、面板
+     * 收放都会让格子移动,预览继续按旧坐标画就会飘。优先拿当时那个格子元素现读矩形;元素
+     * 已经不在 DOM 里(搜索/筛选把格子移走)时返回 null,由调用方收掉预览。只有旧状态没有
+     * 元素时才退回快照。
+     */
+    function liveCellRect(hover) {
+      if (!hover) return null
+      if (hover.cellEl) {
+        try {
+          return hover.cellEl.isConnected === false ? null : hover.cellEl.getBoundingClientRect()
+        } catch (e) { return hover.cellRect || null }
+      }
+      return hover.cellRect || null
+    }
+
+    /**
      * 指针是否还停在「当前格子 ∪ 预览框」里(4px 容差,避免贴边移动时抖动)。
      * 预览框也算停留区,否则从格子挪到大图上预览会闪掉。
      */
@@ -2595,7 +2631,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const [selPacks, setSelPacks] = React.useState([]) // 空 = 不筛:全部图库
       const [selTags, setSelTags] = React.useState([])   // 空 = 不筛:全部情绪
       const [showFilters, setShowFilters] = React.useState(() => pickerFiltersOpen) // 筛选区展开状态(默认收起)
-      const [hover, setHover] = React.useState(null)     // 悬浮预览:{ meme, cellRect }
+      const [hover, setHover] = React.useState(null)     // 悬浮预览:{ meme, cellEl, cellRect }
       const panelRef = React.useRef(null)
       const previewRef = React.useRef(null)
       const keepRef = React.useRef(null) // 预览停留区 [格子矩形, 预览框矩形],pointermove 判「还在不在」
@@ -2654,20 +2690,30 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 指针从格子挪到大图上不能闪掉,钳制改了位置也要同步更新,否则会被误判成「已经离开」。
       const placePreview = () => {
         const el = previewRef.current
-        if (!hover || !el || !hover.cellRect) { keepRef.current = null; return }
+        const cellRect = liveCellRect(hover)
+        if (!hover || !el || !cellRect) {
+          keepRef.current = null
+          // 格子被搜索/筛选移走了:元素都不在了,预览别再停在空白处
+          if (hover && hover.cellEl && hover.cellEl.isConnected === false) setHover(null)
+          return
+        }
         try {
           const vp = { width: viewport('w'), height: viewport('h') }
           const rect = el.getBoundingClientRect()
-          const pos = previewPosition(hover.cellRect, rect, vp)
+          const pos = previewPosition(cellRect, rect, vp)
           // 写下去的位置不一定等于屏幕位置(祖先带 transform/zoom 时会整体平移或缩放);
           // 只把越界部分钳回来会让预览贴在窗口边上、离格子很远,所以按实测反解到目标位置。
           const placed = alignPreviewElement(el, pos, 2)
           // 对齐后再按最终矩形复核一次:预览变高(描述换行)时竖直钳制要按新高度重算
-          const fit = previewPosition(hover.cellRect, placed.rect, vp)
+          const fit = previewPosition(cellRect, placed.rect, vp)
           const final = (fit.left === pos.left && fit.top === pos.top) ? placed : alignPreviewElement(el, fit, 2)
-          keepRef.current = [hover.cellRect, final.rect]
+          keepRef.current = [cellRect, final.rect]
         } catch (e) { keepRef.current = null }
       }
+      // 布局变化(resize/面板收放)发生在别的 effect 里,拿不到这次渲染的 placePreview 闭包,
+      // 用 ref 指向最新一版;重放时才能读到最新的 hover。
+      const placePreviewRef = React.useRef(null)
+      placePreviewRef.current = placePreview
       const useLayout = typeof React.useLayoutEffect === 'function' ? React.useLayoutEffect : React.useEffect
       // 预览的关闭时机:指针离开「当前格子 ∪ 预览框」就关(4px 容差),分三处兜住 ——
       // ① 离开格子:pointerleave 里按停留区判(指针挪到探出面板的大图上时不能误关);
@@ -2693,8 +2739,9 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         }
       }, [hover])
 
-      // 量「宿主顶栏下沿」:面板得先真的长到那个位置才量得出来,所以先把 max-height 放到「底边到
-      // 窗口顶」摆一次(有限值 —— 不是 none),再从面板顶往下命中测试。测完原样还回去。
+      // 量「宿主顶栏下沿」:面板得先真的长到那个位置才量得出来,所以先把 max-height 放到
+      // 「底边到窗口顶」摆一次(有限值 —— 不是 none,也按最终上限封顶),再从面板顶往下命中测试。
+      // 测完原样还回去。
       //
       // 两个坑都踩过:① 量到的一半是「加载中」时的矮面板(那时顶栏根本没挡到它),这个值必须
       // 跟着内容失效,否则网格出来以后还拿旧值算,面板被压到最小高度;所以缓存按自然高度作键。
@@ -2705,7 +2752,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         let limit = 16
         try {
           const prev = panel.style.maxHeight
-          panel.style.maxHeight = Math.max(0, bottom - 16) + 'px'
+          panel.style.maxHeight = topProbeHeight(bottom, viewport('h')) + 'px'
           const box = panel.getBoundingClientRect()
           const x = Math.round(box.left + Math.min(box.width / 2, 80))
           const probe = (y) => {
@@ -2748,23 +2795,57 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           panel.setAttribute('data-meme-picker-fit', 'nat=' + nat + ' avail=' + avail + ' h=' + finalH + ' top=' + limit)
         } catch (e) { /* 纯增强:算不出来就退回 CSS 的 46vh,不能影响面板本身 */ }
       }
-      useLayout(() => { if (open) fitPanel() })
+      // 只在会影响面板几何的状态变化时重算:开合或内容(数据/搜索/筛选)。hover 不参与布局,
+      // 不能跟着每次 pointerenter 重跑 —— 否则鼠标每划过一格就强制一次同步布局(issue #70)。
+      useLayout(() => {
+        if (!open) return
+        fitPanel()
+        // 内容变化可能把格子挤动,悬停中的预览跟着重放
+        if (placePreviewRef.current) placePreviewRef.current()
+      }, [open, loaded, data, q, selPacks, selTags, showFilters])
 
       React.useEffect(() => {
         if (!open) return
-        // 几何变了(窗口 / 宿主容器 / 输入框高):顶栏下沿要重量,别拿旧值
-        const onResize = () => { topLimitRef.current = null; fitPanel() }
+        // 几何变了(窗口 / 宿主容器 / 输入框高):重新适配。侧栏开合、拖窗口会连续几十帧触发
+        // resize,合并到一帧里做;只有竖向几何变了才作废「顶栏下沿」缓存 —— 宽度变化不影响
+        // 它,每帧作废重测反而会让面板高度逐帧抖(issue #70)。
         const win = typeof window !== 'undefined' ? window : null
+        const host = panelRef.current && panelRef.current.parentElement
+        let rafId = 0
+        let lastKey = fitResizeKey(viewport('h'), host && host.clientHeight)
+        const runFit = () => {
+          rafId = 0
+          fitPanel()
+          // 面板高度/位置变了,悬停中的预览按格子的新位置重放
+          if (placePreviewRef.current) placePreviewRef.current()
+        }
+        const scheduleFit = () => {
+          if (rafId) return
+          if (win && typeof win.requestAnimationFrame === 'function') {
+            rafId = win.requestAnimationFrame(runFit) || 1
+          } else {
+            rafId = setTimeout(runFit, 16) || 1
+          }
+        }
+        const onResize = () => {
+          const key = fitResizeKey(viewport('h'), host && host.clientHeight)
+          if (key !== lastKey) { lastKey = key; topLimitRef.current = null }
+          scheduleFit()
+        }
         if (win && typeof win.addEventListener === 'function') win.addEventListener('resize', onResize)
         let ro = null
         try {
           // 输入框变高(打多行)时宿主容器跟着变 → 面板跟着收紧
-          if (typeof ResizeObserver === 'function' && panelRef.current && panelRef.current.parentElement) {
+          if (typeof ResizeObserver === 'function' && host) {
             ro = new ResizeObserver(onResize)
-            ro.observe(panelRef.current.parentElement)
+            ro.observe(host)
           }
         } catch (e) { ro = null }
         return () => {
+          if (rafId) {
+            if (win && typeof win.cancelAnimationFrame === 'function') win.cancelAnimationFrame(rafId)
+            else clearTimeout(rafId)
+          }
           if (win && typeof win.removeEventListener === 'function') win.removeEventListener('resize', onResize)
           if (ro) ro.disconnect()
         }
@@ -2851,7 +2932,10 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         // (描述、文件名预览里都有,不用再来一份)
         onClick: (e) => pick(m, e),
         onPointerEnter: (e) => {
-          try { setHover({ meme: m, cellRect: e.currentTarget.getBoundingClientRect() }) } catch (err) { setHover(null) }
+          try {
+            const cellEl = e.currentTarget
+            setHover({ meme: m, cellEl, cellRect: cellEl.getBoundingClientRect() })
+          } catch (err) { setHover(null) }
         },
         // 离开格子:只有指针既不在格子里、也不在预览框里(见上面的停留区)才关
         onPointerLeave: (e) => {
@@ -3584,7 +3668,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       foldCaption, looseCaption, splitDescTokens, buildMemeIndex, buildMemeSearch, matchDesc, compareVersions,
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
-      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, panelVisibleTop, previewPosition, alignPreviewElement, inKeepZone, uniqueKeys,
+      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }
