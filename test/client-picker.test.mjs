@@ -448,24 +448,27 @@ test('表情格不挂原生 title:否则 tooltip 会压在悬浮预览上,两个
 
 test('开关动效:视觉层在 .mp-body 里,悬浮预览不跟着动画层缩放', async () => {
   const { board, repaint } = await openBoard()
-  const panel = byClass(board, 'meme-picker')[0]
+  // 数据到位后才会挂进入动画:openBoard 返回的那次渲染把 fit effect 排进了队列,先跑它
+  await flush()
+  const tree = repaint()
+  const panel = byClass(tree, 'meme-picker')[0]
   assert.ok(panel, '面板要渲染')
-  assert.match(panel.props.className, /(^|\s)mp-in(\s|$)/, '布局量完后要挂进入动画,不能停在 mp-pre')
-  const body = byClass(board, 'mp-body')
+  assert.match(panel.props.className, /(^|\s)mp-in(\s|$)/, '数据到位、量完布局后要挂进入动画,不能停在 mp-pre')
+  const body = byClass(tree, 'mp-body')
   assert.equal(body.length, 1, '面板视觉层只包一层')
   assert.equal(byClass(body[0], 'mp-grid').length, 1, '网格在动画层里')
   assert.equal(byClass(body[0], 'mp-search').length, 1, '搜索框在动画层里')
   // 悬停预览必须留在动画层外:动画层缩放/位移时,固定定位的预览不能被卷进它的坐标系
-  const cell = byClass(board, 'mp-cell')[0]
+  const cell = byClass(tree, 'mp-cell')[0]
   cell.props.onPointerEnter({
     currentTarget: {
       isConnected: true,
       getBoundingClientRect: () => ({ left: 0, top: 0, right: 76, bottom: 76 }),
     },
   })
-  const tree = repaint()
-  assert.equal(byClass(tree, 'mp-hover').length, 1, '悬停后要出预览')
-  assert.equal(byClass(byClass(tree, 'mp-body')[0], 'mp-hover').length, 0, '预览不能放进 .mp-body')
+  const hovered = repaint()
+  assert.equal(byClass(hovered, 'mp-hover').length, 1, '悬停后要出预览')
+  assert.equal(byClass(byClass(hovered, 'mp-body')[0], 'mp-hover').length, 0, '预览不能放进 .mp-body')
 })
 
 test('筛选区:点开关展开出两排 chip,再点收起;选中状态与开关上的计数都留着', async () => {

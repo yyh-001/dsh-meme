@@ -2110,6 +2110,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:30;display:flex;flex-direction:column;max-height:min(46vh,calc(100vh - 32px));font-size:12px;color:var(--dsw-alias-label-primary)}',
       '.meme-picker .mp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);overflow:hidden;transform-origin:50% 100%}',
       '.meme-picker.mp-pre .mp-body{opacity:0}',
+      // 等数据/加载动画的这一段面板不可见,别让一个透明的面板挡住下面的点击
+      '.meme-picker.mp-pre{pointer-events:none}',
       '.meme-picker.mp-in .mp-body{animation:mp-picker-in .16s cubic-bezier(.2,.8,.2,1)}',
       '.meme-picker.mp-out{pointer-events:none}',
       '.meme-picker.mp-out .mp-body{animation:mp-picker-out .12s ease-in forwards}',
@@ -2697,6 +2699,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 先不做几何重算,等 animationend(或兜底定时器)再补。openRef 给定时器读最新值。
       const animGuardRef = React.useRef(false)
       const animTimerRef = React.useRef(0)
+      const animWaitRef = React.useRef(0) // 等数据到位再播进入动画的兜底定时器
       const openRef = React.useRef(open)
       openRef.current = open
       const panelRef = React.useRef(null)
@@ -2750,6 +2753,10 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         if (open) return
         setEntering(false)
         animGuardRef.current = false
+        clearTimeout(animWaitRef.current)
+        animWaitRef.current = 0
+        clearTimeout(animTimerRef.current)
+        animTimerRef.current = 0
         setHover(null)
       }, [open])
 
@@ -2871,6 +2878,25 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           panel.setAttribute('data-meme-picker-fit', 'nat=' + nat + ' avail=' + avail + ' h=' + finalH + ' top=' + limit)
         } catch (e) { /* 纯增强:算不出来就退回 CSS 的 46vh,不能影响面板本身 */ }
       }
+      // 启动进入动画:布局已经按最终内容量好(max-height 正确),同一帧 re-render,
+      // 首帧就从 opacity 0 起播,不会先闪一下完整面板。
+      const startEnter = () => {
+        if (entering) return
+        setEntering(true)
+        animGuardRef.current = true
+        clearTimeout(animWaitRef.current)
+        animWaitRef.current = 0
+        clearTimeout(animTimerRef.current)
+        // 动画被 prefers-reduced-motion 关掉时不会派发 animationend,兜底补一次。
+        // 极简测试 DOM 里没有真面板,不挂定时器(否则测试进程会留一堆 900ms/260ms 的尾巴)
+        if (!panelRef.current && !(typeof document.querySelector === 'function' && document.querySelector('.meme-picker'))) return
+        animTimerRef.current = setTimeout(() => {
+          animGuardRef.current = false
+          if (!openRef.current) return
+          fitPanel()
+          if (placePreviewRef.current) placePreviewRef.current()
+        }, 260)
+      }
       // 只在会影响面板几何的状态变化时重算:开合或内容(数据/搜索/筛选)。hover 不参与布局,
       // 不能跟着每次 pointerenter 重跑 —— 否则鼠标每划过一格就强制一次同步布局(issue #70)。
       useLayout(() => {
@@ -2880,20 +2906,23 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         fitPanel()
         // 内容变化可能把格子挤动,悬停中的预览跟着重放
         if (placePreviewRef.current) placePreviewRef.current()
-        if (!entering) {
-          // 布局量完再挂进入动画(见 store 的 closing 相位与 entering 注释):同一帧内
-          // re-render,首帧就从 opacity 0 起播,不会先闪一下完整面板
-          setEntering(true)
-          animGuardRef.current = true
-          clearTimeout(animTimerRef.current)
-          // 动画被 prefers-reduced-motion 关掉时不会派发 animationend,兜底补一次
-          animTimerRef.current = setTimeout(() => {
-            animGuardRef.current = false
-            if (!openRef.current) return
-            fitPanel()
-            if (placePreviewRef.current) placePreviewRef.current()
-          }, 260)
+        if (entering) return
+        // 数据没到位先别播:淡入到一半面板从「加载中」长到全量,看起来会顿一下;
+        // 等 loaded 翻真后按最终内容量高再播。900ms 兜底——接口挂了面板也得出得来。
+        if (!loaded) {
+          const hasPanel = !!(panelRef.current
+            || (typeof document.querySelector === 'function' ? document.querySelector('.meme-picker') : null))
+          if (hasPanel && !animWaitRef.current) {
+            animWaitRef.current = setTimeout(() => {
+              animWaitRef.current = 0
+              if (!openRef.current) return
+              fitPanel()
+              startEnter()
+            }, 900)
+          }
+          return
         }
+        startEnter()
       }, [open, loaded, data, q, selPacks, selTags, showFilters])
 
       React.useEffect(() => {
