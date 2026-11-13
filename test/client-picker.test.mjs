@@ -95,7 +95,7 @@ globalThis.fetch = async (url) => {
 await import('../client.js')
 
 const {
-  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
+  packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, pickerHeightCap, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
 } = globalThis.__dshMeme.__test
 
 // ---------- ① 多选筛选:范围 / 计数 / 交集 ----------
@@ -213,6 +213,19 @@ test('量顶栏时的临时高度按最终上限封顶,不把整屏格子展开'
   assert.equal(topProbeHeight(0, 900), 0)
   assert.equal(topProbeHeight(800, 0), 0)
   assert.equal(topProbeHeight('', ''), 0)
+})
+
+test('短窗口高度上限放宽到够三行,不再卡死在 46vh', () => {
+  // 视口 480:46vh 只有 220(约 1.5 行);可用 276 时应给到 276
+  assert.equal(pickerHeightCap(480, 276), 276)
+  // 可用空间比 46vh 还小时,上限不往下压;最终高度由 avail 收口
+  assert.equal(fitPanelHeight(9999, 200, 180, pickerHeightCap(480, 200)), 200)
+  // 窗口够高时还是 46vh 的老规则
+  assert.equal(pickerHeightCap(900, 700), 414)
+  // 视口量不到时不硬撑
+  assert.equal(pickerHeightCap(0, 300), 0)
+  // 量顶栏的临时高度也跟着放宽:短窗口撑到 320 而不是 220
+  assert.equal(topProbeHeight(480, 480), 320)
 })
 
 test('resize 失效键只看竖向几何:侧栏开合(只改宽度)不会作废顶栏缓存', () => {

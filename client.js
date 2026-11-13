@@ -2108,15 +2108,15 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 面板本体只负责定位/尺寸/纵向布局;视觉层(.mp-body)单独包一层,开关动画只作用在它
       // 上面 —— 动画的 transform 不会改面板布局矩形,也不会把固定定位的悬浮预览卷进坐标系。
       '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:30;display:flex;flex-direction:column;max-height:min(46vh,calc(100vh - 32px));font-size:12px;color:var(--dsw-alias-label-primary)}',
-      '.meme-picker .mp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);overflow:hidden;transform-origin:50% 100%}',
+      '.meme-picker .mp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);overflow:hidden;transform-origin:50% 100%;will-change:opacity,transform;backface-visibility:hidden}',
       '.meme-picker.mp-pre .mp-body{opacity:0}',
       // 等数据/加载动画的这一段面板不可见,别让一个透明的面板挡住下面的点击
       '.meme-picker.mp-pre{pointer-events:none}',
       '.meme-picker.mp-in .mp-body{animation:mp-picker-in .16s cubic-bezier(.2,.8,.2,1)}',
       '.meme-picker.mp-out{pointer-events:none}',
       '.meme-picker.mp-out .mp-body{animation:mp-picker-out .12s ease-in forwards}',
-      '@keyframes mp-picker-in{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}',
-      '@keyframes mp-picker-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(6px) scale(.99)}}',
+      '@keyframes mp-picker-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}',
+      '@keyframes mp-picker-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(6px)}}',
       '@media (prefers-reduced-motion:reduce){.meme-picker.mp-in .mp-body,.meme-picker.mp-out .mp-body{animation:none}}',
       '.meme-picker .mp-head{display:flex;gap:6px;align-items:center;flex:none}',
       '.meme-picker .mp-search{flex:1 1 auto;min-width:0;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;font-size:12px;outline:none;transition:border-color .12s ease}',
@@ -2443,12 +2443,25 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
     }
 
     /**
+     * 面板高度上限(issue #70 后续)。视口很矮时 46vh 只剩一两行,基本没法挑图;所以短窗口
+     * 下放宽到「够三行左右」(PICKER_MIN_CAP),再和实际可用高度取小。窗口够高时仍然是
+     * 46vh 的老规则。
+     */
+    const PICKER_MIN_CAP = 320
+    function pickerHeightCap(viewportHeight, available) {
+      const vh = Math.max(0, Number(viewportHeight) || 0)
+      if (!vh) return 0
+      const room = Math.max(0, Number(available) || 0)
+      return Math.max(Math.floor(vh * PICKER_MAX_VH), Math.min(room, PICKER_MIN_CAP))
+    }
+
+    /**
      * measureTopLimit 临时把面板撑到多高(issue #70)。最终高度被 PICKER_MAX_VH 封顶,量的时候
      * 撑到接近满屏只会让 240 个格子全部展开、每次打开都白重排一遍;撑到最终上限就够命中顶栏。
      */
     function topProbeHeight(bottom, viewportHeight) {
       const b = Math.max(0, Number(bottom) || 0)
-      const cap = Math.max(0, Math.floor((Number(viewportHeight) || 0) * PICKER_MAX_VH))
+      const cap = pickerHeightCap(viewportHeight, b - 16)
       return Math.max(0, Math.min(b - 16, cap))
     }
 
@@ -2866,7 +2879,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           const cached = topLimitRef.current
           const limit = cached && cached.nat === nat ? cached.limit : measureTopLimit(panel, bottom, nat)
           const avail = Math.floor(bottom - limit)
-          const cap = Math.floor(viewport('h') * PICKER_MAX_VH)
+          const cap = pickerHeightCap(viewport('h'), avail)
           const finalH = fitPanelHeight(nat, avail, 180, cap)
           // 判断依据必须是「这个节点当前的内联高度」,不能用跨挂载记的 ref(历史 bug:
           // 关掉面板再打开,新节点没有内联 max-height、却因为 ref 记着同一个数值被判成
@@ -2924,7 +2937,6 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         }
         startEnter()
       }, [open, loaded, data, q, selPacks, selTags, showFilters])
-
       React.useEffect(() => {
         if (!open) return
         // 几何变了(窗口 / 宿主容器 / 输入框高):重新适配。侧栏开合、拖窗口会连续几十帧触发
@@ -3806,7 +3818,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       foldCaption, looseCaption, splitDescTokens, buildMemeIndex, buildMemeSearch, matchDesc, compareVersions,
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
-      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
+      packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, pickerHeightCap, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }
