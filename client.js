@@ -2105,7 +2105,17 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 宽度按「一行正好 5 格」定:格子外框 78(76 + 两条 1px 边框)+ 间距 8,5 格要 422 的网格
       // 内宽;面板 480 时网格内宽约 441(已扣掉面板 padding/border、网格 padding 和滚动条),
       // 留够余量不至于被滚动条挤成 4 格,也还不到 6 格的 508。窄窗口仍由 92vw 兜底。
-      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:30;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:8px;padding:12px;max-height:min(46vh,calc(100vh - 32px));overflow:hidden;font-size:12px;color:var(--dsw-alias-label-primary)}',
+      // 面板本体只负责定位/尺寸/纵向布局;视觉层(.mp-body)单独包一层,开关动画只作用在它
+      // 上面 —— 动画的 transform 不会改面板布局矩形,也不会把固定定位的悬浮预览卷进坐标系。
+      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:30;display:flex;flex-direction:column;max-height:min(46vh,calc(100vh - 32px));font-size:12px;color:var(--dsw-alias-label-primary)}',
+      '.meme-picker .mp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);overflow:hidden;transform-origin:50% 100%}',
+      '.meme-picker.mp-pre .mp-body{opacity:0}',
+      '.meme-picker.mp-in .mp-body{animation:mp-picker-in .16s cubic-bezier(.2,.8,.2,1)}',
+      '.meme-picker.mp-out{pointer-events:none}',
+      '.meme-picker.mp-out .mp-body{animation:mp-picker-out .12s ease-in forwards}',
+      '@keyframes mp-picker-in{from{opacity:0;transform:translateY(8px) scale(.985)}to{opacity:1;transform:none}}',
+      '@keyframes mp-picker-out{from{opacity:1;transform:none}to{opacity:0;transform:translateY(6px) scale(.99)}}',
+      '@media (prefers-reduced-motion:reduce){.meme-picker.mp-in .mp-body,.meme-picker.mp-out .mp-body{animation:none}}',
       '.meme-picker .mp-head{display:flex;gap:6px;align-items:center;flex:none}',
       '.meme-picker .mp-search{flex:1 1 auto;min-width:0;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:5px 9px;font-size:12px;outline:none;transition:border-color .12s ease}',
       '.meme-picker .mp-search:focus{border-color:var(--dsw-alias-brand-primary)}',
@@ -2338,6 +2348,11 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
      * 上限 —— 半屏高左右最能兼顾「看得到够多图」和「不把对话顶掉」,再高就喧宾夺主了。
      */
     const PICKER_MAX_VH = 0.46
+    /**
+     * 面板关闭时留在 DOM 里播完淡出的时长(ms)。要 ≥ CSS 里 .meme-picker.mp-out 的动画时长,
+     * 否则动画没播完就被 React 卸载,看起来还是「啪一下没了」。
+     */
+    const PICKER_HIDE_MS = 140
 
     /**
      * 从图片 url 反推图库 id(issue #30 第 1 条):
@@ -2586,20 +2601,61 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       })
     }
 
+    /**
+     * 面板开关状态。除了 open,还带一个 closing 相位:关面板时先进入 closing(面板留在
+     * DOM 里播淡出),PICKER_HIDE_MS 后才真正关掉。
+     *
+     * 相位必须放在 store 快照里,不能放在组件渲染期 setState:实测在渲染期 setState 会让
+     * React 的 useSyncExternalStore 订阅失联 —— 关面板后组件再也收不到 store 通知,面板
+     * 就永远关不掉。快照对象缓存起来复用(U-S-E-S 按 Object.is 比较,每次 new 会死循环),
+     * 只有状态变了才换新对象。
+     */
     function makeMemeStore() {
       let open = false
+      let closing = false
+      let snapshot = { open, closing }
+      let timer = 0
       const subs = new Set()
+      const publish = () => {
+        snapshot = { open, closing }
+        subs.forEach((fn) => fn())
+      }
+      const cancelClose = () => {
+        if (!timer) return
+        clearTimeout(timer)
+        timer = 0
+      }
+      const close = () => {
+        cancelClose()
+        open = false
+        closing = true
+        publish()
+        timer = setTimeout(() => {
+          timer = 0
+          if (open || !closing) return
+          closing = false
+          publish()
+        }, PICKER_HIDE_MS)
+      }
+      const show = () => {
+        cancelClose()
+        if (open && !closing) return
+        open = true
+        closing = false
+        publish()
+      }
       return {
-        get: () => open,
-        set: (v) => { open = !!v; subs.forEach((fn) => fn()) },
-        toggle: () => { open = !open; subs.forEach((fn) => fn()) },
+        get: () => snapshot,
+        set: (v) => { if (v) show(); else if (open) close() },
+        toggle: () => { if (open) close(); else show() },
         subscribe: (fn) => { subs.add(fn); return () => subs.delete(fn) },
       }
     }
 
     function makeMemeButton(store) {
       return function MemeButton(props) {
-        const open = React.useSyncExternalStore(store.subscribe, store.get)
+        const snap = React.useSyncExternalStore(store.subscribe, store.get)
+        const open = !!(snap && snap.open)
         return React.createElement('button', {
           className: open ? 'meme-trigger active' : 'meme-trigger',
           title: '表情包',
@@ -2624,7 +2680,9 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 拿不到钩子(宿主侧改动)时兜底为空串,即修复前的行为,不因此崩。
       const useLiveInput = typeof props.useInput === 'function' ? props.useInput : (() => null)
       const inputState = useLiveInput((s) => s)
-      const open = React.useSyncExternalStore(store.subscribe, store.get)
+      const snap = React.useSyncExternalStore(store.subscribe, store.get)
+      const open = !!(snap && snap.open)
+      const closing = !!(snap && snap.closing)
       const [data, setData] = React.useState(() => pickerCache || { packs: [], memes: [], pickerSendOnClick: true })
       const [loaded, setLoaded] = React.useState(!!pickerCache)
       const [q, setQ] = React.useState('')
@@ -2632,6 +2690,15 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const [selTags, setSelTags] = React.useState([])   // 空 = 不筛:全部情绪
       const [showFilters, setShowFilters] = React.useState(() => pickerFiltersOpen) // 筛选区展开状态(默认收起)
       const [hover, setHover] = React.useState(null)     // 悬浮预览:{ meme, cellEl, cellRect }
+      // 进入动画等 fitPanel 量完布局再挂:先挂 transform 会把面板矩形缩放/平移,量高和
+      // 悬停预览都会按错的矩形算。关闭/重开时复位,下次打开重新播。
+      const [entering, setEntering] = React.useState(false)
+      // 进入动画期间 .mp-body 带着缩放/位移,elementFromPoint 量「顶栏下沿」会量偏;这期间
+      // 先不做几何重算,等 animationend(或兜底定时器)再补。openRef 给定时器读最新值。
+      const animGuardRef = React.useRef(false)
+      const animTimerRef = React.useRef(0)
+      const openRef = React.useRef(open)
+      openRef.current = open
       const panelRef = React.useRef(null)
       const previewRef = React.useRef(null)
       const keepRef = React.useRef(null) // 预览停留区 [格子矩形, 预览框矩形],pointermove 判「还在不在」
@@ -2675,6 +2742,15 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         }
         document.addEventListener('pointerdown', onDown)
         return () => document.removeEventListener('pointerdown', onDown)
+      }, [open])
+
+      // 关面板:复位进入动画/测量守卫,并收掉悬浮预览。面板本身由 store 的 closing 相位
+      // 留在 DOM 里,PICKER_HIDE_MS 后 store 再发一次通知,面板才真正卸载。
+      React.useEffect(() => {
+        if (open) return
+        setEntering(false)
+        animGuardRef.current = false
+        setHover(null)
       }, [open])
 
       const viewport = (what) => {
@@ -2799,9 +2875,25 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 不能跟着每次 pointerenter 重跑 —— 否则鼠标每划过一格就强制一次同步布局(issue #70)。
       useLayout(() => {
         if (!open) return
+        // 进入动画还在跑:body 的 transform 会影响命中测试,等动画结束的补算(见 onAnimationEnd)
+        if (animGuardRef.current) return
         fitPanel()
         // 内容变化可能把格子挤动,悬停中的预览跟着重放
         if (placePreviewRef.current) placePreviewRef.current()
+        if (!entering) {
+          // 布局量完再挂进入动画(见 store 的 closing 相位与 entering 注释):同一帧内
+          // re-render,首帧就从 opacity 0 起播,不会先闪一下完整面板
+          setEntering(true)
+          animGuardRef.current = true
+          clearTimeout(animTimerRef.current)
+          // 动画被 prefers-reduced-motion 关掉时不会派发 animationend,兜底补一次
+          animTimerRef.current = setTimeout(() => {
+            animGuardRef.current = false
+            if (!openRef.current) return
+            fitPanel()
+            if (placePreviewRef.current) placePreviewRef.current()
+          }, 260)
+        }
       }, [open, loaded, data, q, selPacks, selTags, showFilters])
 
       React.useEffect(() => {
@@ -2851,7 +2943,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         }
       }, [open])
 
-      if (!open) return null
+      // 关闭动画(store 的 closing 相位)期间还要留着面板,相位结束才卸载
+      if (!open && !closing) return null
 
       // 点一张的去向由设置「快捷发图 → 点图直接发送」决定(issue #61):
       //   开(默认):拼好 [表情: 描述] 立即提交,保持老的一键发图习惯;
@@ -2945,66 +3038,82 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       }))
 
       return h('div', {
-        className: 'meme-picker',
+        className: 'meme-picker' + (closing ? ' mp-out' : entering ? ' mp-in' : ' mp-pre'),
         ref: panelRef,
         'data-meme-picker': '1',
         onClick: (e) => e.stopPropagation(),
         // 滚动后格子的屏幕位置就不对了,预览跟着清掉(关闭时机见上面的 layout effect)
         onWheel: () => setHover(null),
       },
-        h('div', { className: 'mp-head' },
-          h('input', {
-            type: 'text', className: 'mp-search', value: q,
-            placeholder: '搜索描述 / 关键词…',
-            onChange: (e) => setQ(e.target.value),
-            onKeyDown: (e) => { if (e.key === 'Escape') { setQ(''); if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur() } },
-          }),
-          hasFilter ? h('button', { type: 'button', className: 'mp-clear', onClick: clearAll }, '清空') : null,
-          // 筛选区默认收起(图库一多两排 chip 能吃掉大半个面板);有选中的筛选就显示选了几个,免得收起时看不出来
-          h('button', {
-            type: 'button',
-            className: 'mp-tag mp-toggle' + (selCount ? ' on' : ''),
-            title: showFilters ? '收起筛选' : '展开筛选(按图库 / 情绪挑图)',
-            'aria-expanded': showFilters ? 'true' : 'false',
-            onClick: toggleFilters,
-          }, '筛选' + (selCount ? ' ' + selCount : ''), h('span', { className: 'caret' }, showFilters ? '▲' : '▼')),
-          h('span', { className: 'mp-count' }, '共 ' + rows.length + ' 张'),
+        // 视觉层单独包一层:动画只作用在 .mp-body 上,面板的布局矩形(以及悬浮预览所在的
+        // 坐标系)不跟着缩放/平移,fitting 和预览定位都不会被动画干扰。
+        h('div', {
+          className: 'mp-body',
+          onAnimationEnd: (e) => {
+            if (e.target !== e.currentTarget) return
+            if (closing) return
+            // 进入动画结束:transform 没了,补一次正经量高,再按格子的最终位置重放预览
+            animGuardRef.current = false
+            clearTimeout(animTimerRef.current)
+            fitPanel()
+            if (placePreviewRef.current) placePreviewRef.current()
+          },
+        },
+          h('div', { className: 'mp-head' },
+            h('input', {
+              type: 'text', className: 'mp-search', value: q,
+              placeholder: '搜索描述 / 关键词…',
+              onChange: (e) => setQ(e.target.value),
+              onKeyDown: (e) => { if (e.key === 'Escape') { setQ(''); if (e.currentTarget && e.currentTarget.blur) e.currentTarget.blur() } },
+            }),
+            hasFilter ? h('button', { type: 'button', className: 'mp-clear', onClick: clearAll }, '清空') : null,
+            // 筛选区默认收起(图库一多两排 chip 能吃掉大半个面板);有选中的筛选就显示选了几个,免得收起时看不出来
+            h('button', {
+              type: 'button',
+              className: 'mp-tag mp-toggle' + (selCount ? ' on' : ''),
+              title: showFilters ? '收起筛选' : '展开筛选(按图库 / 情绪挑图)',
+              'aria-expanded': showFilters ? 'true' : 'false',
+              onClick: toggleFilters,
+            }, '筛选' + (selCount ? ' ' + selCount : ''), h('span', { className: 'caret' }, showFilters ? '▲' : '▼')),
+            h('span', { className: 'mp-count' }, '共 ' + rows.length + ' 张'),
+          ),
+          // 两排多选 chip:都不选 = 不筛。情绪只列当前图库范围内真实存在的,按数量降序带计数。
+          // 收起时不渲染(而不是 display:none):省掉几十个 chip 的节点与重排。
+          showFilters
+            ? h('div', { className: 'mp-filters' },
+              packChips.length
+                ? h('div', { className: 'mp-filter-row' },
+                  h('span', { className: 'mp-filter-label' }, '图库'),
+                  packChips.map((p) => h('button', {
+                    type: 'button', key: p.id,
+                    className: 'mp-tag' + (selPacks.includes(p.id) ? ' on' : ''),
+                    title: '点一下只看这个图库;再点取消。都不点 = 全部图库',
+                    onClick: () => toggle(selPacks, setSelPacks, p.id),
+                  }, p.name, h('span', { className: 'n' }, String(p.count)))),
+                )
+                : null,
+              tagCounts.length
+                ? h('div', { className: 'mp-filter-row' },
+                  h('span', { className: 'mp-filter-label' }, '情绪'),
+                  tagCounts.map((t) => h('button', {
+                    type: 'button', key: t.tag,
+                    className: 'mp-tag' + (selTags.includes(t.tag) ? ' on' : ''),
+                    title: '点一下只看这个情绪;再点取消。都不点 = 全部情绪',
+                    onClick: () => toggle(selTags, setSelTags, t.tag),
+                  }, tagZh(t.tag), h('span', { className: 'n' }, String(t.count)))),
+                )
+                : null,
+            )
+            : null,
+          data.memes.length === 0
+            ? h('div', { className: 'mp-empty' }, loaded ? '还没有可发的表情包' : '加载中…')
+            : (rows.length === 0
+              ? h('div', { className: 'mp-empty' }, '没有匹配的表情包')
+              : h('div', { className: 'mp-grid' }, gridCells)),
         ),
-        // 两排多选 chip:都不选 = 不筛。情绪只列当前图库范围内真实存在的,按数量降序带计数。
-        // 收起时不渲染(而不是 display:none):省掉几十个 chip 的节点与重排。
-        showFilters
-          ? h('div', { className: 'mp-filters' },
-            packChips.length
-              ? h('div', { className: 'mp-filter-row' },
-                h('span', { className: 'mp-filter-label' }, '图库'),
-                packChips.map((p) => h('button', {
-                  type: 'button', key: p.id,
-                  className: 'mp-tag' + (selPacks.includes(p.id) ? ' on' : ''),
-                  title: '点一下只看这个图库;再点取消。都不点 = 全部图库',
-                  onClick: () => toggle(selPacks, setSelPacks, p.id),
-                }, p.name, h('span', { className: 'n' }, String(p.count)))),
-              )
-              : null,
-            tagCounts.length
-              ? h('div', { className: 'mp-filter-row' },
-                h('span', { className: 'mp-filter-label' }, '情绪'),
-                tagCounts.map((t) => h('button', {
-                  type: 'button', key: t.tag,
-                  className: 'mp-tag' + (selTags.includes(t.tag) ? ' on' : ''),
-                  title: '点一下只看这个情绪;再点取消。都不点 = 全部情绪',
-                  onClick: () => toggle(selTags, setSelTags, t.tag),
-                }, tagZh(t.tag), h('span', { className: 'n' }, String(t.count)))),
-              )
-              : null,
-          )
-          : null,
-        data.memes.length === 0
-          ? h('div', { className: 'mp-empty' }, loaded ? '还没有可发的表情包' : '加载中…')
-          : (rows.length === 0
-            ? h('div', { className: 'mp-empty' }, '没有匹配的表情包')
-            : h('div', { className: 'mp-grid' }, gridCells)),
         // 悬浮预览:大图(contain 不裁切)+ 情绪 + 描述 + 文件名;pointer-events:none 不挡点击
-        hover ? h('div', {
+        // 关面板的同一帧就把预览收掉,不跟着面板一起淡出
+        open && hover ? h('div', {
           className: 'mp-hover', ref: previewRef,
           style: {
             left: (hover.cellRect ? hover.cellRect.right + 10 : 0) + 'px',
