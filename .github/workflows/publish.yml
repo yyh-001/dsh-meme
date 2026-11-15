@@ -1,0 +1,65 @@
+name: publish
+
+# 发版约定(仓库无 tag 流程):package.json 的 version 一提交到 main 就发 npm。
+# 版本号已经在 npm 上则整条流水线跳过,所以改文档/描述不会重复发布。
+# 需要补发时可在 Actions 里手动 Run workflow。
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: npm dist-tag
+        type: choice
+        options:
+          - latest
+          - next
+        default: latest
+
+# trusted publishing(OIDC):不需要 NPM_TOKEN,id-token: write 必须开。
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: 检查版本是否已发布
+        id: check
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "dsh-meme@$version" version >/dev/null 2>&1; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "dsh-meme@$version 已在 npm 上,跳过。"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 测试用宿主 peer 依赖;和本机保持一致,升级宿主时手动改这里的版本。
+      - name: 安装宿主 peer 依赖
+        if: steps.check.outputs.publish == 'true'
+        run: npm install --no-save --omit=optional --ignore-scripts @deepseek-ai/dsh-tools@0.2.2-rc.3
+
+      - name: 跑测试
+        if: steps.check.outputs.publish == 'true'
+        run: npm test
+
+      - name: 发布到 npm
+        if: steps.check.outputs.publish == 'true'
+        run: npm publish --access public --tag "${{ inputs.dist_tag || 'latest' }}"
