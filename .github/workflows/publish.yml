@@ -36,7 +36,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
+          # 不要加 registry-url:setup-node v4 会导出占位 token
+          # XXXXX-XXXXX-XXXXX-XXXXX,npm 会拿它当真实 token 发,trusted
+          # publishing(OIDC)反而失效(E404)。npm 默认 registry 就是
+          # https://registry.npmjs.org,这里不需要额外配置。
+          # 上游问题:actions/setup-node#1440 / #1558
 
       - name: 检查版本是否已发布
         id: check
