@@ -8,6 +8,7 @@
 
 - **Web 聊天**:把 `[表情: 描述]` 整段写进回复,不要把路径贴进回复。
 - **dsh-im 的 IM 会话**:候选行带 `path=`,原样传给 `dsh_im_return_file`。
+- **OneBot(dsh-qq-onebot)会话**:按 dsh-qq-onebot 自己的判据认人——读它的会话账本(宿主 `dshHomePath` 指向的 `dsh-qq/session-state.json`),把 `sessions` 里的 sessionId 与当前 `sessionId` 做**精确字符串比对**,在表里就判定为 OneBot 渠道(不计算、不推导);**在 Web 里给这个 QQ 会话发消息也一样**,因为它认的是 sessionId 而非消息来源。候选行带 `path=`,把绝对路径原样传给 `qq_send_image(file=...)`,不要写 `[表情:]` 标记。工具名/参数名可用 patch 的 `onebotToolName` / `onebotFileParam` 覆盖,账本路径用 `onebotStateFile` 覆盖,`onebotDelivery: off` 可关闭整个渠道。
 - **QQ 官方机器人(dsh-qqbot 插件)**:工具表里有 `qqbot_send_file` 时,不要写 `[表情:]` 标记——把挑中候选的 **`absPath` 绝对路径传给 `qqbot_send_file` 的 `file_path`**,正文只写普通文字。它默认启用路径白名单(media + agent cwd + `sendFile.extraRoots`);被拒时提示用户在 dsh-qqbot 配置的 `sendFile.extraRoots` 里加入图库目录(通常 `~/.dsh/meme-packs`)。
 - **QQ 发图尺寸**:设置页打开后,IM 的 `path` 和 Web 的 `absPath` 已经是缩到 200-450px 的发送副本(在图库目录的 `.send-cache/` 下),照常原样传给 `dsh_im_return_file` / `qqbot_send_file`,不要再自己缩图或改回图库原图。Web 候选的 `path` 仍是原图出处。没装 sharp 时按原图发送。
 
