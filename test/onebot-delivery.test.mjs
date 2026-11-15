@@ -220,6 +220,16 @@ test('纯文字模式不发图,也不要求调用任何图片工具', async () =
   }
 })
 
+test('OneBot-only 时 send_meme 工具描述不再让模型写 [表情:] 标记', () => {
+  // 只有 dsh-qq-onebot(没有 dsh-im)时 imReady 为 false,工具描述也必须跟着结果说明走,
+  // 不能再说「挑中后把 [表情: 描述] 原样写进回复」——否则和系统提示/工具结果打架。
+  const host = createHost()
+  const desc = host.sendMeme.description
+  assert.doesNotMatch(desc, /挑中后把 \[表情: /)
+  assert.match(desc, /结果说明要求用原生图片投递工具/)
+  assert.match(desc, /不要写 \[表情: \.\.\.\] 标记/)
+})
+
 test('system-prompt 给 QQ 会话注入 OneBot 投递规则,纯 Web 会话不注入', async () => {
   const host = createHost()
   assert.ok(host.assemble)
