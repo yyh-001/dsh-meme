@@ -580,6 +580,8 @@ export function openIndexWriter(root, opts = {}) {
  * `<channel>-steer-<uuid>`),旧版还会把 `<channel>-` 直接拼进会话 id。
  * dsh-im 将来加渠道时在这里补一项即可,没列到的渠道会退回 Web 的标记模式。
  */
+// 注意:OneBot(dsh-qq-onebot)不在这里。它不写 rpcId 渠道前缀,而是靠
+// sessionId 反查自己的会话账本,见 index.js 的 onebotSessionOf / imChannelOf。
 export const IM_CHANNEL_PREFIXES = Object.freeze([
   'weixin', 'feishu', 'dingtalk', 'wecom', 'wecomapp', 'qq', 'slack', 'telegram',
   'discord', 'whatsapp', 'imessage', 'matrix', 'email', 'office',
@@ -593,6 +595,7 @@ export const IM_CHANNEL_LABELS = Object.freeze({
   wecom: '企业微信',
   wecomapp: '企业微信应用',
   qq: 'QQ',
+  onebot: 'QQ(OneBot)',
   slack: 'Slack',
   telegram: 'Telegram',
   discord: 'Discord',
@@ -602,6 +605,21 @@ export const IM_CHANNEL_LABELS = Object.freeze({
   email: '邮件',
   office: 'AI Office',
 })
+
+/**
+ * 渠道 → 原生图片投递工具。
+ * dsh-im 系渠道统一用 dsh_im_return_file(path=...);OneBot(dsh-qq-onebot)没有
+ * dsh-im 服务,图片要走它自己的 qq_send_image(file=...)。工具名/参数名可由 patch
+ * 覆盖(换成 dsh-qqbot 的 qqbot_send_file / file_path 也走这里)。
+ */
+export const DEFAULT_IM_DELIVERY = Object.freeze({ name: 'dsh_im_return_file', param: 'path' })
+export function imDeliveryToolOf(channel, onebot) {
+  if (channel !== 'onebot') return DEFAULT_IM_DELIVERY
+  return {
+    name: String(onebot?.name || 'qq_send_image').trim() || 'qq_send_image',
+    param: String(onebot?.param || 'file').trim() || 'file',
+  }
+}
 
 const IM_UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 const IM_RPC_ID_RE = new RegExp('^(' + IM_CHANNEL_PREFIXES.join('|') + ')-(?:steer-)?' + IM_UUID_PATTERN + '$', 'u')
@@ -842,6 +860,10 @@ function clampLimit(n) {
 export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, options = {}) {
   const webMode = !sendImage && !!urlPrefix
   const imChannelOf = typeof options.imChannelOf === 'function' ? options.imChannelOf : null
+  /** 渠道 → 原生图片投递工具(工具名/参数名);宿主按 patch 配置注入 */
+  const deliveryToolOf = typeof options.deliveryToolOf === 'function'
+    ? options.deliveryToolOf
+    : (channel) => imDeliveryToolOf(channel)
   /** 注册时 dsh-im 是否已在进程内——只决定工具描述要不要提 IM 的发送方式 */
   const imReady = options.imReady === true
   /**
@@ -902,7 +924,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       '情绪字典: ' + MOOD_DICT + '。' +
       (webMode
         ? (imReady
-            ? '发送方式看工具结果末尾的说明:Web 聊天把 [表情: 描述] 原样写进回复(描述抄候选原文,不要带网址);IM(QQ/微信等)聊天调用 dsh_im_return_file 传候选的 path 发原生图片,不要写 [表情: ...] 标记。'
+            ? '发送方式看工具结果末尾的说明:Web 聊天把 [表情: 描述] 原样写进回复(描述抄候选原文,不要带网址);IM(QQ/微信等)聊天默认调用 dsh_im_return_file 传候选的 path 发原生图片(OneBot 等渠道按说明换成对应工具),不要写 [表情: ...] 标记。'
             : '挑中后把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址)——自己编的描述前端配不上图。')
         : '两步:search 看候选,再用 send + path 发出。') +
       '发送方式以设置里的「发送方式」下拉框为准(自动/纯文字/图片),每次结果末尾的「发图」说明会告诉你怎么发。' +
@@ -961,6 +983,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       // 纯文字模式:Web/IM 都不发图;候选不带路径,免得模型顺手把 path 交给投递工具
       const imMode = !textMode && !sendImage && !!imChannel
       const imLabel = imMode ? (IM_CHANNEL_LABELS[imChannel] || 'IM') : ''
+      /** IM 渠道各自的原生图片投递工具:OneBot 走 qq_send_image,其余走 dsh_im_return_file */
+      const delivery = imMode ? deliveryToolOf(imChannel) : null
 
       const captionOf = (m) => String(m.caption || m.file_name || '').slice(0, 80)
       /** 候选的绝对路径:IM 投递工具要的是磁盘路径,不能是图库内的相对路径/包前缀路径 */
@@ -1020,11 +1044,12 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         ? '主动发图档位为「关闭」:不要主动发表情图片,用文字接梗即可;只有用户明确要求发表情/发图/斗图时才照常发。'
         : ''
       const howToSend = textMode
-        ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file 或 qqbot_send_file,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
+        ? '发图:当前发送方式是「纯文字」,不发图片——不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要调用任何图片投递工具,也不要把图片路径贴进回复;把下面某一行「描述=」的原文用进你的文字回复里,接梗/吐槽/卖萌即可。'
         : chanceNote +
           (imageMode ? '当前发送方式是「图片」:挑好图就必须真的发出去,不能只写文字描述。' : '') +
           (imMode
-            ? (chanceBlocked ? '发图:只在用户明确要图时,把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)' : '发图:把挑中的那一行 path 原样传给 dsh_im_return_file(path=...)') +
+            ? (chanceBlocked ? '发图:只在用户明确要图时,把挑中的那一行 path 原样传给 ' : '发图:把挑中的那一行 path 原样传给 ') +
+              delivery.name + '(' + delivery.param + '=...)' +
               '——它会作为 ' + imLabel +
               ' 原生图片消息发出' + (chanceBlocked ? '。' : ';不用等用户要求,现在就能主动发。') +
               '回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'

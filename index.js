@@ -24,7 +24,7 @@ import { DatabaseSync } from 'node:sqlite'
 import {
   MemesStore, defaultPacksDir, scanPacks, readPackMeta, isPackDir, bundledPacksDir,
   resolveActiveRoot, liveStore, registerSendMemeTool, dshHome, enabledPackIds, packDeleteDir,
-  searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS,
+  searchRows, prunePackKeywords, imChannelOfSession, IM_CHANNEL_LABELS, imDeliveryToolOf,
   SEND_MODES, normalizeSendMode, normalizeSendChance, LAYOUT_MODES, normalizeLayoutMode, openIndexWriter,
   scanRowFor, walkPackImages, ensurePackAt, movePackEntries, isInsidePluginPackage, SCAN_IMAGE_EXTS,
 } from './memes.js'
@@ -665,21 +665,23 @@ export function apply(ctx, config) {
    * `![描述](C:\...\x.jpg)` 或 `[描述]` 来「确保能看到」,而 IM 客户端只会显示
    * 方括号里的描述文字、把本地路径原样暴露出来,图片本身还是靠原生消息送达。
    */
-  const imNoInlineImageRule = (label) => '- 回复正文只写普通聊天的文字:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要写 markdown 图片(![]()),更不要把本地文件路径贴进回复——' + label + ' 里这些只会显示成难看的文字,图片会由 dsh_im_return_file 作为原生消息发出;\n'
+  const imNoInlineImageRule = (label, delivery) => '- 回复正文只写普通聊天的文字:不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要写 markdown 图片(![]()),更不要把本地文件路径贴进回复——' + label + ' 里这些只会显示成难看的文字,图片会由 ' + delivery.name + ' 作为原生消息发出;\n'
   const imCompanionPrompt = (channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
+    const delivery = deliveryOf(channel)
     return '斗图规则:氛围合适就主动发图,不用等用户开口;对方说正事时克制。\n' +
-      '- 先调 send_meme 拿候选,把候选 path 交给 dsh_im_return_file 作为 ' + label + ' 原生图片发出;\n' +
-      imNoInlineImageRule(label) +
+      '- 先调 send_meme 拿候选,把候选 path 传给 ' + delivery.name + '(' + delivery.param + '=...) 作为 ' + label + ' 原生图片发出;\n' +
+      imNoInlineImageRule(label, delivery) +
       '- 发完保持简短,不解释投递过程。'
   }
   /** 用户自定义过提示词时不动原文,只在末尾补 IM 的投递方式 */
   const imCompanionRules = (channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
+    const delivery = deliveryOf(channel)
     return '当前对话来自 ' + label + '(IM 聊天):\n' +
-      '- 发图方式是先调用 send_meme 拿候选,再把挑中的候选 path(工具结果里的绝对路径)传给 dsh_im_return_file,让它作为 ' + label + ' 原生图片消息发出;\n' +
-      imNoInlineImageRule(label) +
-      '- 不用等用户先授权:气氛合适就直接 send_meme → dsh_im_return_file 主动发;对方说正事/干活时克制。'
+      '- 发图方式是先调用 send_meme 拿候选,再把挑中的候选 path(工具结果里的绝对路径)传给 ' + delivery.name + '(' + delivery.param + '=...),让它作为 ' + label + ' 原生图片消息发出;\n' +
+      imNoInlineImageRule(label, delivery) +
+      '- 不用等用户先授权:气氛合适就直接 send_meme → ' + delivery.name + ' 主动发;对方说正事/干活时克制。'
   }
   // ---- 主动发图三档(关闭 / 看气氛 / 每轮都发) ----
   // 不再让用户调 0-100% 概率:三档各配一套固定提示词,同一档内 system prompt
@@ -691,11 +693,12 @@ export function apply(ctx, config) {
   const GEAR_ALWAYS_RULE = '主动发图档位:每轮都发——这一轮必须主动发一张表情包:先调 send_meme 挑贴合当前气氛的图,再按发送方式发出;不要只写文字描述,只有 send_meme 报错或没有任何候选时才允许只回文字。'
   const gearPrompt = (gear, channel) => {
     const label = IM_CHANNEL_LABELS[channel] || 'IM'
+    const delivery = deliveryOf(channel)
     if (gear === 'off') {
       return '斗图规则:不主动发表情包,只回文字;\n' +
         '- 只有用户明确要求发表情/发图/斗图时才发:先调 send_meme 拿候选;\n' +
         (channel
-          ? '- 把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文不要写标记/路径。\n'
+          ? '- 把候选 path 交给 ' + delivery.name + ' 发 ' + label + ' 原生图片,正文不要写标记/路径。\n'
           : '- 把候选的 [表情: 描述] 写进回复。\n')
     }
     if (gear === 'active') {
@@ -703,7 +706,7 @@ export function apply(ctx, config) {
         '- 大部分合适的回合都主动发一张表情包,接梗、吐槽、卖萌时别冷场;\n' +
         '- 先调 send_meme 挑一张贴合当前气氛的图,' +
         (channel
-          ? '把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字。\n'
+          ? '把候选 path 交给 ' + delivery.name + ' 发 ' + label + ' 原生图片,正文只写普通文字。\n'
           : '把候选的 [表情: 描述] 原样写进回复。\n') +
         '- 只有对方明确在说正事/严肃话题时才克制。'
     }
@@ -711,19 +714,90 @@ export function apply(ctx, config) {
       return '斗图规则:每轮都必须主动发一张表情包:\n' +
         '- 先调 send_meme 挑一张贴合当前气氛的图;\n' +
         (channel
-          ? '- 把候选 path 交给 dsh_im_return_file 发 ' + label + ' 原生图片,正文只写普通文字。\n'
+          ? '- 把候选 path 交给 ' + delivery.name + ' 发 ' + label + ' 原生图片,正文只写普通文字。\n'
           : '- 把候选的 [表情: 描述] 原样写进回复。\n') +
         '- 不要只写文字描述;只有 send_meme 报错或没有任何候选时才允许只回文字。'
     }
     return channel ? imCompanionPrompt(channel) : DEFAULT_COMPANION_PROMPT
   }
-  /** dsh-im 是否在进程内(它提供 dsh_im_return_file,是 IM 发图的唯一通道) */
+  /** dsh-im 是否在进程内(它提供 dsh_im_return_file) */
   const hasImDelivery = () => {
     try {
       const service = ctx.get && ctx.get('dshIm')
       return service !== undefined && service !== null
     } catch { return false }
   }
+  /**
+   * 统一的渠道判据:
+   * ① dsh-im 系渠道靠用户消息 source.rpcId 的 '<channel>-<uuid>' 前缀;
+   * ② OneBot(dsh-qq-onebot)不写渠道前缀,按它自己的方式认会话——用
+   *    sessionId 精确比对它落盘的会话账本(dshHomePath 指向的 dsh-qq/ 目录)。
+   * 这也解释了为什么在 Web 里给 QQ 会话发消息仍会投递到 QQ:dsh-qq-onebot
+   * 的 outbound 只用 manager.find(sessionId) 认人,不看这轮从哪进来。
+   */
+  const imChannelOf = (session) => {
+    const channel = imChannelOfSession(session)
+    if (channel) return hasImDelivery() ? channel : null
+    return onebotSessionOf(session) ? 'onebot' : null
+  }
+
+  // ---- OneBot(dsh-qq-onebot)投递配置 ----
+  // 差别只在投递工具:OneBot 没有 dsh-im 服务,图片要交给 qq_send_image。
+  const onebotDelivery = String(config?.onebotDelivery || 'auto').trim().toLowerCase() // off | auto
+  const onebotTool = {
+    name: String(config?.onebotToolName || 'qq_send_image').trim() || 'qq_send_image',
+    param: String(config?.onebotFileParam || 'file').trim() || 'file',
+  }
+  /**
+   * 与 dsh-qq-onebot 的 outbound 用同一把钥匙:sessionId。它的 SessionManager
+   * 内存映射不对外暴露,但 setSessionId() 会把同一份
+   * "qq:<self>:<scope>:<peer>[@iso] -> sessionId" 落盘到会话账本(为了重启后
+   * 不退回老会话),所以读账本等价于问 manager,不需要改上游一行代码。
+   *
+   * 账本所在目录优先问宿主的 dshHomePath 服务,与 dsh-qq-onebot 自己的
+   * homeDirOf 同一套逻辑(可能是函数,也可能是字符串)。注意不能用 dsh-meme
+   * 的 dshHome():有些部署里 HOME 指向工作区,而宿主把插件数据放在
+   * dshHomePath 指定的另一个目录,两者不是一回事。
+   */
+  const onebotHomeOf = () => {
+    try {
+      const p = ctx.get?.('dshHomePath')
+      if (typeof p === 'function') {
+        const v = p('dsh-qq')
+        if (v) return String(v)
+      } else if (typeof p === 'string' && p) {
+        return join(p, 'dsh-qq')
+      }
+    } catch { /* 宿主没这个服务就走下面的默认 */ }
+    // 与 dsh-qq-onebot 的 homeDirOf 兜底保持同一语义;dshHome() 受
+    // DSH_MEME_HOME 影响,测试与自定义部署里能指到正确的 .dsh。
+    return join(process.env.DSH_HOME || join(dshHome(), '.dsh'), 'dsh-qq')
+  }
+  const onebotStateFile = String(config?.onebotStateFile || '').trim() ||
+    join(onebotHomeOf(), 'session-state.json')
+  let onebotCache = { mtimeMs: -1, at: 0, ids: new Set() }
+  const onebotSessionIds = () => {
+    try {
+      const st = statSync(onebotStateFile)
+      // 3 秒内且账本没变就读缓存;新建/重置会话时靠 mtime 立刻失效。
+      if (onebotCache.ids.size && onebotCache.mtimeMs === st.mtimeMs && Date.now() - onebotCache.at < 3000) return onebotCache.ids
+      const data = JSON.parse(readFileSync(onebotStateFile, 'utf8'))
+      const ids = new Set()
+      for (const [key, id] of Object.entries(data?.sessions || {})) {
+        if (/^qq:\d+:(?:group|private):\d+/.test(String(key)) && id) ids.add(String(id))
+      }
+      onebotCache = { mtimeMs: st.mtimeMs, at: Date.now(), ids }
+      return ids
+    } catch { return onebotCache.ids }
+  }
+  /** sessionId 属于某个 QQ 会话 → 这一轮(无论从 Web 还是 QQ 进来)都是 OneBot 渠道 */
+  const onebotSessionOf = (session) => {
+    if (onebotDelivery === 'off') return false
+    const id = String(session?.header?.id ?? session?.id ?? '')
+    return id ? onebotSessionIds().has(id) : false
+  }
+  /** 渠道 → 原生图片投递工具;系统提示与 send_meme 工具结果共用同一份映射 */
+  const deliveryOf = (channel) => imDeliveryToolOf(channel, onebotTool)
   /**
    * 发送方式设置(settings.sendMode):只影响 AI 怎么发,不改前端把 [表情: 描述]
    * 渲染成图片的逻辑。auto = 按渠道自动(默认);text = 纯文字不发图;image = 总是发图。
@@ -762,9 +836,9 @@ export function apply(ctx, config) {
   /** 设置页「允许局域网访问图库」(issue #54):默认关,打开后局域网 IP 字面量的 Host 也放行 */
   const allowLanAccess = () => readSettings().allowLanAccess === true
   /** 纯文字模式:默认提示词里教模型写 [表情:] 标记的规则要压掉,否则前端仍会配图 */
-  const TEXT_MODE_RULE = '发送方式设置为「纯文字」:不要发图片。不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用 dsh_im_return_file,也不要把图片路径贴进回复;想斗图就用文字接梗、吐槽、卖萌。可以用 send_meme 查候选拿描述,但不要真的把图发出去。'
+  const TEXT_MODE_RULE = '发送方式设置为「纯文字」:不要发图片。不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用任何图片投递工具,也不要把图片路径贴进回复;想斗图就用文字接梗、吐槽、卖萌。可以用 send_meme 查候选拿描述,但不要真的把图发出去。'
   /** 图片模式:在自动行为上强调「必须真发图」,不允许只描述 */
-  const IMAGE_MODE_RULE = '发送方式设置为「图片」:每次用 send_meme 挑好图后都必须把图片真的发出去——Web 聊天把 [表情: 描述] 原样写进回复;IM 聊天把候选 path 交给 dsh_im_return_file。不能只写文字描述、不发图。'
+  const IMAGE_MODE_RULE = '发送方式设置为「图片」:每次用 send_meme 挑好图后都必须把图片真的发出去——Web 聊天把 [表情: 描述] 原样写进回复;IM/QQ 聊天按 send_meme 结果末尾的说明,把候选路径交给对应的图片投递工具。不能只写文字描述、不发图。'
   const memeRoot = resolveActiveRoot(readSettings(), config?.memeRoot)
   let memes = null
   try {
@@ -782,7 +856,7 @@ export function apply(ctx, config) {
     const settingsNow = readSettings()
     if (settingsNow.promptEnabled === false) return assembled
     const sendMode = normalizeSendMode(settingsNow.sendMode)
-    const channel = hasImDelivery() ? imChannelOfSession(context?.agent?.session) : null
+    const channel = imChannelOf(context?.agent?.session)
     const custom = settingsNow.companionPrompt
     // 三档只在「自动」发送方式下有区别;纯文字/图片模式的语义是确定的
     const gear = sendMode === 'auto' ? sendGearOf() : 'auto'
@@ -1194,11 +1268,13 @@ export function apply(ctx, config) {
     }
   }
   const imToolOptions = () => ({
-    imChannelOf: (session) => (hasImDelivery() ? imChannelOfSession(session) : null),
+    imChannelOf,
     imReady: hasImDelivery(),
     sendMode: sendModeOf,
     proactiveGate: proactiveGateOf,
     prepareSendPath,
+    // 渠道 → 原生图片投递工具;OneBot 走 qq_send_image,其余走 dsh_im_return_file
+    deliveryToolOf: deliveryOf,
     // 跨启用图库的真实分类统计:send_meme 没命中时给模型有用的换词建议(issue #53)
     tagStats: () => sampler.tagStats(),
   })
@@ -1209,7 +1285,7 @@ export function apply(ctx, config) {
   if (sendImage || urlPrefix) {
     registerToolWhenReady(ctx, 'send_meme', () => {
       registerSendMemeTool(ctx, sampler, sendImage, urlPrefix, imToolOptions())
-      console.log(`[dsh-expression] send_meme 已注册(${sendImage ? 'QQ' : 'Web'}通道${!sendImage && hasImDelivery() ? '+IM' : ''},${urlPrefix || '无路由'})`)
+      console.log(`[dsh-expression] send_meme 已注册(${sendImage ? 'QQ' : 'Web'}通道${!sendImage && hasImDelivery() ? '+IM' : ''}${!sendImage && onebotDelivery !== 'off' ? '+OneBot' : ''},${urlPrefix || '无路由'})`)
     })
   } else {
     console.log('[dsh-expression] 无可用发送通道(需要 dsh-companion 的 QQ 或 webServer),未注册 send_meme')
