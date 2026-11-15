@@ -130,7 +130,7 @@ meme_update path="C:\Users\<你>\.dsh\meme-packs\work\a.jpg" caption="加班到�
 
 ### IM 投递
 
-经 [dsh-im](https://github.com/xmanrui/dsh-im) 接入后，候选带绝对路径，模型调用 `dsh_im_return_file` 发原生图片；Web 聊天仍用 `[表情: 描述]`。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接 QQ。
+经 [dsh-im](https://github.com/xmanrui/dsh-im) 接入后，候选带绝对路径，模型调用 `dsh_im_return_file` 发原生图片；Web 聊天仍用 `[表情: 描述]`。通过 [dsh-companion](https://github.com/yyh-001/dsh-companion) 也可接 QQ；用 [dsh-qq-onebot](https://github.com/2710586329/dsh-qq) 接 QQ 时则调用 `qq_send_image(file=...)`，按它的会话账本自动识别，无需额外配置。
 
 ### QQ 官方机器人
 
@@ -181,6 +181,7 @@ npm test
 - [dsh-im](https://github.com/xmanrui/dsh-im) — QQ / 微信 / 飞书等 IM 接入，表情包以原生图片发送
 - [dsh-meme-packs](https://github.com/yyh-001/dsh-meme-packs) — 可下载图库与机器可读目录
 - [dsh-companion](https://github.com/yyh-001/dsh-companion) — 陪伴模式插件，也能接 QQ 通道
+- [dsh-qq-onebot](https://github.com/2710586329/dsh-qq) — OneBot 11 / NapCat 的 QQ 通道，dsh-meme 自动识别并原生发图
 - [agent-expression](https://github.com/yyh-001/agent-expression) — 同一套图库思路的本地 Skill，适配 OpenClaw / Hermes / Cursor
 
 ## 许可

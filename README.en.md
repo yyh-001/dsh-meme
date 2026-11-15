@@ -130,7 +130,7 @@ Mood buckets: `happy` / `angry` / `sad` / `shy` / `confused` / `daily`. The mode
 
 ### IM delivery
 
-Through [dsh-im](https://github.com/xmanrui/dsh-im), candidates carry absolute paths and the model calls `dsh_im_return_file`; Web chats keep `[表情: caption]`. [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ delivery.
+Through [dsh-im](https://github.com/xmanrui/dsh-im), candidates carry absolute paths and the model calls `dsh_im_return_file`; Web chats keep `[表情: caption]`. [dsh-companion](https://github.com/yyh-001/dsh-companion) also provides QQ delivery; with [dsh-qq-onebot](https://github.com/2710586329/dsh-qq) the model calls `qq_send_image(file=...)` instead, detected automatically from its session ledger with no extra setup.
 
 ### Official QQ bot
 
@@ -181,6 +181,7 @@ Tests use Node's built-in runner (`node --test test/*.test.mjs`) and should be g
 - [dsh-im](https://github.com/xmanrui/dsh-im) — QQ / WeChat / Feishu IM bridge that delivers memes as native images
 - [dsh-meme-packs](https://github.com/yyh-001/dsh-meme-packs) — downloadable packs and a machine-readable catalog
 - [dsh-companion](https://github.com/yyh-001/dsh-companion) — companion-mode plugin with an optional QQ channel
+- [dsh-qq-onebot](https://github.com/2710586329/dsh-qq) — OneBot 11 / NapCat QQ channel; dsh-meme detects it and sends native images
 - [agent-expression](https://github.com/yyh-001/agent-expression) — a local skill with the same pack idea, for OpenClaw / Hermes / Cursor
 
 ## License
