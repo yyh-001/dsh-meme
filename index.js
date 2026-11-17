@@ -647,7 +647,7 @@ export function apply(ctx, config) {
   }
   // 陪伴模式提示词:模型主动斗图。设置页可编辑覆盖(settings.companionPrompt)。
   const DEFAULT_COMPANION_PROMPT = '斗图规则:氛围合适就主动发一张表情包,不用等用户开口;对方说正事时克制。\n' +
-    '- 先调 send_meme 拿候选,[表情: 描述] 必须抄候选原文,别自己编;\n' +
+    '- 先调 send_meme 拿候选,[表情: 描述] 必须抄候选原文,别自己编;标记里的冒号用半角英文冒号 :(别写成全角「：」);\n' +
     '- QQ 官方机器人(工具表里有 qqbot_send_file):不要写标记,把候选 absPath 原样传给 file_path;\n' +
     '- 发完简短,让图自己说话,不啰嗦不复述。'
   /**
@@ -826,6 +826,11 @@ export function apply(ctx, config) {
    * 设置里关闭后只把 [表情: 描述] 插进输入框,由用户自己按回车发。
    */
   const pickerSendOnClickOf = () => readSettings().pickerSendOnClick !== false
+  /**
+   * 点表情时是否把原图挂成附件(issue #73):默认开 —— 模型直接看图,而不是只收到
+   * [表情: 描述]。附件走宿主私有接口,宿主不支持时前端自动退回纯文字标记。
+   */
+  const pickerAttachImageOf = () => readSettings().pickerAttachImage !== false
   /**
    * 发给 send_meme 的档位回调:返回 false = 关闭档,工具结果要提示别主动发;
    * null = 不限制。只影响主动发图,用户明确要图时模型仍可正常挑图。
@@ -1441,6 +1446,8 @@ export function apply(ctx, config) {
         sendGear: sendGearOf(),
         // 点图行为:true = 直接发送(默认);false = 只放进输入框
         pickerSendOnClick: s.pickerSendOnClick !== false,
+        // 点图附图(issue #73):true = 把原图作为输入框附件发给模型(默认);false = 只发文字标记
+        pickerAttachImage: s.pickerAttachImage !== false,
         // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
         layoutMode: normalizeLayoutMode(s.layoutMode),
         // 局域网访问图库(issue #54):默认关;打开后手机/平板经局域网 IP 才能看到表情包
@@ -2515,7 +2522,7 @@ export function apply(ctx, config) {
               } catch { /* 坏库跳过 */ }
               finally { if (store) store.close() }
             }
-            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode), pickerSendOnClick: pickerSendOnClickOf(), ...recognizeSettingsPayload() })
+            json(res, { ok: true, total: all.length, tags: [], packId: activeId, packs: packList(), memes: all, remoteSubs: remoteSubs(), remoteDirUrl: remoteDirUrlList(), layoutMode: normalizeLayoutMode(readSettings().layoutMode), pickerSendOnClick: pickerSendOnClickOf(), pickerAttachImage: pickerAttachImageOf(), ...recognizeSettingsPayload() })
             return
           }
           const pack = packs.find((p) => p.id === packId)
@@ -2546,6 +2553,7 @@ export function apply(ctx, config) {
             remoteDirUrl: remoteDirUrlList(),
             layoutMode: normalizeLayoutMode(readSettings().layoutMode),
             pickerSendOnClick: pickerSendOnClickOf(),
+            pickerAttachImage: pickerAttachImageOf(),
             ...recognizeSettingsPayload(),
           })
           return
@@ -2961,6 +2969,17 @@ export function apply(ctx, config) {
               message: enabled
                 ? '已开启:点表情直接发送'
                 : '已关闭:点表情只放进输入框,按回车和文字一起发送',
+            })
+          } else if (op === 'setPickerAttachImage') {
+            // 点表情附图(issue #73):开 = 点图时把原图挂成附件,模型能直接看图;
+            // 关 = 退回纯文字 [表情: 描述]。宿主附件接口不可用时前端会自动退回文字,不拦截。
+            const enabled = body.enabled === true
+            writeSettings({ pickerAttachImage: enabled })
+            json(res, {
+              ok: true, ...packPayload(),
+              message: enabled
+                ? '已开启:点表情时把原图也发给模型(不再重复插文字标记)'
+                : '已关闭:点表情只发 [表情: 描述] 文字,模型看不到原图',
             })
           } else if (op === 'setLayoutMode') {
             // 表情排布:inline = 图与正文并排(默认);stacked = 图独占一行、正文铺开(issue #50)

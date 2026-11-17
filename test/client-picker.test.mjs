@@ -83,11 +83,17 @@ const packs = [{ id: 'p1', name: '包一', count: 3 }, { id: 'p2', name: '包二
 const fetched = []
 // 「点图直接发送」设置随面板数据下发;每个用例自己指定开/关
 let mockPickerSendOnClick = true
+// 点图附图(issue #73)开关与图片字节:只有附图用例才需要
+let mockPickerAttachImage = true
+let mockImageBlob = null
 globalThis.fetch = async (url) => {
   fetched.push(String(url))
   const reply = (data) => ({ ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) })
   if (String(url).includes('/dsh-memes-api')) {
-    return reply({ ok: true, packId: 'p1', packs, memes: rows, tags: [], pickerSendOnClick: mockPickerSendOnClick })
+    return reply({ ok: true, packId: 'p1', packs, memes: rows, tags: [], pickerSendOnClick: mockPickerSendOnClick, pickerAttachImage: mockPickerAttachImage !== false })
+  }
+  if (String(url).includes('/dsh-memes/') && mockImageBlob) {
+    return { ok: true, status: 200, blob: async () => mockImageBlob }
   }
   return reply({ ok: false, error: 'unexpected ' + url })
 }
@@ -401,8 +407,9 @@ const ensureFilters = (tree, repaint, want = true) => {
 }
 
 /** 装一遍插件并打开面板,返回当前这棵树 + 重绘函数 + setDraft 记录 */
-const openBoard = async ({ sendOnClick = true } = {}) => {
+const openBoard = async ({ sendOnClick = true, attach = true, sessionId, conversationService, actions: actionExtra } = {}) => {
   mockPickerSendOnClick = sendOnClick
+  mockPickerAttachImage = attach
   stateCells = []
   passIndex = 0
   pendingEffects = []
@@ -410,15 +417,23 @@ const openBoard = async ({ sendOnClick = true } = {}) => {
   const inputActions = {
     setDraft: (text) => calls.push({ kind: 'setDraft', text }),
     submit: () => calls.push({ kind: 'submit' }),
+    ...(actionExtra || {}),
   }
   const slots = {
     registered: [],
     inject(_name, fn) { fn() },
     register(meta, render) { this.registered.push({ meta, render }) },
   }
-  globalThis.__dshMeme.apply({ get: (name) => (name === 'slots' ? slots : undefined), effect: () => {} })
+  globalThis.__dshMeme.apply({
+    get: (name) => (name === 'slots' ? slots : (name === 'conversation' ? conversationService : undefined)),
+    effect: () => {},
+  })
   const find = (name) => slots.registered.find((r) => r.meta.name === name && r.meta.id === 'meme-picker')
-  const props = { inputActions, useInput: (s) => s({ draft: '先说两句' }) }
+  const props = {
+    inputActions,
+    useInput: (s) => s({ draft: '先说两句' }),
+    ...(sessionId ? { sessionId } : {}),
+  }
 
   const trigger = find('conversation.input.left')
   passIndex = 0
@@ -559,4 +574,93 @@ test('点图行为跟随设置:开启=直接发送;关闭=只放进草稿(issue 
   assert.equal(offDraft.length, 1)
   assert.equal(offDraft[0].text, '先说两句\n[表情: 开心猫]')
   assert.ok(!off.calls.some((c) => c.kind === 'submit'), '关闭时不能自动提交')
+})
+
+// ---------- issue #73:点图把原图挂成附件(宿主私有 createDrafts/addAttachments) ----------
+
+const settle = async () => { for (let i = 0; i < 6; i++) await new Promise((ok) => setTimeout(ok, 0)) }
+
+const attachBoard = async ({ sendOnClick = true, attach = true, conversation } = {}) => {
+  mockImageBlob = new Blob([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], { type: 'image/png' })
+  const created = []
+  const released = []
+  const attached = []
+  const conv = conversation || {
+    createDrafts(sessionId, files, uploadImages) {
+      created.push({ sessionId, files, uploadImages })
+      return [{ id: 'draft-1' }]
+    },
+    releaseDraftAttachment(id) { released.push(id) },
+  }
+  const board = await openBoard({
+    sendOnClick,
+    attach,
+    sessionId: 'sess-1',
+    conversationService: conv,
+    actions: { addAttachments: (ids) => { attached.push(ids); return true } },
+  })
+  return { ...board, created, released, attached }
+}
+
+test('issue #73 附图:createDrafts + addAttachments 成功时只发附件,不再拼文字标记', async () => {
+  const on = await attachBoard({ sendOnClick: true })
+  byClass(on.board, 'mp-cell')[0].props.onClick()
+  await settle()
+  assert.equal(on.created.length, 1, '要按当前会话建 image draft')
+  assert.equal(on.created[0].sessionId, 'sess-1')
+  assert.equal(on.created[0].uploadImages, false, '内联字节,不走后台上传')
+  assert.equal(on.created[0].files.length, 1)
+  assert.equal(on.created[0].files[0].type, 'image/png')
+  assert.equal(on.created[0].files[0].name, 'a.jpg', '保留图库里的原文件名')
+  assert.deepEqual(on.attached, [['draft-1']], 'draft id 要挂进输入框')
+  assert.equal(on.calls.filter((c) => c.kind === 'setDraft').length, 0, '附图成功就不再插 [表情: 描述](避免同一张图显示两次)')
+  assert.ok(on.calls.some((c) => c.kind === 'submit'), '仍然直接发送')
+})
+
+test('issue #73 附图:关闭「点图直接发送」时把图挂进草稿,不提交', async () => {
+  const off = await attachBoard({ sendOnClick: false })
+  byClass(off.board, 'mp-cell')[0].props.onClick()
+  await settle()
+  assert.deepEqual(off.attached, [['draft-1']])
+  assert.equal(off.calls.filter((c) => c.kind === 'setDraft').length, 0)
+  assert.ok(!off.calls.some((c) => c.kind === 'submit'), '草稿模式不能自动提交')
+})
+
+test('issue #73 附图:addAttachments 拒绝时释放 draft 并退回文字标记', async () => {
+  mockImageBlob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
+  const released = []
+  const conversation = {
+    createDrafts: () => [{ id: 'draft-x' }],
+    releaseDraftAttachment: (id) => released.push(id),
+  }
+  const board = await openBoard({
+    sendOnClick: true,
+    sessionId: 'sess-1',
+    conversationService: conversation,
+    actions: { addAttachments: () => false },
+  })
+  byClass(board.board, 'mp-cell')[0].props.onClick()
+  await settle()
+  assert.deepEqual(released, ['draft-x'], '挂不进去要把半成品 draft 释放掉')
+  const drafts = board.calls.filter((c) => c.kind === 'setDraft')
+  assert.equal(drafts.length, 1)
+  assert.equal(drafts[0].text, '先说两句\n[表情: 开心猫]', '退回老行为,不能把点图弄坏')
+  assert.ok(board.calls.some((c) => c.kind === 'submit'))
+})
+
+test('issue #73 附图:设置关闭 / 宿主没有会话服务时完全不走附件接口', async () => {
+  // 设置关闭
+  const off = await attachBoard({ attach: false })
+  byClass(off.board, 'mp-cell')[0].props.onClick()
+  await settle()
+  assert.equal(off.created.length, 0, '设置关闭不建 draft')
+  assert.equal(off.attached.length, 0)
+  assert.equal(off.calls.filter((c) => c.kind === 'setDraft')[0].text, '先说两句\n[表情: 开心猫]')
+
+  // 老宿主/单测环境没有 sessionId:不取图,直接文字
+  mockImageBlob = new Blob([new Uint8Array([1])], { type: 'image/png' })
+  const plain = await openBoard({ sendOnClick: true })
+  byClass(plain.board, 'mp-cell')[0].props.onClick()
+  await settle()
+  assert.equal(plain.calls.filter((c) => c.kind === 'setDraft')[0].text, '先说两句\n[表情: 开心猫]')
 })

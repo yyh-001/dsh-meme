@@ -27,7 +27,7 @@
 
 ## Features
 
-- 😊 **Click to send** — open 😊 beside the composer, search or filter by pack and mood, and click to send. Turn off “Click to send” and a click only inserts `[表情: caption]` at the caret, so text and sticker go out on Enter.
+- 😊 **Click to send** — open 😊 beside the composer, search or filter by pack and mood, and click to send. The original image is attached too by default so the model sees it (can be turned off in settings). Turn off “Click to send” and a click only inserts `[表情: caption]` at the caret, so text and sticker go out on Enter.
 - 🎭 **Proactive memes** — the AI picks a meme that fits the mood on its own; four levels (off / by mood / active / every turn), with an editable prompt.
 - 📱 **IM / mobile** — through dsh-im, QQ / WeChat / Feishu send memes as native image messages; open DSH Web over your LAN IP on a phone (off by default). “QQ send size” shrinks the IM copy to 200–450 px.
 - 🧠 **Learn new images** — upload an image and ask to save it; the AI identifies its category and caption. Drop files into a pack folder and click “Scan” (animated GIFs keep their frames).

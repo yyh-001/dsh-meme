@@ -428,6 +428,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const [sendGear, setSendGear] = React.useState('auto')
       // 快捷面板点图行为:true=点一张直接发送(默认);false=只放进输入框(issue #61)
       const [pickerSendOnClick, setPickerSendOnClick] = React.useState(true)
+      // 点图附图(issue #73):true=把原图挂成输入框附件(默认);false=只发 [表情: 描述]
+      const [pickerAttachImage, setPickerAttachImage] = React.useState(true)
       // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
       const [layoutMode, setLayoutMode] = React.useState('inline')
       // 局域网访问图库(issue #54):默认仅本机;打开后手机/平板经局域网 IP 才能加载表情包
@@ -454,6 +456,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         else if (res.qqSendResizeSupported === true) setQqSendResizeSupported(true)
         setSendGear(res.sendGear === 'off' || res.sendGear === 'active' || res.sendGear === 'always' ? res.sendGear : 'auto')
         setPickerSendOnClick(res.pickerSendOnClick !== false)
+        setPickerAttachImage(res.pickerAttachImage !== false)
         // 排布设置(old host 不带该字段,按默认并排处理),同时回写模块级状态
         // 让气泡装饰即时翻新(issue #50)
         setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
@@ -978,6 +981,25 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           }
         } catch (e) {
           setPickerSendOnClick(prev)
+          setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
+        }
+      }
+      // 点图附图(issue #73):开关立即保存,失败回滚。打开后点图时把原图挂成附件,
+      // 模型能直接看图;宿主附件接口不可用时前端自动退回 [表情: 描述] 文字。
+      const onTogglePickerAttach = async (next) => {
+        const prev = pickerAttachImage
+        setPickerAttachImage(next)
+        try {
+          const res = await apiPost({ op: 'setPickerAttachImage', enabled: next })
+          if (res && res.ok) {
+            applyRoot(res)
+            setRootNotice(res.message || (next ? '已开启点图附图' : '已关闭点图附图'))
+          } else {
+            setPickerAttachImage(prev)
+            setRootNotice('保存失败: ' + ((res && res.error) || ''))
+          }
+        } catch (e) {
+          setPickerAttachImage(prev)
           setRootNotice('保存失败: ' + (e && e.message ? e.message : String(e)))
         }
       }
@@ -1880,6 +1902,19 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           pickerSendOnClick
             ? '点一张立即发送;担心手滑误发可以关掉这个开关'
             : '点一张只把 [表情: 描述] 放进输入框,你打完字按回车一起发送'),
+        // 点图附图(issue #73):让模型拿到原图,而不是只靠描述猜
+        h('div', { className: 'row', style: { marginTop: 4 } },
+          h('span', {
+            className: 'switch' + (pickerAttachImage ? ' on' : ''),
+            title: pickerAttachImage ? '点击关闭:只发 [表情: 描述] 文字' : '点击开启:点图时把原图作为附件发给模型',
+            onClick: () => onTogglePickerAttach(!pickerAttachImage),
+          }),
+          h('span', { style: { fontSize: 12 } }, pickerAttachImage ? '点图也把原图发给 AI' : '只发文字标记'),
+        ),
+        h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
+          pickerAttachImage
+            ? '点图时把这张图挂进输入框附件,AI 能直接看到原图(消息里不再重复显示同一张标记图);模型不支持图片时宿主会提示发送失败'
+            : '只把 [表情: 描述] 发给模型,AI 只能靠描述猜图'),
         // 表情排布:图文同条时怎么排,只影响前端渲染,默认并排不改已有观感(issue #50)
         h('div', { className: 'section-title' }, '表情排布'),
         h('div', { className: 'row', style: { width: '100%' } },
@@ -2107,7 +2142,10 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 留够余量不至于被滚动条挤成 4 格,也还不到 6 格的 508。窄窗口仍由 92vw 兜底。
       // 面板本体只负责定位/尺寸/纵向布局;视觉层(.mp-body)单独包一层,开关动画只作用在它
       // 上面 —— 动画的 transform 不会改面板布局矩形,也不会把固定定位的悬浮预览卷进坐标系。
-      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:30;display:flex;flex-direction:column;max-height:min(46vh,calc(100vh - 32px));font-size:12px;color:var(--dsw-alias-label-primary)}',
+      // 面板本体的层级要压过宿主常驻控件(issue #74):窗口模式下模型切换胶囊会盖住
+      // 悬浮预览;宿主自己的菜单才 1100,而插件全屏看图是 2147483000。面板/预览取
+      // 同一量级并留一档差值,预览永远在面板之上、又不抢全屏看图的顶。
+      '.meme-picker{position:absolute;bottom:calc(100% + 8px);left:0;box-sizing:border-box;width:min(480px,92vw);z-index:2147481000;display:flex;flex-direction:column;max-height:min(46vh,calc(100vh - 32px));font-size:12px;color:var(--dsw-alias-label-primary)}',
       '.meme-picker .mp-body{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px;box-sizing:border-box;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:14px;box-shadow:0 12px 40px rgba(0,0,0,.28);overflow:hidden;transform-origin:50% 100%;will-change:opacity,transform;backface-visibility:hidden}',
       '.meme-picker.mp-pre .mp-body{opacity:0}',
       // 等数据/加载动画的这一段面板不可见,别让一个透明的面板挡住下面的点击
@@ -2142,7 +2180,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       '.meme-picker .mp-empty{color:var(--dsw-alias-label-secondary);text-align:center;padding:28px 0}',
       // 悬浮预览(issue #30 第 2 条):fixed + pointer-events:none,浮在格子旁边不挡点击;
       // 位置在 layout effect 里按实测尺寸算(右侧放不下翻左边、垂直钳制),见 MemeBoard。
-      '.meme-picker .mp-hover{position:fixed;z-index:60;width:176px;pointer-events:none;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:8px;box-shadow:0 12px 32px rgba(0,0,0,.32);display:flex;flex-direction:column;gap:6px}',
+      '.meme-picker .mp-hover{position:fixed;z-index:2147482000;width:176px;pointer-events:none;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:8px;box-shadow:0 12px 32px rgba(0,0,0,.32);display:flex;flex-direction:column;gap:6px}',
       '.meme-picker .mp-hover-img{width:144px;height:144px;margin:0 auto;border-radius:8px;background-color:var(--dsw-alias-bg-base);background-size:contain;background-position:center center;background-repeat:no-repeat}',
       '.meme-picker .mp-hover-tag{align-self:flex-start;font-size:10px;color:var(--dsw-alias-brand-primary);background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);border-radius:999px;padding:1px 8px}',
       '.meme-picker .mp-hover-cap{font-size:12px;line-height:1.45;max-height:3.9em;overflow:hidden;word-break:break-word}',
@@ -2355,6 +2393,13 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
      * 否则动画没播完就被 React 卸载,看起来还是「啪一下没了」。
      */
     const PICKER_HIDE_MS = 140
+    /**
+     * 点表情附图(issue #73):宿主只把 createDrafts + addAttachments 暴露在私有接口上
+     * (公开 slot props 没有 addFiles),所以附图是增强项 —— 任何一步不支持就退回纯文字
+     * 标记。只收宿主 image draft 认的四种位图;体积与输入框的常规图片上限同量级。
+     */
+    const MEME_ATTACH_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    const MEME_ATTACH_MAX_BYTES = 10 * 1024 * 1024
 
     /**
      * 从图片 url 反推图库 id(issue #30 第 1 条):
@@ -2616,6 +2661,57 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       })
     }
 
+    /** 附件文件名:保留原扩展名;没有就按 MIME 补一个,宿主附件栏里更好认。 */
+    function memeAttachmentName(m, type) {
+      const raw = String((m && (m.file_name || m.path || m.caption)) || 'meme')
+      const base = raw.split(/[\\/]/).pop().replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 120) || 'meme'
+      if (/\.[A-Za-z0-9]{1,8}$/.test(base)) return base
+      const ext = type === 'image/jpeg' ? 'jpg' : (type.split('/')[1] || 'png')
+      return base + '.' + ext
+    }
+
+    /** blob → 宿主可接受的 image File;类型/体积不合适返回 null(调用方退回文字标记)。 */
+    function memeAttachmentFile(m, blob) {
+      if (!blob || typeof blob.size !== 'number' || !blob.size) return null
+      const type = String(blob.type || '').split(';')[0].trim().toLowerCase()
+      if (MEME_ATTACH_TYPES.indexOf(type) < 0) return null
+      if (blob.size > MEME_ATTACH_MAX_BYTES) return null
+      try { return new File([blob], memeAttachmentName(m, type), { type }) } catch (e) { return null }
+    }
+
+    /**
+     * 把一张表情挂进当前输入框附件。
+     *
+     * `conversation.createDrafts(sessionId, files)` + `inputActions.addAttachments(ids)` 是
+     * 宿主 0.2.x 的私有接口(issue #73 已在 0.2.1-rc.3 / 0.2.2-rc.2 上核对);任何一步缺失
+     * 或返回 false 都先释放半成品 draft,再让调用方走文字标记 —— 宿主改接口不能把点图弄坏。
+     */
+    function attachMemeDraft(conversation, sessionId, actions, file) {
+      if (!conversation || !sessionId || !actions || !file) return false
+      if (typeof conversation.createDrafts !== 'function' || typeof actions.addAttachments !== 'function') return false
+      let drafts = null
+      try { drafts = conversation.createDrafts(sessionId, [file], false) } catch (e) { return false }
+      const id = drafts && drafts[0] && drafts[0].id
+      if (!id) return false
+      let added = false
+      try { added = actions.addAttachments([id]) === true } catch (e) { added = false }
+      if (!added) {
+        try { if (typeof conversation.releaseDraftAttachment === 'function') conversation.releaseDraftAttachment(id) } catch (e) { /* 半成品释放失败不影响回退 */ }
+        return false
+      }
+      return true
+    }
+
+    /** 取图并包成 File;跨域/404/非位图都返回 null。 */
+    async function fetchMemeAttachment(m) {
+      if (!m || !m.url || typeof fetch !== 'function' || typeof File !== 'function') return null
+      try {
+        const res = await fetch(absAppPath(m.url), { credentials: 'same-origin' })
+        if (!res || !res.ok || typeof res.blob !== 'function') return null
+        return memeAttachmentFile(m, await res.blob())
+      } catch (e) { return null }
+    }
+
     /**
      * 面板开关状态。除了 open,还带一个 closing 相位:关面板时先进入 closing(面板留在
      * DOM 里播淡出),PICKER_HIDE_MS 后才真正关掉。
@@ -2698,7 +2794,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const snap = React.useSyncExternalStore(store.subscribe, store.get)
       const open = !!(snap && snap.open)
       const closing = !!(snap && snap.closing)
-      const [data, setData] = React.useState(() => pickerCache || { packs: [], memes: [], pickerSendOnClick: true })
+      const [data, setData] = React.useState(() => pickerCache || { packs: [], memes: [], pickerSendOnClick: true, pickerAttachImage: true })
       const [loaded, setLoaded] = React.useState(!!pickerCache)
       const [q, setQ] = React.useState('')
       const [selPacks, setSelPacks] = React.useState([]) // 空 = 不筛:全部图库
@@ -2717,6 +2813,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       openRef.current = open
       const panelRef = React.useRef(null)
       const previewRef = React.useRef(null)
+      const pickingRef = React.useRef(false) // 附图/发送进行中:双击同一格不重复挂附件
       const keepRef = React.useRef(null) // 预览停留区 [格子矩形, 预览框矩形],pointermove 判「还在不在」
       const topLimitRef = React.useRef(null) // { limit, nat }:宿主顶栏下沿 + 量它时的自然高度(作失效键)
 
@@ -2736,6 +2833,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
               memes: Array.isArray(res.memes) ? res.memes : [],
               // 点图行为随面板数据一起下发:开关改了,下次打开面板立刻生效
               pickerSendOnClick: res.pickerSendOnClick !== false,
+              // 点图附图(issue #73):默认开;旧宿主不返回该字段也按开处理
+              pickerAttachImage: res.pickerAttachImage !== false,
             }
             pickerCache = next
             // 打开面板也同步索引:其它页面或 AI 学图带来的变化无需刷新整个页面。
@@ -2988,32 +3087,30 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       if (!open && !closing) return null
 
       // 点一张的去向由设置「快捷发图 → 点图直接发送」决定(issue #61):
-      //   开(默认):拼好 [表情: 描述] 立即提交,保持老的一键发图习惯;
-      //   关:只插进输入框(光标处),用户自己按回车,手滑不会发出去。
-      // 纯文本标记:模型只看到文字,前端按描述配图 —— 与 AI 侧发送的约定一致。
+      //   开(默认):立即提交,保持老的一键发图习惯;
+      //   关:只放进输入框(光标处),用户自己按回车,手滑不会发出去。
+      // 附图设置打开时优先把原图挂成附件(issue #73),模型能直接看图;宿主私有附件接口
+      // 不可用、取图失败或类型不支持时才退回纯文字 [表情: 描述] —— 那条路模型只能靠描述猜。
       const setText = (text) => { try { if (actions && actions.setDraft) actions.setDraft(text) } catch (e) {} }
       const markerOf = (m) => {
         const desc = (m.caption || m.keywords || m.tag || '表情包').slice(0, 80)
         return '[表情: ' + desc + ']'
       }
       const draftOf = () => (inputState && typeof inputState.draft === 'string' ? inputState.draft : '')
-      // 光标处插入优先:宿主公开的 insertText 需要同一轮拿到的插入锚点(captureInsertion),
-      // 不会覆盖草稿,也不会把已有的 quote chip 清掉。拿不到这套 API、或者当前 phase 冻结
-      // (模型还在输出)时插入会失败,退回 setDraft 追加 —— 与旧版拼法一致,至少不丢草稿。
-      const insert = (m) => {
-        if (!m) return
-        const marker = markerOf(m)
-        let inserted = false
+      // 取图 + 挂附件。任何一步失败都返回 false,调用方照旧写文字标记。
+      const attachMeme = async (m) => {
+        if (!m || data.pickerAttachImage === false) return false
         try {
-          if (actions && typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-            inserted = actions.insertText(marker, actions.captureInsertion()) === true
-          }
-        } catch (e) { inserted = false }
-        if (!inserted) {
-          const cur = draftOf()
-          setText(cur.trim() ? cur + '\n' + marker : marker)
-        }
-        store.set(false)
+          // 宿主没给会话 id / conversation 服务时没必要取图,直接走文字标记
+          if (!props.sessionId) return false
+          const conversation = typeof props.getConversation === 'function' ? props.getConversation() : null
+          if (!conversation || typeof conversation.createDrafts !== 'function') return false
+          const file = await fetchMemeAttachment(m)
+          if (!file) return false
+          return attachMemeDraft(conversation, props.sessionId, actions, file)
+        } catch (e) { return false }
+      }
+      const focusEditor = () => {
         // 面板一关焦点就掉到 body 了,直接敲回车不会发;顺手把焦点还给输入框,
         // 让「选图 → 接着打字 → 回车」一串动作不用再点一下。宿主结构变了就静默跳过。
         try {
@@ -3021,18 +3118,45 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           if (editor && typeof editor.focus === 'function') editor.focus()
         } catch (e) { /* 纯增强 */ }
       }
-      // 设置开启时:拼草稿并立即发送
-      const sendNow = (m) => {
+      const insert = async (m) => {
+        if (!m) return
+        const attached = await attachMeme(m)
+        if (!attached) {
+          const marker = markerOf(m)
+          let inserted = false
+          // 光标处插入优先:宿主公开的 insertText 需要同一轮拿到的插入锚点(captureInsertion),
+          // 不会覆盖草稿,也不会把已有的 quote chip 清掉。拿不到这套 API、或者当前 phase 冻结
+          // (模型还在输出)时插入会失败,退回 setDraft 追加 —— 与旧版拼法一致,至少不丢草稿。
+          try {
+            if (actions && typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+              inserted = actions.insertText(marker, actions.captureInsertion()) === true
+            }
+          } catch (e) { inserted = false }
+          if (!inserted) {
+            const cur = draftOf()
+            setText(cur.trim() ? cur + '\n' + marker : marker)
+          }
+        }
+        store.set(false)
+        focusEditor()
+      }
+      // 设置开启时:立即发送。附图成功时消息里只有附件、不再拼标记 —— 否则前端配图器
+      // 会把同一张图再画一遍(附件一张 + 标记配图一张)。
+      const sendNow = async (m) => {
         if (!m) return
         const cur = draftOf()
-        const marker = markerOf(m)
-        setText(cur.trim() ? cur + '\n' + marker : marker)
+        const attached = await attachMeme(m)
+        if (!attached) setText(cur.trim() ? cur + '\n' + markerOf(m) : markerOf(m))
         try { if (actions && actions.submit) actions.submit() } catch (e) {}
         store.set(false)
       }
-      const pick = (m) => {
-        if (data.pickerSendOnClick !== false) sendNow(m)
-        else insert(m)
+      const pick = async (m) => {
+        if (!m || pickingRef.current) return
+        pickingRef.current = true
+        try {
+          if (data.pickerSendOnClick !== false) await sendNow(m)
+          else await insert(m)
+        } finally { pickingRef.current = false }
       }
 
       // 多选 chip:点一下选中(只看它),再点取消;一个都不选 = 不筛
@@ -3301,11 +3425,14 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       // 无 url 时先按描述精确匹配图库;失败再按分词在 caption/关键词里做包含匹配
       // 兜底(模型偶尔不抄候选原文、自己编描述);仍无命中显示描述原文,
       // 不把 [表情: ...] 标记裸露在气泡里(历史教训:社区反馈「表情显示不出来」)。
-      const MEME_TEXT_RE = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g
+      // 冒号兼容全角(issue #75):模型经中文输入法/自带格式时常见「[表情：xxx]」,
+      // 只认半角会把整条退化成方括号文字,图发不出去。方括号仍只认 ASCII ——
+      // 下面的无命中降级按 `]` 下标切描述,换成「】」会算错位置。
+      const MEME_TEXT_RE = /\[表情\s*[:：]\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/g
       // acceptNode 用不带 g 的副本。带 g 的正则 test() 会推进 lastIndex,下一个文本节点从
       // 上次的位置往后找——于是「这一条运气不好」的消息被静默跳过、永远不出图,还得等下一轮
       // 扫描碰巧把游标绕回 0(历史 bug:表现就是「表情有时显示不出来」)。
-      const MEME_TEXT_TEST = /\[表情:\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/
+      const MEME_TEXT_TEST = /\[表情\s*[:：]\s*([^\]]+)\](?:\((https?:\/\/[^\s)]+)\))?/
       let memeIndex = null
       let memeSearch = [] // 分词兜底用的 haystack:[{hay:[...], url}]
       let memeIndexLoading = false
@@ -3803,6 +3930,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           store,
           inputActions: props.inputActions,
           useInput: props.useInput,
+          // issue #73:附件要按会话建 draft;宿主 session-scoped slot 会自动带 sessionId
+          sessionId: props.sessionId,
           getConversation: () => ctx.get('conversation'),
         }),
       ))
@@ -3819,6 +3948,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       setMemeLayoutMode,
       createOwnedStyle, STYLE_OWNER_ID, installMemeZoom,
       packOfUrl, pickerTagCounts, pickerFilter, fitPanelHeight, naturalPanelHeight, pickerHeightCap, topProbeHeight, fitResizeKey, panelVisibleTop, previewPosition, alignPreviewElement, liveCellRect, inKeepZone, uniqueKeys,
+      // 点表情附图(issue #73):附件私有接口的降级与文件名/MIME 过滤直接钉死
+      MEME_ATTACH_TYPES, MEME_ATTACH_MAX_BYTES, memeAttachmentName, memeAttachmentFile, attachMemeDraft, fetchMemeAttachment,
       // 图片镜像候选/回退:测试要能直接钉候选顺序,也要能在用例之间清掉模块级探测缓存
       imageCandidates, imageUrl, imageProvider, MemeRemoteImage, remoteImageOk, remoteImageBad,
     }

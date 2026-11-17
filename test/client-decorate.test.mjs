@@ -365,3 +365,21 @@ test('⑨ 用户 / steering 行里提到的图靠右,助手行与老宿主不受
   assert.equal(imgsIn(rows.legacy).length, 1, '老宿主(无 kind 标记)照常装饰')
   assert.equal(imgsIn(rows.legacy)[0].style.marginLeft, undefined, '老宿主行为保持原样')
 })
+
+// ---------- issue #75:模型写全角冒号也要配图 ----------
+// 模型经中文输入法/自带格式常输出「[表情：开心]」。只认半角冒号时整条会退化成
+// 方括号文字(图发不出去);渲染侧必须同时认 : 和 :,提示词里再要求半角只是辅助。
+
+test('issue #75 全角冒号 / 冒号前空格: [表情：开心] 与 [表情 ： 开心] 都能装饰', async () => {
+  const full = bubble('这条 [表情：开心] 也要出图')
+  await scan()
+  assert.equal(imgsIn(full.row).length, 1, '全角冒号必须命中')
+  assert.equal(imgsIn(full.row)[0].src, 'http://localhost/dsh-memes/memes/happy/a.jpg')
+  assert.equal(imgsIn(full.row)[0].dataset.memeImg, '开心', '描述要原样截出来(含全角冒号不能带进描述)')
+  assert.equal(full.p.textContent, '这条 [表情：开心] 也要出图', 'ghost 仍要保住 textContent')
+
+  const spaced = bubble('这条 [表情 ： 开心] 也能出图')
+  await scan()
+  assert.equal(imgsIn(spaced.row).length, 1, '冒号前后的空格要吞掉')
+  assert.equal(imgsIn(spaced.row)[0].dataset.memeImg, '开心')
+})
