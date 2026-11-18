@@ -626,6 +626,25 @@ test('issue #73 附图:关闭「点图直接发送」时把图挂进草稿,不�
   assert.ok(!off.calls.some((c) => c.kind === 'submit'), '草稿模式不能自动提交')
 })
 
+test('issue #73 附图:只插入模式可以连续点多张,面板不关', async () => {
+  let n = 0
+  const conversation = {
+    createDrafts: () => [{ id: 'draft-' + (++n) }],
+    releaseDraftAttachment: () => {},
+  }
+  const off = await attachBoard({ sendOnClick: false, conversation })
+  const cells = () => byClass(off.board, 'mp-cell')
+  cells()[0].props.onClick()
+  await settle()
+  cells()[1].props.onClick()
+  await settle()
+  assert.deepEqual(off.attached, [['draft-1'], ['draft-2']], '每点一张都要追加一个附件')
+  assert.ok(!off.calls.some((c) => c.kind === 'submit'), '连续点多张时不能自动提交')
+  const tree = off.repaint()
+  assert.ok(byClass(tree, 'mp-cell').length > 0, '点完面板要留在原地,才能继续点下一张')
+  assert.match(textOf(byClass(tree, 'mp-count')[0]), /已加入 2 张/, '面板上要显示已加入几张')
+})
+
 test('issue #73 附图:addAttachments 拒绝时释放 draft 并退回文字标记', async () => {
   mockImageBlob = new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })
   const released = []

@@ -1896,12 +1896,16 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
             title: pickerSendOnClick ? '点击关闭:点表情只放进输入框' : '点击开启:点表情直接发送',
             onClick: () => onTogglePickerSend(!pickerSendOnClick),
           }),
-          h('span', { style: { fontSize: 12 } }, pickerSendOnClick ? '点图直接发送' : '只放进输入框'),
+          h('span', { style: { fontSize: 12 } }, '点图直接发送'),
         ),
         h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
           pickerSendOnClick
-            ? '点一张立即发送;担心手滑误发可以关掉这个开关'
-            : '点一张只把 [表情: 描述] 放进输入框,你打完字按回车一起发送'),
+            ? (pickerAttachImage
+                ? '点一张立即发送原图附件;担心手滑误发可以关掉这个开关'
+                : '点一张立即发送 [表情: 描述];担心手滑误发可以关掉这个开关')
+            : (pickerAttachImage
+                ? '点一张把原图挂进输入框,不自动发送;可以连续点多张,关面板后按回车一起发送'
+                : '点一张只把 [表情: 描述] 放进输入框,你打完字按回车一起发送')),
         // 点图附图(issue #73):让模型拿到原图,而不是只靠描述猜
         h('div', { className: 'row', style: { marginTop: 4 } },
           h('span', {
@@ -1913,7 +1917,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         ),
         h('div', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary)', width: '100%' } },
           pickerAttachImage
-            ? '点图时把这张图挂进输入框附件,AI 能直接看到原图(消息里不再重复显示同一张标记图);模型不支持图片时宿主会提示发送失败'
+            ? '点图时把这张图挂进输入框附件,AI 能直接看到原图(消息里不再重复显示同一张标记图);关掉「点图直接发送」后可连续点多张'
             : '只把 [表情: 描述] 发给模型,AI 只能靠描述猜图'),
         // 表情排布:图文同条时怎么排,只影响前端渲染,默认并排不改已有观感(issue #50)
         h('div', { className: 'section-title' }, '表情排布'),
@@ -2796,6 +2800,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const closing = !!(snap && snap.closing)
       const [data, setData] = React.useState(() => pickerCache || { packs: [], memes: [], pickerSendOnClick: true, pickerAttachImage: true })
       const [loaded, setLoaded] = React.useState(!!pickerCache)
+      // 只插入模式连续点多张:记录本次面板打开期间已挂进输入框的附件数,给用户一个反馈
+      const [attachedCount, setAttachedCount] = React.useState(0)
       const [q, setQ] = React.useState('')
       const [selPacks, setSelPacks] = React.useState([]) // 空 = 不筛:全部图库
       const [selTags, setSelTags] = React.useState([])   // 空 = 不筛:全部情绪
@@ -2870,6 +2876,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         clearTimeout(animTimerRef.current)
         animTimerRef.current = 0
         setHover(null)
+        setAttachedCount(0)
       }, [open])
 
       const viewport = (what) => {
@@ -3121,21 +3128,24 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const insert = async (m) => {
         if (!m) return
         const attached = await attachMeme(m)
-        if (!attached) {
-          const marker = markerOf(m)
-          let inserted = false
-          // 光标处插入优先:宿主公开的 insertText 需要同一轮拿到的插入锚点(captureInsertion),
-          // 不会覆盖草稿,也不会把已有的 quote chip 清掉。拿不到这套 API、或者当前 phase 冻结
-          // (模型还在输出)时插入会失败,退回 setDraft 追加 —— 与旧版拼法一致,至少不丢草稿。
-          try {
-            if (actions && typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
-              inserted = actions.insertText(marker, actions.captureInsertion()) === true
-            }
-          } catch (e) { inserted = false }
-          if (!inserted) {
-            const cur = draftOf()
-            setText(cur.trim() ? cur + '\n' + marker : marker)
+        if (attached) {
+          // 只插入模式:挂上附件后不关面板,可以连续点下一张;关闭面板后按回车一起发。
+          setAttachedCount((n) => n + 1)
+          return
+        }
+        const marker = markerOf(m)
+        let inserted = false
+        // 光标处插入优先:宿主公开的 insertText 需要同一轮拿到的插入锚点(captureInsertion),
+        // 不会覆盖草稿,也不会把已有的 quote chip 清掉。拿不到这套 API、或者当前 phase 冻结
+        // (模型还在输出)时插入会失败,退回 setDraft 追加 —— 与旧版拼法一致,至少不丢草稿。
+        try {
+          if (actions && typeof actions.captureInsertion === 'function' && typeof actions.insertText === 'function') {
+            inserted = actions.insertText(marker, actions.captureInsertion()) === true
           }
+        } catch (e) { inserted = false }
+        if (!inserted) {
+          const cur = draftOf()
+          setText(cur.trim() ? cur + '\n' + marker : marker)
         }
         store.set(false)
         focusEditor()
@@ -3240,7 +3250,10 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
               'aria-expanded': showFilters ? 'true' : 'false',
               onClick: toggleFilters,
             }, '筛选' + (selCount ? ' ' + selCount : ''), h('span', { className: 'caret' }, showFilters ? '▲' : '▼')),
-            h('span', { className: 'mp-count' }, '共 ' + rows.length + ' 张'),
+            h('span', {
+              className: 'mp-count',
+              title: attachedCount > 0 ? '已加入输入框,可继续点选;关闭面板后按回车一起发送' : undefined,
+            }, '共 ' + rows.length + ' 张' + (attachedCount > 0 ? ' · 已加入 ' + attachedCount + ' 张' : '')),
           ),
           // 两排多选 chip:都不选 = 不筛。情绪只列当前图库范围内真实存在的,按数量降序带计数。
           // 收起时不渲染(而不是 display:none):省掉几十个 chip 的节点与重排。
