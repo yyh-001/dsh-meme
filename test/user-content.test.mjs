@@ -255,16 +255,15 @@ test('learn_meme:固定写入「我的收藏」并自动启用,不混进当前�
 
 test('upload:当前图库在插件包内时改写「我的收藏」并自动启用(升级不清空收藏)', async () => {
   // 在插件包目录里造一个临时图库(模拟内置图库的位置),上传必须落到包外。
-  // 清理都带重试并容错:Windows 上刚写完的 index.db 常被杀软/索引器瞬时锁住,
-  // rmSync 立刻失败;一旦硬失败留下残留,下一次运行的 pre-clean 会级联挂掉。
-  const volatileDir = join(repoRoot, 'memes', '.volatile-test')
+  // 目录名必须唯一且不要放在 memes/ 下:node --test 并行跑文件时,别的用例可能正在
+  // 扫 repo 的 memes 目录,把同名 index.db 打开,Linux CI 上会直接 database is locked。
+  const volatileDir = mkdtempSync(join(repoRoot, '.volatile-test-'))
   const rmrf = (dir) => {
     try { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch { /* 锁没放开就算了,下次运行再清 */ }
   }
-  rmrf(volatileDir)
-  ensurePackAt(volatileDir, { id: 'volatile-test', name: '易失图库' })
   const volatileHost = createHost()
   try {
+    ensurePackAt(volatileDir, { id: 'volatile-test', name: '易失图库' })
     mod.apply(volatileHost.ctx, { memeRoot: volatileDir })
     const volatileApi = volatileHost.handlers.find((h) => h.path === '/dsh-memes-api')
     const res = await new Promise((resolve_, reject) => {
