@@ -4,7 +4,9 @@ __pycache__/
 .DS_Store
 
 # 旧版 Windows 路径 bug 会在启动目录留下 .dsh/ 设置文件(现在设置写在 ~/.dsh)
-.dsh/
+# 只忽略 .dsh/ 下的本地残留;.dsh/skills/ 是仓库内容,要进包(issue #76)
+.dsh/*
+!.dsh/skills/
 
 # 测试残留的临时易失图库(打包/提交都不该带上)
 memes/.volatile-test/
