@@ -2877,6 +2877,9 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         animTimerRef.current = 0
         setHover(null)
         setAttachedCount(0)
+        // issue #77:顶栏下沿的缓存不能跨开合复用。首次打开若在动画/数据未就绪时量到偏大的
+        // limit,关掉再开还会拿着旧值,面板会一直卡在最小高度;重开必须重新量。
+        topLimitRef.current = null
       }, [open])
 
       const viewport = (what) => {
@@ -3012,6 +3015,9 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         animTimerRef.current = setTimeout(() => {
           animGuardRef.current = false
           if (!openRef.current) return
+          // issue #77:进入动画期间量到的顶栏下沿可能是错的(命中的还是动画中的面板),
+          // 动画结束必须丢掉缓存重测一次;否则 nat 不变会一直复用偏大的 limit。
+          topLimitRef.current = null
           fitPanel()
           if (placePreviewRef.current) placePreviewRef.current()
         }, 260)
@@ -3035,6 +3041,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
             animWaitRef.current = setTimeout(() => {
               animWaitRef.current = 0
               if (!openRef.current) return
+              topLimitRef.current = null
               fitPanel()
               startEnter()
             }, 900)
@@ -3230,6 +3237,9 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
             // 进入动画结束:transform 没了,补一次正经量高,再按格子的最终位置重放预览
             animGuardRef.current = false
             clearTimeout(animTimerRef.current)
+            // issue #77:动画期间 elementFromPoint 命中的是动画中的面板,量出的顶栏下沿可能偏大;
+            // 结束时必须作废缓存重测。否则 nat 不变会一直复用 h=180 的坏结果,切一次筛选才恢复。
+            topLimitRef.current = null
             fitPanel()
             if (placePreviewRef.current) placePreviewRef.current()
           },
