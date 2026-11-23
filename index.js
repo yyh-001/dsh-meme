@@ -856,6 +856,12 @@ export function apply(ctx, config) {
   // ---- 陪伴模式:系统提示注入,模型根据对话情绪主动斗图 ----
   // 设置页可整段关掉这项注入(settings.promptEnabled === false),关掉后模型不再主动斗图。
   // IM 会话(dsh-im)追加投递规则:候选路径交给 dsh_im_return_file,不要写标记。
+  //
+  // 段必须带 order:宿主的 AssembledSection 以此为必填字段(zod `order: z.number()`),
+  // 且 system/message 落盘前要做一次无损 JSON 校验——缺了它,undefined 过不了校验,
+  // 整轮对话直接失败(dsh 0.2.3-alpha.2 上实测,issue #78)。取 10200:排在宿主
+  // 内置的末段 app:web-surface(10100)之后,斗图指令放最后。
+  const COMPANION_SECTION_ORDER = 10200
   ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
     const assembled = await next()
     const settingsNow = readSettings()
@@ -884,7 +890,7 @@ export function apply(ctx, config) {
       // 三档各一套提示词;IM 会话在 gearPrompt 里换成 IM 投递写法
       text = gearPrompt(gear, channel)
     }
-    assembled.sections.push({ name: 'dsh-expression:companion', text })
+    assembled.sections.push({ name: 'dsh-expression:companion', order: COMPANION_SECTION_ORDER, text })
     return assembled
   })
 
