@@ -35,3 +35,10 @@ test('issue #77:进入动画结束(animationend 与 260ms 兜底)都清缓存后
 test('issue #77:900ms 数据兜底也会重测顶栏下沿', () => {
   assert.match(client, /animWaitRef\.current = setTimeout\([\s\S]*?topLimitRef\.current = null\n\s*fitPanel\(\)\n\s*startEnter\(\)/, '900ms 兜底必须先清缓存再 fitPanel')
 })
+
+test('issue #77:mp-pre 期间测量时临时恢复 pointer-events,否则 elementFromPoint 跳过面板会量偏', () => {
+  const fn = section('const measureTopLimit = (panel, bottom, nat) => {', 'topLimitRef.current = { limit, nat }')
+  assert.match(fn, /panel\.style\.pointerEvents = 'auto'/, '测量期间要临时打开命中测试')
+  assert.match(fn, /panel\.style\.pointerEvents = prevPE/, '测完必须还原')
+  assert.match(fn, /panel\.style\.maxHeight = prevMax/, '临时高度也要在 finally 里还原')
+})

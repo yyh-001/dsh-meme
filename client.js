@@ -2955,8 +2955,13 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         const grid = panel.querySelector('.mp-grid')
         const keep = grid ? grid.scrollTop : 0
         let limit = 16
+        const prevMax = panel.style.maxHeight
+        const prevPE = panel.style.pointerEvents
         try {
-          const prev = panel.style.maxHeight
+          // issue #77:首次打开时面板还在 mp-pre(pointer-events:none),elementFromPoint 会
+          // 直接跳过面板本身,量出来的顶栏下沿偏大(avail 负数 → 卡 180px),等动画结束
+          // 重测才跳回正常高度。测量期间临时恢复命中测试,量完立刻还原。
+          panel.style.pointerEvents = 'auto'
           panel.style.maxHeight = topProbeHeight(bottom, viewport('h')) + 'px'
           const box = panel.getBoundingClientRect()
           const x = Math.round(box.left + Math.min(box.width / 2, 80))
@@ -2968,8 +2973,11 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
           // 被挡住时可见起点就是顶栏下沿,再往下留 PICKER_TOP_GAP 的呼吸间距;没被挡
           // (可见起点就是面板自己的顶边)就不加,否则面板会白白矮一截、还永远长不回来。
           limit = Math.max(16, visibleTop > box.top ? visibleTop + PICKER_TOP_GAP : visibleTop)
-          panel.style.maxHeight = prev
         } catch (e) { limit = 16 } // 量不出来就退回「只留窗口边距」的老行为
+        finally {
+          panel.style.pointerEvents = prevPE
+          panel.style.maxHeight = prevMax
+        }
         if (grid && grid.scrollTop !== keep) grid.scrollTop = keep
         topLimitRef.current = { limit, nat }
         return limit
