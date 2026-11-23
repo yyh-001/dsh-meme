@@ -17,6 +17,9 @@ import { tmpdir } from 'node:os'
 const home = mkdtempSync(join(tmpdir(), 'dsh-meme-onebot-'))
 process.env.DSH_MEME_HOME = home
 process.env.HOME = home
+// 宿主部署可能把 DSH_HOME 指到别处(例如演示壳/测试环境);不清掉的话 onebotHomeOf()
+// 会优先读那个目录,测试账本永远命中不了。这里显式指到本用例的临时 home。
+process.env.DSH_HOME = join(home, '.dsh')
 
 const mod = await import('../index.js')
 const { imChannelOfSession } = await import('../memes.js')
