@@ -428,8 +428,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const [sendGear, setSendGear] = React.useState('auto')
       // 快捷面板点图行为:true=点一张直接发送(默认);false=只放进输入框(issue #61)
       const [pickerSendOnClick, setPickerSendOnClick] = React.useState(true)
-      // 点图附图(issue #73):true=把原图挂成输入框附件(默认);false=只发 [表情: 描述]
-      const [pickerAttachImage, setPickerAttachImage] = React.useState(true)
+      // 点图附图(issue #73):true=把原图挂成输入框附件;false=只发 [表情: 描述](默认)
+      const [pickerAttachImage, setPickerAttachImage] = React.useState(false)
       // 表情排布:inline=图文并排(默认) / stacked=图独占一行(issue #50)
       const [layoutMode, setLayoutMode] = React.useState('inline')
       // 局域网访问图库(issue #54):默认仅本机;打开后手机/平板经局域网 IP 才能加载表情包
@@ -456,7 +456,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
         else if (res.qqSendResizeSupported === true) setQqSendResizeSupported(true)
         setSendGear(res.sendGear === 'off' || res.sendGear === 'active' || res.sendGear === 'always' ? res.sendGear : 'auto')
         setPickerSendOnClick(res.pickerSendOnClick !== false)
-        setPickerAttachImage(res.pickerAttachImage !== false)
+        setPickerAttachImage(res.pickerAttachImage === true)
         // 排布设置(old host 不带该字段,按默认并排处理),同时回写模块级状态
         // 让气泡装饰即时翻新(issue #50)
         setLayoutMode(res.layoutMode === 'stacked' ? 'stacked' : 'inline')
@@ -2798,7 +2798,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const snap = React.useSyncExternalStore(store.subscribe, store.get)
       const open = !!(snap && snap.open)
       const closing = !!(snap && snap.closing)
-      const [data, setData] = React.useState(() => pickerCache || { packs: [], memes: [], pickerSendOnClick: true, pickerAttachImage: true })
+      const [data, setData] = React.useState(() => pickerCache || { packs: [], memes: [], pickerSendOnClick: true, pickerAttachImage: false })
       const [loaded, setLoaded] = React.useState(!!pickerCache)
       // 只插入模式连续点多张:记录本次面板打开期间已挂进输入框的附件数,给用户一个反馈
       const [attachedCount, setAttachedCount] = React.useState(0)
@@ -2839,8 +2839,8 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
               memes: Array.isArray(res.memes) ? res.memes : [],
               // 点图行为随面板数据一起下发:开关改了,下次打开面板立刻生效
               pickerSendOnClick: res.pickerSendOnClick !== false,
-              // 点图附图(issue #73):默认开;旧宿主不返回该字段也按开处理
-              pickerAttachImage: res.pickerAttachImage !== false,
+              // 点图附图(issue #73):默认关;旧宿主不返回该字段也按关处理
+              pickerAttachImage: res.pickerAttachImage === true,
             }
             pickerCache = next
             // 打开面板也同步索引:其它页面或 AI 学图带来的变化无需刷新整个页面。
@@ -3121,7 +3121,7 @@ window.__ModuleLoader__.load({ id: 'dsh-meme', factory: (() => {
       const draftOf = () => (inputState && typeof inputState.draft === 'string' ? inputState.draft : '')
       // 取图 + 挂附件。任何一步失败都返回 false,调用方照旧写文字标记。
       const attachMeme = async (m) => {
-        if (!m || data.pickerAttachImage === false) return false
+        if (!m || data.pickerAttachImage !== true) return false
         try {
           // 宿主没给会话 id / conversation 服务时没必要取图,直接走文字标记
           if (!props.sessionId) return false

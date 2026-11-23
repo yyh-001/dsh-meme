@@ -827,10 +827,10 @@ export function apply(ctx, config) {
    */
   const pickerSendOnClickOf = () => readSettings().pickerSendOnClick !== false
   /**
-   * 点表情时是否把原图挂成附件(issue #73):默认开 —— 模型直接看图,而不是只收到
-   * [表情: 描述]。附件走宿主私有接口,宿主不支持时前端自动退回纯文字标记。
+   * 点表情时是否把原图挂成附件(issue #73):默认关 —— 只把 [表情: 描述] 发给模型;
+   * 用户显式打开后才把原图挂成附件。附件走宿主私有接口,不可用时前端退回纯文字标记。
    */
-  const pickerAttachImageOf = () => readSettings().pickerAttachImage !== false
+  const pickerAttachImageOf = () => readSettings().pickerAttachImage === true
   /**
    * 发给 send_meme 的档位回调:返回 false = 关闭档,工具结果要提示别主动发;
    * null = 不限制。只影响主动发图,用户明确要图时模型仍可正常挑图。
@@ -1452,8 +1452,8 @@ export function apply(ctx, config) {
         sendGear: sendGearOf(),
         // 点图行为:true = 直接发送(默认);false = 只放进输入框
         pickerSendOnClick: s.pickerSendOnClick !== false,
-        // 点图附图(issue #73):true = 把原图作为输入框附件发给模型(默认);false = 只发文字标记
-        pickerAttachImage: s.pickerAttachImage !== false,
+        // 点图附图(issue #73):true = 把原图作为输入框附件发给模型;false = 只发文字标记(默认)
+        pickerAttachImage: s.pickerAttachImage === true,
         // 表情排布设置:inline = 图文并排(默认)/ stacked = 图独占一行(issue #50)
         layoutMode: normalizeLayoutMode(s.layoutMode),
         // 局域网访问图库(issue #54):默认关;打开后手机/平板经局域网 IP 才能看到表情包

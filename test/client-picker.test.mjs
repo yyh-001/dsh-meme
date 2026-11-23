@@ -85,12 +85,16 @@ const fetched = []
 let mockPickerSendOnClick = true
 // 点图附图(issue #73)开关与图片字节:只有附图用例才需要
 let mockPickerAttachImage = true
+// 模拟旧宿主:payload 里完全不带 pickerAttachImage 字段
+let mockOmitPickerAttach = false
 let mockImageBlob = null
 globalThis.fetch = async (url) => {
   fetched.push(String(url))
   const reply = (data) => ({ ok: true, status: 200, json: async () => data, text: async () => JSON.stringify(data) })
   if (String(url).includes('/dsh-memes-api')) {
-    return reply({ ok: true, packId: 'p1', packs, memes: rows, tags: [], pickerSendOnClick: mockPickerSendOnClick, pickerAttachImage: mockPickerAttachImage !== false })
+    const data = { ok: true, packId: 'p1', packs, memes: rows, tags: [], pickerSendOnClick: mockPickerSendOnClick }
+    if (!mockOmitPickerAttach) data.pickerAttachImage = mockPickerAttachImage !== false
+    return reply(data)
   }
   if (String(url).includes('/dsh-memes/') && mockImageBlob) {
     return { ok: true, status: 200, blob: async () => mockImageBlob }
@@ -407,9 +411,10 @@ const ensureFilters = (tree, repaint, want = true) => {
 }
 
 /** 装一遍插件并打开面板,返回当前这棵树 + 重绘函数 + setDraft 记录 */
-const openBoard = async ({ sendOnClick = true, attach = true, sessionId, conversationService, actions: actionExtra } = {}) => {
+const openBoard = async ({ sendOnClick = true, attach = true, omitAttachField = false, sessionId, conversationService, actions: actionExtra } = {}) => {
   mockPickerSendOnClick = sendOnClick
   mockPickerAttachImage = attach
+  mockOmitPickerAttach = omitAttachField
   stateCells = []
   passIndex = 0
   pendingEffects = []
@@ -682,4 +687,25 @@ test('issue #73 附图:设置关闭 / 宿主没有会话服务时完全不走附
   byClass(plain.board, 'mp-cell')[0].props.onClick()
   await settle()
   assert.equal(plain.calls.filter((c) => c.kind === 'setDraft')[0].text, '先说两句\n[表情: 开心猫]')
+})
+
+test('issue #73 附图:宿主缺省该字段时默认关闭,点图只发文字标记', async () => {
+  mockImageBlob = new Blob([new Uint8Array([1])], { type: 'image/png' })
+  const created = []
+  const conversation = {
+    createDrafts(...args) { created.push(args); return [{ id: 'draft-default' }] },
+    releaseDraftAttachment() {},
+  }
+  const board = await openBoard({
+    omitAttachField: true,
+    sessionId: 'sess-1',
+    conversationService: conversation,
+  })
+  byClass(board.board, 'mp-cell')[0].props.onClick()
+  await settle()
+  assert.equal(created.length, 0, '默认关闭时不能建 image draft')
+  const drafts = board.calls.filter((c) => c.kind === 'setDraft')
+  assert.equal(drafts.length, 1)
+  assert.equal(drafts[0].text, '先说两句\n[表情: 开心猫]', '只把 [表情: 描述] 放进输入框')
+  assert.ok(board.calls.some((c) => c.kind === 'submit'), '点图直接发送仍然生效')
 })
