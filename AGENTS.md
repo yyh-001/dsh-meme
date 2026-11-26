@@ -2,11 +2,11 @@
 
 面向在 DSH 里对 dsh-meme 干活的 agent。只放**必须提前在场**的约定和坑;维护操作手册在 `.dsh/skills/dsh-meme-maintenance/SKILL.md`(整理图库/查重/批量改时先读它);人类视角见 README.md。
 
-## 1. 发图说明以工具结果末尾为准
+## 1. 发图说明看工具结果里的「发图」说明
 
-「发送方式」(自动/纯文字/图片)× 渠道(Web / dsh-im 的 QQ、微信 / companion QQ / **QQ 官方机器人**)的组合每次都可能不同,`send_meme` 每次执行都会在结果末尾给「发图」说明——**以那段说明为准,不要凭记忆**。候选 JSON 里的 `path`/`library` 只是出处信息(用户问「这图哪来的」可以引用),`absPath` 是绝对路径(给 qqbot_send_file 用)。
+「发送方式」(自动/纯文字/图片)× 渠道(Web / dsh-im 的 QQ、微信 / companion QQ / **QQ 官方机器人**)的组合每次都可能不同,`send_meme` 每次执行都会在结果里给「发图」说明——**以那段说明为准,不要凭记忆**。候选 JSON 里的 `path`/`library` 只是出处信息(用户问「这图哪来的」可以引用),`absPath` 是绝对路径(给 qqbot_send_file 用)。
 
-- **Web 聊天**:把 `[表情: 描述]` 整段写进回复,不要把路径贴进回复。
+- **Web 聊天**:`hits` 每项都带现成可复制的 `token` 字段(`[表情: 描述]`,与候选行逐字一致),直接原样用,别自己改写描述或手拼标记;不要把路径贴进回复。
 - **dsh-im 的 IM 会话**:候选行带 `path=`,原样传给 `dsh_im_return_file`。
 - **OneBot(dsh-qq-onebot)会话**:按 dsh-qq-onebot 自己的判据认人——读它的会话账本(宿主 `dshHomePath` 指向的 `dsh-qq/session-state.json`),把 `sessions` 里的 sessionId 与当前 `sessionId` 做**精确字符串比对**,在表里就判定为 OneBot 渠道(不计算、不推导);**在 Web 里给这个 QQ 会话发消息也一样**,因为它认的是 sessionId 而非消息来源。候选行带 `path=`,把绝对路径原样传给 `qq_send_image(file=...)`,不要写 `[表情:]` 标记。工具名/参数名可用 patch 的 `onebotToolName` / `onebotFileParam` 覆盖,账本路径用 `onebotStateFile` 覆盖,`onebotDelivery: off` 可关闭整个渠道。
 - **QQ 官方机器人(dsh-qqbot 插件)**:工具表里有 `qqbot_send_file` 时,不要写 `[表情:]` 标记——把挑中候选的 **`absPath` 绝对路径传给 `qqbot_send_file` 的 `file_path`**,正文只写普通文字。它默认启用路径白名单(media + agent cwd + `sendFile.extraRoots`);被拒时提示用户在 dsh-qqbot 配置的 `sendFile.extraRoots` 里加入图库目录(通常 `~/.dsh/meme-packs`)。
@@ -28,7 +28,7 @@
 
 | 工具 | 一句话 |
 | --- | --- |
-| `send_meme` | 抽候选 + 发图(说明看结果末尾) |
+| `send_meme` | 抽候选 + 发图(说明看结果里的「发图」提示) |
 | `learn_meme` | 收录新图(附件/URL),存入「我的收藏」;GIF 附件会被压平,见上 |
 | `meme_list` | 只读清单,跨启用图库,可筛 |
 | `meme_update` | 改 tag/caption/keywords,只改索引 |

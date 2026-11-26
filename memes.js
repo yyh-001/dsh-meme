@@ -924,10 +924,10 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       '情绪字典: ' + MOOD_DICT + '。' +
       (webMode
         ? (imReady
-            ? '发送方式看工具结果末尾的说明:Web 聊天把 [表情: 描述] 原样写进回复(描述抄候选原文,不要带网址;标记里的冒号用半角 :);IM/QQ 渠道把候选 path 传给对应的原生图片投递工具(dsh-im 为 dsh_im_return_file,OneBot 为 qq_send_image),不要写 [表情: ...] 标记。'
-            : '发送方式看工具结果末尾的说明:Web 聊天把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址;标记里的冒号用半角 :);如果结果说明要求用原生图片投递工具(IM/QQ 渠道),把候选 path 原样传给该工具,不要写 [表情: ...] 标记。')
+            ? '发送方式看工具结果里的「发图」说明:Web 聊天把 [表情: 描述] 原样写进回复(描述抄候选原文,不要带网址;标记里的冒号用半角 :);IM/QQ 渠道把候选 path 传给对应的原生图片投递工具(dsh-im 为 dsh_im_return_file,OneBot 为 qq_send_image),不要写 [表情: ...] 标记。'
+            : '发送方式看工具结果里的「发图」说明:Web 聊天把 [表情: 描述] 原样写进回复(描述必须抄候选原文,不要带网址;标记里的冒号用半角 :);如果结果说明要求用原生图片投递工具(IM/QQ 渠道),把候选 path 原样传给该工具,不要写 [表情: ...] 标记。')
         : '两步:search 看候选,再用 send + path 发出。') +
-      '发送方式以设置里的「发送方式」下拉框为准(自动/纯文字/图片),每次结果末尾的「发图」说明会告诉你怎么发。' +
+      '发送方式以设置里的「发送方式」下拉框为准(自动/纯文字/图片),每次结果里的「发图」说明会告诉你怎么发。' +
       '气氛对了就主动发;发完短接,让图自己说话。',
     parameters,
     output: {
@@ -987,6 +987,8 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
       const delivery = imMode ? deliveryToolOf(imChannel) : null
 
       const captionOf = (m) => String(m.caption || m.file_name || '').slice(0, 80)
+      /** 可直接粘贴的标记:与 lines() 里的候选行逐字一致(半角冒号 + 空格) */
+      const tokenOf = (caption) => '[表情: ' + caption + ']'
       /** 候选的绝对路径:IM 投递工具要的是磁盘路径,不能是图库内的相对路径/包前缀路径 */
       const absolutePathOf = (m) => {
         try {
@@ -1029,13 +1031,26 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         // 用——它的路径白名单要求绝对路径;Web 聊天里模型不会用到这个字段。
         // 开了 QQ 缩图时,IM 的 path 和 Web 的 absPath 都是缩好的发送副本。
         const sendable = (i) => paths[i] || absolutePathOf(rows[i])
+        // token:Web 模式下现成可复制的 [表情: 描述] 标记(issue #80)——
+        // 与 lines() 逐字一致(caption 同一处 captionOf + 半角冒号 + 空格),
+        // 模型直接抄 token 就不会自己改写描述或拼错冒号。非 Web 模式禁止出现:
+        // IM/QQ 客户端只会把方括号里的文字显示成普通文本。
         if (textMode) return rows.map((m) => ({ tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         if (imMode) return rows.map((m, i) => ({ path: sendable(i), tag: m.tag, caption: captionOf(m), library: libraryOf(m) }))
         // path 给磁盘绝对路径(issue #59):外部 read_image 等通用文件工具可直接用;
         // 旧的包前缀/相对格式仍被 meme_update/send 的解析器接受。absPath 是真正要投递的
         // 副本(开了 QQ 缩图时可能是 .send-cache 里的文件),两件事不要混。
         return webMode
-          ? rows.map((m, i) => ({ caption: captionOf(m), path: absolutePathOf(m), absPath: sendable(i), library: libraryOf(m) }))
+          ? rows.map((m, i) => {
+            const caption = captionOf(m)
+            return {
+              token: tokenOf(caption),
+              caption,
+              path: absolutePathOf(m),
+              absPath: sendable(i),
+              library: libraryOf(m),
+            }
+          })
           : rows.map((m, i) => ({ path: absolutePathOf(m), absPath: sendable(i), tag: m.tag, caption: m.caption, library: libraryOf(m) }))
       }
       // 主动发图档位=关闭:工具结果也要跟系统提示保持一致,否则模型看着候选行照发。
@@ -1055,7 +1070,7 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
               '回复正文只写普通文字:不要写 [表情: ...] 或 [任何描述] 这类方括号标记,不要写 markdown 图片或把本地路径贴进回复,也不用解释图片投递过程——图片会由渠道自己发出。'
             : webMode
               ? (chanceBlocked ? '发图:只在用户明确要图时,把下面某一行的 [表情: ...] 整段原样写进回复' : '发图:把下面某一行的 [表情: ...] 整段原样写进回复') +
-                '(描述抄候选原文,可加一两句文字,不要加网址;标记里的冒号用半角 :)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。' +
+                '(直接原样复制候选行里的 [表情: ...],或 hits[].token 字段的值——不要自己改写里面的描述,不要手动拼;可加一两句文字,不要加网址;标记里的冒号用半角 :)。候选 JSON 里的 path/library 只是出处信息,用户问「这图哪个库的/文件叫什么」可以引用;发图仍然只写 [表情: 描述],不要把路径贴进回复。' +
                 '如果本会话的工具表里有 qqbot_send_file(QQ 官方机器人的 dsh-qqbot 插件),说明当前是 QQ 机器人会话:此时不要写 [表情: ...] 标记,把挑中候选的 absPath(绝对路径)原样传给 qqbot_send_file 的 file_path 参数发出,正文只写普通文字、不要贴路径;若它返回路径白名单拒绝,提示用户在 dsh-qqbot 配置的 sendFile.extraRoots 里加上图库目录(通常是 ~/.dsh/meme-packs)。'
               : '用 send + path 发出。')
 
@@ -1066,16 +1081,18 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         const found = memes.search(query, limit, tag)
         if (found.memes.length > 0) {
           const paths = await preparePaths(found.memes, imMode ? 'im' : (webMode ? 'web' : 'direct'), imChannel)
+          // message 排在 hits 之前(issue #80):模型先读到「发图」说明再去读候选 JSON,
+          // 不会拿着 caption 自己手拼标记、也不会漏读排在最后的说明。
           return {
             ok: true,
             mode: 'keyword',
             query: found.query,
-            hits: hits(found.memes, paths),
-            tags: found.tags,
             message: '关键词「' + found.query + '」命中 ' + found.memes.length + ' 张' +
               (tag ? '(限在情绪 ' + tag + ' 里)' : '') +
               '。看 caption 贴就发;不满意再 search(换词或加大 limit)。' +
               howToSend + '\n' + lines(found.memes, paths).join('\n'),
+            hits: hits(found.memes, paths),
+            tags: found.tags,
           }
         }
         if (found.reason) return { ok: false, message: found.reason }
@@ -1098,15 +1115,16 @@ export function registerSendMemeTool(ctx, memes, sendImage, urlPrefix = null, op
         }
       }
       const paths = await preparePaths(candidates, imMode ? 'im' : (webMode ? 'web' : 'direct'), imChannel)
+      // 同上:hits 放在 message 之后,「发图」说明先于候选 JSON 出现(issue #80)
       return {
         ok: true,
         mode: 'mood',
         mood,
-        hits: hits(candidates, paths),
-        tags,
         message: (keywordMiss ? keywordMiss + '下面按情绪抽:' : '') +
           '情绪 ' + mood + ' 随机 ' + candidates.length + ' 张。看 caption 贴就发;不满意再 search 同一 tag 换一批(可加大 limit)。' +
           howToSend + '\n' + lines(candidates, paths).join('\n'),
+        hits: hits(candidates, paths),
+        tags,
       }
     },
   }))
