@@ -843,7 +843,7 @@ export function apply(ctx, config) {
   /** 纯文字模式:默认提示词里教模型写 [表情:] 标记的规则要压掉,否则前端仍会配图 */
   const TEXT_MODE_RULE = '发送方式设置为「纯文字」:不要发图片。不要写 [表情: …] 或 [任何描述] 这类方括号标记,不要调用任何图片投递工具,也不要把图片路径贴进回复;想斗图就用文字接梗、吐槽、卖萌。可以用 send_meme 查候选拿描述,但不要真的把图发出去。'
   /** 图片模式:在自动行为上强调「必须真发图」,不允许只描述 */
-  const IMAGE_MODE_RULE = '发送方式设置为「图片」:每次用 send_meme 挑好图后都必须把图片真的发出去——Web 聊天把 [表情: 描述] 原样写进回复;IM/QQ 聊天按 send_meme 结果末尾的说明,把候选路径交给对应的图片投递工具。不能只写文字描述、不发图。'
+  const IMAGE_MODE_RULE = '发送方式设置为「图片」:每次用 send_meme 挑好图后都必须把图片真的发出去——Web 聊天把 [表情: 描述] 原样写进回复;IM/QQ 聊天按 send_meme 结果里的「发图」说明,把候选路径交给对应的图片投递工具。不能只写文字描述、不发图。'
   const memeRoot = resolveActiveRoot(readSettings(), config?.memeRoot)
   let memes = null
   try {
